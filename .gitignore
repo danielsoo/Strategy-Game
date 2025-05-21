@@ -1,0 +1,33 @@
+# ─ Node.js ─────────────────────────────────────────────
+node_modules/
+.env
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─ Xcode / Swift ─────────────────────────────────────
+# Xcode 빌드 산출물
+build/
+DerivedData/
+*.xcworkspace
+*.xcuserstate
+
+# CocoaPods
+Pods/
+
+# Carthage
+Carthage/Build/
+
+# Swift Package Manager
+/.build/
+/Packages/
+/Package.resolved
+
+# 사용자별 설정 파일
+*.xcuserdatad
+*.moved-aside
+*.pbxuser
+*.perspective*
+
+# macOS에서 생성되는 숨김 파일
+.DS_Store
