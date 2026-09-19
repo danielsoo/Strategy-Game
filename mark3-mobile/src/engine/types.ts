@@ -151,6 +151,12 @@ export interface EconomyConfig {
   vassalInfluenceWeight: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
+  /**
+   * 본진을 잃은 나라의 군대가 현지 조달로 버는 액수 (유닛당).
+   * 이게 없으면 본진을 빼앗기는 순간 징병도 수입도 끊겨 회복할 길이 없다.
+   * 공포가 높을수록 더 걷는다 — 약탈로 연명하는 군대다.
+   */
+  forageIncomePerUnit: number;
 }
 
 // 균형의 핵심은 세 가지다.
@@ -182,6 +188,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   voluntarySubmitChance: 0.12,
+  forageIncomePerUnit: 0.8,
 };
 
 export const NATION_PRESETS: Array<{ name: string; color: string; taxRate: number }> = [

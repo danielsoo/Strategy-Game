@@ -229,6 +229,15 @@ export function computeLedger(
     else if (c.fortStage === 4) income += eco.fortIncome;
     else income += eco.cellIncome * cellEfficiency(c, hubs, eco);
   }
+  // 본진을 잃은 군대는 현지에서 조달한다.
+  // 이게 없으면 본진 함락이 곧 수입 0 · 징병 불가로 이어져 회복할 길이 사라진다.
+  // 공포가 높을수록 더 걷는다 — 약탈로 연명하는 군대다.
+  const hasCastle = state.cells.some((c) => c.castle && c.owner === nationId);
+  if (!hasCastle && units > 0) {
+    const fear = state.nations[nationId]?.fear ?? 50;
+    income += units * eco.forageIncomePerUnit * (0.5 + fear / 100);
+  }
+
   const upkeep = units * eco.unitUpkeep;
   const admin = Math.pow(cells, eco.adminExponent) * eco.adminCostPerCell;
   return { income, upkeep, admin, net: income - upkeep - admin, cells, units };
@@ -566,7 +575,11 @@ export function recruit(
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): number {
   const n = state.nations[nationId];
-  const home = state.cells.find((c) => c.castle && c.owner === nationId);
+  // 본진이 없으면 완공 요새가 임시 수도 노릇을 한다.
+  // 본진 상실이 곧 징병 불가로 이어지면 회복할 방법이 사라진다.
+  const home =
+    state.cells.find((c) => c.castle && c.owner === nationId) ??
+    state.cells.find((c) => c.fortStage === 4 && c.owner === nationId);
   if (!home) return 0;
   let made = 0;
   while (made < count && n.gold >= eco.recruitCost) {
@@ -864,10 +877,34 @@ export function beginTurn(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): void {
+  promoteCapitalIfNeeded(state, nationId);
   applyUpkeep(state, nationId, eco);
   progressForts(state, nationId);
   trySpawnMerchant(state, nationId, eco);
   recomputeEncirclement(state);
+}
+
+/**
+ * 본진을 모두 잃었는데 완공 요새가 남아 있으면, 그중 하나가 임시 수도가 된다.
+ * 본진 함락이 곧 회복 불가를 뜻하면 "차지하거나 버리거나"를 고친 의미가 없다.
+ * 요새를 미리 지어둔 나라는 다시 일어설 수 있어야 한다.
+ */
+export function promoteCapitalIfNeeded(state: GameState, nationId: number): void {
+  const n = state.nations[nationId];
+  if (!n || !n.alive) return;
+  if (state.cells.some((c) => c.castle && c.owner === nationId)) return;
+
+  // 병력이 가장 많은 요새를 새 수도로 삼는다
+  let best: Cell | null = null;
+  for (const c of state.cells) {
+    if (c.owner !== nationId || c.fortStage !== 4) continue;
+    if (!best || c.units > best.units) best = c;
+  }
+  if (!best) return;
+
+  best.castle = true;
+  best.fortStage = 0;
+  pushLog(state, `${n.name}: 요새 (${best.row},${best.col})를 임시 수도로 삼았습니다`);
 }
 
 /** 차례를 다음 살아있는 나라로 넘긴다 */

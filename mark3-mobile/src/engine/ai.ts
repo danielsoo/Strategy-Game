@@ -54,6 +54,12 @@ export interface AIWeights {
    * 선두가 쌓은 국고가 곧 표적이 되므로, 눈덩이를 되돌리는 힘으로 작동한다.
    */
   wealth: number;
+  /**
+   * 압박받는 아군에게 달려가는 정도.
+   * 이게 0 이면 부대들이 각자 점수만 보고 움직여, 옆에서 아군이 두들겨 맞아도
+   * 모른 척한다. 실제 전쟁은 얻어맞는 곳으로 병력이 몰린다.
+   */
+  support: number;
   /** 영토에 비례해 늘어나는 목표 병력의 기준값 */
   targetArmy: number;
 }
@@ -79,6 +85,7 @@ export const BASE_WEIGHTS: AIWeights = {
   expansion: 1,
   terrain: 0.5,
   wealth: 1,
+  support: 1,
   targetArmy: 18,
 };
 
@@ -128,6 +135,7 @@ export const LEARNED_WEIGHTS: AIWeights = {
   expansion: 2.58,
   terrain: 0.45,
   wealth: 0.42,
+  support: 1,
   targetArmy: 22.81,
 };
 
@@ -143,6 +151,37 @@ interface Ctx {
   homeThreat: number;
   hubs: Cell[];
   eco: EconomyConfig;
+  /** 지금 압박받고 있는 내 진지들. 가까운 부대를 끌어당긴다. */
+  distress: Array<{ cell: Cell; severity: number }>;
+}
+
+/**
+ * 압박받는 아군 진지를 찾는다.
+ *
+ * 부대가 각자 점수만 보고 움직이면 옆에서 아군이 두들겨 맞아도 모른 척한다.
+ * 실제 전쟁은 그렇지 않다 — 얻어맞는 곳으로 병력이 몰린다.
+ * severity 는 "얼마나 부족한가"다. 혼자 막을 수 있으면 부르지 않는다.
+ */
+function findDistress(
+  state: GameState,
+  me: number
+): Array<{ cell: Cell; severity: number }> {
+  const out: Array<{ cell: Cell; severity: number }> = [];
+  for (const c of state.cells) {
+    if (c.owner !== me || c.units <= 0 || c.neutral) continue;
+    let hostile = 0;
+    for (const n of neighbors(state, c)) {
+      if (n.units > 0 && (n.neutral || n.owner !== me)) hostile += cellPower(n, false);
+    }
+    if (hostile <= 0) continue;
+    const mine = cellPower(c, true);
+    const shortfall = hostile - mine;
+    if (shortfall <= 0) continue; // 혼자 감당되면 부르지 않는다
+    // 본진과 요새는 잃으면 타격이 크므로 더 크게 부른다
+    const weight = c.castle ? 2.5 : c.fortStage === 4 ? 1.8 : 1;
+    out.push({ cell: c, severity: shortfall * weight });
+  }
+  return out;
 }
 
 function minDist(c: Cell, targets: Cell[]): number {
@@ -169,7 +208,7 @@ function localStrength(state: GameState, center: Cell, owner: number | null): nu
 }
 
 /** 적 본진 중 '약하고 가까운' 곳을 이번 원정의 목표로 고른다 */
-function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat'>): Cell | null {
+function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress'>): Cell | null {
   let best: Cell | null = null;
   let bestScore = -Infinity;
   for (const h of ctx.enemyHomes) {
@@ -220,6 +259,14 @@ function positionValue(ctx: Ctx, c: Cell): number {
     ? hexDistance(c.row, c.col, ctx.target.row, ctx.target.col)
     : minDist(c, ctx.enemyHomes);
   v += w.advance * Math.max(0, 14 - dist) * 1.0;
+
+  // 압박받는 아군 쪽으로 끌린다. 가까울수록 세게 당긴다.
+  for (const d of ctx.distress) {
+    if (d.cell.id === c.id) continue;
+    const dd = hexDistance(c.row, c.col, d.cell.row, d.cell.col);
+    if (dd > 5) continue; // 너무 멀면 가봐야 늦는다
+    v += w.support * (d.severity / (1 + dd * dd * 0.6));
+  }
   return v;
 }
 
@@ -250,10 +297,23 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
   // "제자리"를 최선으로 고르며 게임이 영구히 멎는다.
   const distToTarget = ctx.target ? hexDistance(c.row, c.col, ctx.target.row, ctx.target.col) : 0;
   const idlePenalty = distToTarget > 1 ? w.advance * 1.5 : 0;
+
+  // 지켜야 할 자리는 비우지 않는다.
+  // 적이 붙어 있는 본진·요새를 두고 원정을 나가면 그 사이에 잃는다.
+  let enemyAdjacent = 0;
+  for (const n of neighbors(ctx.state, c)) {
+    if (n.units > 0 && (n.neutral || n.owner !== ctx.me)) enemyAdjacent += cellPower(n, false);
+  }
+  const holdingCritical = (c.castle || c.fortStage === 4) && enemyAdjacent > 0;
+  const holdBonus = holdingCritical ? w.homeDefense * 12 + enemyAdjacent * 0.8 : 0;
+
   actions.push({
     kind: 'stay',
     score:
-      positionValue(ctx, c) - idlePenalty + (c.exhaustion > 50 ? w.units * c.units * 0.2 : 0),
+      positionValue(ctx, c) -
+      idlePenalty +
+      holdBonus +
+      (c.exhaustion > 50 ? w.units * c.units * 0.2 : 0),
   });
 
   for (const n of neighbors(ctx.state, c)) {
@@ -352,6 +412,7 @@ export function takeAITurn(
     ...partial,
     target: pickTarget(partial),
     homeThreat: computeHomeThreat(state, nationId, homes),
+    distress: findDistress(state, nationId),
   };
 
   // 1. 징병 — 목표 병력은 영토에 비례해야 한다. 절대 상한으로 두면
