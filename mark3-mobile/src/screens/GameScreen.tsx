@@ -28,6 +28,7 @@ import {
   nationStats,
   pushLog,
   recruitableCastles,
+  desertionGrace,
   collectTribute,
   updateLoyalty,
   stepVoluntarySubmission,
@@ -376,14 +377,33 @@ export default function GameScreen() {
           </View>
         </View>
         {!watching && (
-          <Text style={styles.gold}>
-            💰 {Math.floor(me.gold)}G
-            <Text style={ledger.net >= 0 ? styles.plus : styles.minus}>
-              {'  '}
-              {ledger.net >= 0 ? '+' : ''}
-              {ledger.net.toFixed(1)}/턴
+          <>
+            <Text style={styles.gold}>
+              💰 {Math.floor(me.gold)}G
+              <Text style={ledger.net >= 0 ? styles.plus : styles.minus}>
+                {'  '}
+                {ledger.net >= 0 ? '+' : ''}
+                {ledger.net.toFixed(1)}/턴
+              </Text>
             </Text>
-          </Text>
+            <Text style={styles.breakdown}>
+              수입 <Text style={styles.plus}>+{ledger.income.toFixed(1)}</Text>
+              {'   '}지출{' '}
+              <Text style={styles.minus}>
+                -{(ledger.upkeep + ledger.admin).toFixed(1)}
+              </Text>
+              <Text style={styles.breakdownDim}>
+                {' '}
+                (군 {ledger.upkeep.toFixed(1)} · 행정 {ledger.admin.toFixed(1)})
+              </Text>
+            </Text>
+            {me.unpaidTurns > 0 && (
+              <Text style={styles.arrears}>
+                ⚠ 급여 체납 {me.unpaidTurns}/{desertionGrace(me)}턴 — 넘기면 병력이 이탈합니다
+                {me.justice > 50 ? ` (정의 ${me.justice}로 유예 연장됨)` : ''}
+              </Text>
+            )}
+          </>
         )}
       </View>
 
@@ -733,6 +753,9 @@ const styles = StyleSheet.create({
   gold: { color: '#fbbf24', fontSize: 14, fontWeight: 'bold', marginTop: 3 },
   plus: { color: '#34d399' },
   minus: { color: '#f87171' },
+  breakdown: { color: '#cbd5e1', fontSize: 11, marginTop: 2 },
+  breakdownDim: { color: '#6b7280', fontSize: 10 },
+  arrears: { color: '#fbbf24', fontSize: 11, marginTop: 3, fontWeight: 'bold' },
 
   watchBar: {
     flexDirection: 'row',

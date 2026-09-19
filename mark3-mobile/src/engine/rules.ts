@@ -152,6 +152,7 @@ export function createGameState(
       isHuman: i === 0,
       suzerain: null,
       loyalty: 100,
+      unpaidTurns: 0,
       vassalOrigin: null,
     });
   }
@@ -276,30 +277,63 @@ export function applyUpkeep(
 
   n.gold += l.net;
 
-  if (n.gold < 0) {
-    const deserters = Math.ceil(-n.gold / Math.max(0.1, eco.unitUpkeep));
-    let left = deserters;
+  if (n.gold >= 0) {
+    if (n.unpaidTurns > 0) {
+      pushLog(state, `${n.name}: 밀린 급여를 지급했습니다`);
+      n.unpaidTurns = 0;
+    }
+    return;
+  }
+
+  // 돈이 마르자마자 병력이 흩어지면 한 번의 실수가 곧바로 회복 불가가 된다.
+  // 유예를 두고, 그동안은 사기만 깎인다.
+  const shortfall = -n.gold;
+  n.gold = 0;
+  n.unpaidTurns++;
+
+  const grace = desertionGrace(n, eco);
+  if (n.unpaidTurns <= grace) {
+    // 급여가 밀린 군대는 마음이 상한다
+    for (const c of state.cells) {
+      if (c.owner !== nationId || c.units <= 0) continue;
+      c.morale = Math.max(0, c.morale - 6);
+    }
+    pushLog(
+      state,
+      `${n.name}: 급여가 밀렸습니다 (${n.unpaidTurns}/${grace}턴) — 사기 하락`
+    );
+    return;
+  }
+
+  const deserters = Math.ceil(shortfall / Math.max(0.1, eco.unitUpkeep));
+  let left = deserters;
+  for (const c of state.cells) {
+    if (left <= 0) break;
+    if (c.owner !== nationId || c.units <= 0 || c.castle) continue;
+    const take = Math.min(c.units, left);
+    c.units -= take;
+    left -= take;
+  }
+  if (left > 0) {
     for (const c of state.cells) {
       if (left <= 0) break;
-      if (c.owner !== nationId || c.units <= 0 || c.castle) continue;
-      const take = Math.min(c.units, left);
-      c.units -= take;
-      left -= take;
-    }
-    if (left > 0) {
-      for (const c of state.cells) {
-        if (left <= 0) break;
-        if (c.owner !== nationId || c.units <= 0) continue;
-        const take = Math.min(c.units - 1, left);
-        if (take > 0) {
-          c.units -= take;
-          left -= take;
-        }
+      if (c.owner !== nationId || c.units <= 0) continue;
+      const take = Math.min(c.units - 1, left);
+      if (take > 0) {
+        c.units -= take;
+        left -= take;
       }
     }
-    n.gold = 0;
-    pushLog(state, `${n.name}: 재정이 바닥나 병력이 이탈했습니다`);
   }
+  pushLog(state, `${n.name}: 급여를 못 견딘 병력이 이탈했습니다`);
+}
+
+/**
+ * 급여가 밀려도 버티는 턴 수.
+ * 정의로운 군주의 군대는 외상으로도 따라온다 — 정의가 높을수록 오래 버틴다.
+ */
+export function desertionGrace(n: Nation, eco: EconomyConfig = DEFAULT_ECONOMY): number {
+  return eco.graceTurnsBase + Math.round((n.justice / 100) * eco.graceTurnsJustice);
 }
 
 // ─────────────────────────────────────────────────────────────

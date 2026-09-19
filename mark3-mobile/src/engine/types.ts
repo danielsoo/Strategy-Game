@@ -80,6 +80,12 @@ export interface Nation {
   /** 속국일 때의 충성도 0~100. 0 이 되면 독립 전쟁을 일으킨다. */
   loyalty: number;
   /**
+   * 급여를 못 준 연속 턴 수.
+   * 돈이 마르자마자 병력이 흩어지면 한 번의 실수가 곧바로 회복 불가가 된다.
+   * 유예를 두고, 정의로운 나라는 더 오래 버틴다.
+   */
+  unpaidTurns: number;
+  /**
    * 속국이 된 경위.
    * conquest  본진을 잃고 강제로 복속 — 조공은 많지만 충성이 잘 깎인다
    * voluntary 위협에 시달리다 정의로운 나라에 보호를 청함 — 조공은 적지만 안정적
@@ -156,6 +162,10 @@ export interface EconomyConfig {
   vassalInfluenceWeight: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
+  /** 급여가 밀려도 버티는 기본 턴 수 */
+  graceTurnsBase: number;
+  /** 정의 100 일 때 더 버티는 턴 수. 정의로운 군주는 외상으로도 따른다. */
+  graceTurnsJustice: number;
   /**
    * 본진을 잃은 나라의 군대가 현지 조달로 버는 액수 (유닛당).
    * 이게 없으면 본진을 빼앗기는 순간 징병도 수입도 끊겨 회복할 길이 없다.
@@ -193,6 +203,8 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   voluntarySubmitChance: 0.12,
+  graceTurnsBase: 2,
+  graceTurnsJustice: 4,
   forageIncomePerUnit: 0.8,
 };
 
