@@ -16,6 +16,8 @@ import {
   EconomyConfig,
   neighbors,
   cellPower,
+  cellEfficiency,
+  adminHubs,
   estimateWinProb,
   performAttack,
   moveStack,
@@ -83,6 +85,9 @@ interface Ctx {
   target: SimCell | null;
   /** 내 본진 주변 적 전력. 높으면 원정보다 수비를 택한다 */
   homeThreat: number;
+  /** 관리 거점(본진·완공 요새) — 여기서 멀면 땅을 먹어도 돈이 안 된다 */
+  hubs: SimCell[];
+  eco: EconomyConfig;
 }
 
 /** 어떤 칸 주변(반경 2)의 특정 세력 전력 합 — "저기가 비었나"를 판단하는 눈 */
@@ -259,7 +264,10 @@ function scoreActions(ctx: Ctx, c: SimCell): Action[] {
     }
 
     if (n.owner === null && n.units === 0) {
-      const gain = w.expansion * w.territory + positionValue(ctx, n);
+      // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
+      // AI가 돈도 안 되는 변두리를 끝없이 칠한다.
+      const eff = cellEfficiency(n, ctx.hubs, ctx.eco);
+      const gain = w.expansion * w.territory * (2 * eff - 0.4) + positionValue(ctx, n);
       actions.push({
         kind: 'move',
         score: gain - riskAt(ctx, n, c.units, myPower),
@@ -303,7 +311,8 @@ export function takeAITurn(
   const enemyHomes = state.cells.filter(
     (c) => c.castle && c.owner !== null && c.owner !== nationId
   );
-  const partial = { state, me: nationId, w, homes, enemyHomes };
+  const hubs = adminHubs(state, nationId);
+  const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco };
   const ctx: Ctx = {
     ...partial,
     target: pickTarget(partial),
@@ -332,12 +341,21 @@ export function takeAITurn(
     log.recruited = n;
   }
 
-  // 2. 요새 — 여유가 있고 수비 성향이면 짓는다
-  if (nation.gold >= eco.fortCost && w.fort >= 3) {
-    const site = state.cells.find(
-      (c) => c.owner === nationId && !c.castle && c.fortStage === 0 && c.units >= 3
-    );
-    if (site) {
+  // 2. 요새 — 거점에서 먼 땅을 쓸모 있게 만드는 수단이다.
+  //    효율이 가장 낮은(= 가장 방치된) 내 땅에 짓는 것이 경제적으로 옳다.
+  if (nation.gold >= eco.fortCost * 1.4) {
+    let site: SimCell | null = null;
+    let worst = 1;
+    for (const c of state.cells) {
+      if (c.owner !== nationId || c.castle || c.fortStage !== 0 || c.units < 3) continue;
+      const eff = cellEfficiency(c, hubs, eco);
+      if (eff < worst) {
+        worst = eff;
+        site = c;
+      }
+    }
+    // fort 가중치가 높을수록 더 이른(효율이 덜 나쁜) 시점에도 짓는다
+    if (site && worst < 0.35 + w.fort * 0.06) {
       nation.gold -= eco.fortCost;
       site.fortStage = 1;
       log.fortsStarted = 1;

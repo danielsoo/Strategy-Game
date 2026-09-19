@@ -295,4 +295,8 @@ function main() {
   }
 }
 
-main();
+// 이 파일은 playGame 을 다른 시뮬레이터(tuneAI 등)에 export 한다.
+// 가드 없이 main() 을 부르면 import 하는 것만으로 시뮬레이션이 통째로 한 번 돈다.
+if (process.argv[1] && process.argv[1].includes('gameSim')) {
+  main();
+}

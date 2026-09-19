@@ -11,7 +11,7 @@
 // 세금/무역/속국이 들어오면 여기부터 바뀐다. 지금은 "생산이 없으면 초반 전투
 // 결과가 그대로 게임 결과가 되어 시뮬레이션이 무의미해지기 때문에" 넣었다.
 
-import { getHexNeighborOffsets } from '../src/utils/hexGrid';
+import { getHexNeighborOffsets, hexDistance } from '../src/utils/hexGrid';
 import {
   resolveCombat,
   CombatSide,
@@ -63,17 +63,30 @@ export interface EconomyConfig {
   maxRecruitPerTurn: number;
   fortCost: number;
   startingGold: number;
+  /**
+   * 관리 거점(본진·완공 요새)에서 멀어질 때 수입이 감쇠하는 척도.
+   * 이게 없으면 걸어다니며 땅을 칠하는 것이 곧 수입이 되어 확장이 지배 전략이 된다.
+   */
+  adminRange: number;
+  /** 칸 하나를 유지하는 데 드는 행정 비용. 먼 땅은 순손실이 되어야 한다. */
+  adminCostPerCell: number;
 }
 
+// 균형의 핵심은 두 가지다.
+//  1. 시작 국가가 흑자여야 한다. 본진 수입 < 초기 병력 유지비면 모두가 개전 전에
+//     파산해 병력이 이탈하고, 무방비가 된 본진을 먼저 확장한 나라가 주워간다.
+//  2. 대제국은 요새 없이는 적자여야 한다. 그래야 확장이 지배 전략이 되지 않는다.
 export const DEFAULT_ECONOMY: EconomyConfig = {
   cellIncome: 2,
-  castleIncome: 12,
-  fortIncome: 5,
-  unitUpkeep: 1,
+  castleIncome: 25,
+  fortIncome: 8,
+  unitUpkeep: 0.7,
   recruitCost: 18,
   maxRecruitPerTurn: 3,
   fortCost: 120,
-  startingGold: 120,
+  startingGold: 150,
+  adminRange: 2.5,
+  adminCostPerCell: 0.4,
 };
 
 const NATION_NAMES = [
@@ -361,19 +374,47 @@ export function moveStack(from: SimCell, to: SimCell): void {
   from.driftPP = 0;
 }
 
+/** 이 나라의 관리 거점 — 본진과 완공된 요새 */
+export function adminHubs(state: SimState, nationId: number): SimCell[] {
+  return state.cells.filter((c) => c.owner === nationId && (c.castle || c.fortStage === 4));
+}
+
+/**
+ * 칸의 수입 효율 (0~1). 관리 거점에서 멀수록 떨어진다.
+ * 요새를 지어 거점을 늘리는 것이 곧 영토를 쓸모 있게 만드는 길이다.
+ */
+export function cellEfficiency(c: SimCell, hubs: SimCell[], eco: EconomyConfig): number {
+  if (hubs.length === 0) return 0.15;
+  let best = 99;
+  for (const h of hubs) {
+    const d = hexDistance(c.row, c.col, h.row, h.col);
+    if (d < best) best = d;
+  }
+  return 1 / (1 + best / eco.adminRange);
+}
+
 /** 턴 시작 시 수입·유지비 정산. 병력이 없는 칸은 회복한다. */
 export function applyUpkeep(state: SimState, nationId: number, eco: EconomyConfig): void {
   const n = state.nations[nationId];
+  const hubs = adminHubs(state, nationId);
   let income = 0;
   let units = 0;
+  let cells = 0;
   for (const c of state.cells) {
     if (c.owner !== nationId) continue;
-    income += eco.cellIncome;
-    if (c.castle) income += eco.castleIncome;
-    if (c.fortStage === 4) income += eco.fortIncome;
+    cells++;
     units += c.units;
+    if (c.castle) {
+      income += eco.castleIncome;
+      continue;
+    }
+    if (c.fortStage === 4) {
+      income += eco.fortIncome;
+      continue;
+    }
+    income += eco.cellIncome * cellEfficiency(c, hubs, eco);
   }
-  n.gold += income - units * eco.unitUpkeep;
+  n.gold += income - units * eco.unitUpkeep - cells * eco.adminCostPerCell;
 
   // 골드가 마이너스면 병력이 이탈한다 (유지 못 하는 군대는 흩어진다)
   if (n.gold < 0) {
