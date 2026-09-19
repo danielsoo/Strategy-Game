@@ -132,20 +132,20 @@ export const PERSONALITIES: Record<string, AIWeights> = {
  *                          생각만큼 이득이 아니라는 뜻이다
  */
 export const LEARNED_WEIGHTS: AIWeights = {
-  territory: 2.23,
-  units: 0.68,
-  castleAssault: 12.97,
-  fort: 0.25,
-  aggression: 0.7,
+  territory: 2.59,
+  units: 1.33,
+  castleAssault: 16.05,
+  fort: 0.0,
+  aggression: 0.66,
   massing: 0.0,
-  homeDefense: 0.85,
-  advance: 0.07,
-  expansion: 1.85,
-  terrain: 0.78,
-  wealth: 1.22,
-  support: 0.38,
-  explore: 1,
-  targetArmy: 19.96,
+  homeDefense: 0.38,
+  advance: 0.24,
+  expansion: 2.27,
+  terrain: 0.91,
+  wealth: 0.82,
+  support: 0.0,
+  explore: 0.79,
+  targetArmy: 20.23,
 };
 
 PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
