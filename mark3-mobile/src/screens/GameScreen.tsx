@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
 import Svg, { Polygon } from 'react-native-svg';
-import { makeRng, DetailedCombatResult } from '../services/combatSystem';
+import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
 import {
   Cell,
   GameState,
@@ -9,7 +9,6 @@ import {
   DEFAULT_ECONOMY,
   NEUTRAL_COLOR,
   createGameState,
-  cellAt,
   neighbors,
   isHostile,
   performAttack,
@@ -27,6 +26,7 @@ import {
   expectedTradeProfit,
   sendMerchant,
   nationStats,
+  pushLog,
 } from '../engine';
 import { takeAITurn, PERSONALITIES, LEARNED_WEIGHTS, AIWeights } from '../engine/ai';
 
@@ -35,18 +35,26 @@ const COLS = 11;
 const NATIONS = 5;
 const PLAYER = 0;
 
-// AI 나라마다 다른 성격을 준다. 0번은 사람이다.
+/** 나라별 AI 성격. 0번 자리는 사람이 둘 때는 쓰이지 않고, 관전 모드에서만 쓰인다. */
 const AI_WEIGHTS: AIWeights[] = [
-  LEARNED_WEIGHTS, // 사용되지 않음 (사람 자리)
+  LEARNED_WEIGHTS,
   PERSONALITIES['공격형'],
   PERSONALITIES['확장형'],
   PERSONALITIES['수비형'],
-  LEARNED_WEIGHTS,
+  PERSONALITIES['집중형'],
 ];
+const AI_LABELS = ['학습된 AI', '공격형', '확장형', '수비형', '집중형'];
 
-const HEX = 30;
+const HEX = 26;
 const HEX_W = Math.sqrt(3) * HEX;
 const HEX_H = HEX * 2;
+
+const SPEEDS: Array<{ label: string; ms: number }> = [
+  { label: '느리게', ms: 900 },
+  { label: '보통', ms: 350 },
+  { label: '빠르게', ms: 120 },
+  { label: '최고속', ms: 1 },
+];
 
 /** 엔진은 상태를 제자리에서 고친다. React 가 다시 그리도록 최상위 참조만 새로 만든다. */
 function bump(s: GameState): GameState {
@@ -59,21 +67,73 @@ function bump(s: GameState): GameState {
   };
 }
 
+/** 지금 차례인 나라 하나를 AI 로 두고, 다음 살아있는 나라로 넘긴다. */
+function playOneNation(s: GameState, rng: RNG): void {
+  if (s.winner !== null) return;
+  const id = s.current;
+  const nation = s.nations[id];
+
+  if (nation.alive) {
+    beginTurn(s, id, rng);
+    const log = takeAITurn(s, id, AI_WEIGHTS[id] ?? PERSONALITIES['균형'], rng);
+    restUnmoved(s, id, log.moved);
+    for (const a of log.attacks) {
+      const res = a.result;
+      const verb =
+        res.outcome === 'attacker-win' ? '점령' : res.outcome === 'stalemate' ? '교착' : '격퇴당함';
+      pushLog(
+        s,
+        `${nation.name}: 공격 ${verb} (${res.rounds.length}R, 생존 ${res.attackerSurvivors})`
+      );
+    }
+    stepMerchants(s);
+    stepNeutrals(s, rng);
+    updateAliveFlags(s);
+  }
+
+  // 다음 살아있는 나라로. 한 바퀴 돌면 턴이 오른다.
+  const n = s.nations.length;
+  for (let i = 1; i <= n; i++) {
+    const next = (s.current + i) % n;
+    if (s.nations[next].alive) {
+      if (next <= s.current) s.turn++;
+      s.current = next;
+      return;
+    }
+  }
+}
+
 export default function GameScreen() {
-  const [rng] = useState(() => makeRng(Date.now() & 0xffffffff));
+  const rngRef = useRef<RNG>(makeRng(Date.now() & 0xffffffff));
+  const rng = rngRef.current;
+
   const [state, setState] = useState<GameState>(() => {
     const s = createGameState(NATIONS, ROWS, COLS, rng);
     beginTurn(s, PLAYER, rng);
     return s;
   });
+  const [watching, setWatching] = useState(false);
+  const [speedIdx, setSpeedIdx] = useState(1);
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
-  const [showLog, setShowLog] = useState(false);
+  const [showStats, setShowStats] = useState(true);
 
   const me = state.nations[PLAYER];
   const ledger = useMemo(() => computeLedger(state, PLAYER), [state]);
-  const myTurn = state.current === PLAYER && state.winner === null;
+  const myTurn = !watching && state.current === PLAYER && state.winner === null;
+
+  // ── 관전 모드: 한 나라씩 자동으로 둔다 ────────────────────
+  useEffect(() => {
+    if (!watching || state.winner !== null) return;
+    const t = setTimeout(() => {
+      setState((prev) => {
+        playOneNation(prev, rng);
+        return bump(prev);
+      });
+    }, SPEEDS[speedIdx].ms);
+    return () => clearTimeout(t);
+  }, [watching, speedIdx, state, rng]);
 
   const selectedCell = selected ? state.cells.find((c) => c.id === selected) ?? null : null;
   const movable = useMemo(() => {
@@ -96,7 +156,7 @@ export default function GameScreen() {
 
     if (!selected) {
       if (cell.owner === PLAYER && cell.units > 0 && !cell.neutral) {
-        if (cell.fortStage > 0 && cell.fortStage < 4) return; // 건설 중 수비대는 못 움직인다
+        if (cell.fortStage > 0 && cell.fortStage < 4) return;
         setSelected(cell.id);
       }
       return;
@@ -126,54 +186,27 @@ export default function GameScreen() {
     setSelected(null);
   };
 
-  const buildFort = () => {
-    if (!selectedCell) return;
-    setState((prev) => {
-      const c = prev.cells.find((x) => x.id === selectedCell.id)!;
-      startFort(prev, c, PLAYER);
-      return bump(prev);
-    });
-    setSelected(null);
-  };
-
-  const doRecruit = () => {
-    setState((prev) => {
-      recruit(prev, PLAYER, DEFAULT_ECONOMY.maxRecruitPerTurn);
-      return bump(prev);
-    });
-  };
-
-  const chooseDestination = (dest: Cell) => {
-    if (!merchantPick) return;
-    setState((prev) => {
-      const m = prev.merchants.find((x) => x.id === merchantPick.id);
-      if (m) sendMerchant(prev, m, dest);
-      return bump(prev);
-    });
-    setMerchantPick(null);
-  };
-
   const endTurn = () => {
     setSelected(null);
     setState((prev) => {
-      // 내 턴 마무리
       restUnmoved(prev, PLAYER, new Set());
       stepMerchants(prev);
       stepNeutrals(prev, rng);
       updateAliveFlags(prev);
-
-      // AI 나라들이 차례로 둔다
-      for (let id = 1; id < prev.nations.length; id++) {
-        if (!prev.nations[id].alive || prev.winner !== null) continue;
-        prev.current = id;
-        beginTurn(prev, id, rng);
-        const log = takeAITurn(prev, id, AI_WEIGHTS[id] ?? PERSONALITIES['균형'], rng);
-        restUnmoved(prev, id, log.moved);
-        stepMerchants(prev);
-        stepNeutrals(prev, rng);
-        updateAliveFlags(prev);
+      prev.current = PLAYER;
+      // 사람 차례를 마친 뒤 AI 들을 차례로 돌린다
+      const n = prev.nations.length;
+      for (let i = 1; i < n; i++) {
+        prev.current = i;
+        if (prev.nations[i].alive && prev.winner === null) {
+          beginTurn(prev, i, rng);
+          const log = takeAITurn(prev, i, AI_WEIGHTS[i] ?? PERSONALITIES['균형'], rng);
+          restUnmoved(prev, i, log.moved);
+          stepMerchants(prev);
+          stepNeutrals(prev, rng);
+          updateAliveFlags(prev);
+        }
       }
-
       prev.turn++;
       prev.current = PLAYER;
       if (prev.nations[PLAYER].alive && prev.winner === null) beginTurn(prev, PLAYER, rng);
@@ -181,7 +214,15 @@ export default function GameScreen() {
     });
   };
 
+  const stepOnce = () => {
+    setState((prev) => {
+      playOneNation(prev, rng);
+      return bump(prev);
+    });
+  };
+
   const reset = () => {
+    setWatching(false);
     setState(() => {
       const s = createGameState(NATIONS, ROWS, COLS, rng);
       beginTurn(s, PLAYER, rng);
@@ -199,6 +240,7 @@ export default function GameScreen() {
     if (cell.neutral) fill = NEUTRAL_COLOR[cell.neutral];
 
     const isSel = cell.id === selected;
+    const isActive = cell.owner !== null && cell.owner === state.current && watching;
     if (movable.has(cell.id) && !isSel) fill = '#fbbf24';
 
     let icon = '';
@@ -230,68 +272,138 @@ export default function GameScreen() {
         key={cell.id}
         style={[styles.hex, { left: x, top: y }]}
         onPress={() => onCellPress(cell)}
+        activeOpacity={0.8}
       >
         <Svg width={HEX_W} height={HEX_H}>
           <Polygon
             points={points}
             fill={fill}
-            stroke={isSel ? '#fff' : cell.hasRoad ? '#a16207' : 'rgba(0,0,0,0.35)'}
-            strokeWidth={isSel ? 3 : cell.hasRoad ? 2 : 0.5}
+            stroke={
+              isSel ? '#fff' : isActive ? '#fde68a' : cell.hasRoad ? '#a16207' : 'rgba(0,0,0,0.35)'
+            }
+            strokeWidth={isSel ? 3 : isActive ? 2 : cell.hasRoad ? 2 : 0.5}
           />
         </Svg>
         <View style={styles.hexInner} pointerEvents="none">
           {icon !== '' && <Text style={styles.icon}>{icon}</Text>}
           {merchant && <Text style={styles.merchant}>🚚</Text>}
           {cell.units > 0 && <Text style={styles.units}>{cell.units}</Text>}
+          {cell.units > 0 && cell.morale < 60 && <Text style={styles.shaken}>▼</Text>}
+          {cell.encircled && <Text style={styles.encircled}>◌</Text>}
         </View>
       </TouchableOpacity>
     );
   };
 
   const fortCheck = selectedCell ? canBuildFort(state, selectedCell, PLAYER) : null;
+  const current = state.nations[state.current];
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>
-          턴 {state.turn} · {me.name}
-        </Text>
-        <Text style={styles.gold}>
-          💰 {Math.floor(me.gold)}G
-          <Text style={ledger.net >= 0 ? styles.plus : styles.minus}>
-            {'  '}
-            {ledger.net >= 0 ? '+' : ''}
-            {ledger.net.toFixed(1)}/턴
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>턴 {state.turn}</Text>
+          <View style={[styles.turnChip, { backgroundColor: current.color }]}>
+            <Text style={styles.turnChipText}>
+              {current.name}
+              {watching ? ` (${AI_LABELS[state.current]})` : ''}
+            </Text>
+          </View>
+        </View>
+        {!watching && (
+          <Text style={styles.gold}>
+            💰 {Math.floor(me.gold)}G
+            <Text style={ledger.net >= 0 ? styles.plus : styles.minus}>
+              {'  '}
+              {ledger.net >= 0 ? '+' : ''}
+              {ledger.net.toFixed(1)}/턴
+            </Text>
           </Text>
-        </Text>
-        <Text style={styles.sub}>
-          영토 {ledger.cells} · 병력 {ledger.units} · 수입 {ledger.income.toFixed(0)} · 유지{' '}
-          {ledger.upkeep.toFixed(0)} · 행정 {ledger.admin.toFixed(0)}
-        </Text>
+        )}
       </View>
 
-      <View style={styles.repRow}>
-        <View style={styles.repItem}>
-          <Text style={styles.repLabel}>공포 {me.fear}</Text>
-          <View style={styles.bar}>
-            <View style={[styles.fill, { width: `${me.fear}%`, backgroundColor: '#ef4444' }]} />
-          </View>
-        </View>
-        <View style={styles.repItem}>
-          <Text style={styles.repLabel}>정의 {me.justice}</Text>
-          <View style={styles.bar}>
-            <View style={[styles.fill, { width: `${me.justice}%`, backgroundColor: '#3b82f6' }]} />
-          </View>
-        </View>
+      {/* 관전 조작 */}
+      <View style={styles.watchBar}>
+        <TouchableOpacity
+          style={[styles.chip, watching ? styles.chipOn : styles.chipOff]}
+          onPress={() => setWatching((w) => !w)}
+        >
+          <Text style={styles.chipText}>{watching ? '⏸ 정지' : '▶ 관전'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.chip, styles.chipOff]} onPress={stepOnce}>
+          <Text style={styles.chipText}>▷ 한 수</Text>
+        </TouchableOpacity>
+        {SPEEDS.map((s, i) => (
+          <TouchableOpacity
+            key={s.label}
+            style={[styles.chip, i === speedIdx ? styles.chipOn : styles.chipOff]}
+            onPress={() => setSpeedIdx(i)}
+          >
+            <Text style={styles.chipText}>{s.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      <ScrollView style={styles.gridWrap} contentContainerStyle={{ paddingBottom: 12 }}>
+      {/* 수치 표 */}
+      {showStats && (
+        <View style={styles.table}>
+          <View style={styles.trHead}>
+            <Text style={[styles.th, styles.colName]}>나라</Text>
+            <Text style={styles.th}>영토</Text>
+            <Text style={styles.th}>병력</Text>
+            <Text style={styles.th}>요새</Text>
+            <Text style={styles.th}>골드</Text>
+            <Text style={styles.th}>수지</Text>
+            <Text style={styles.th}>무역</Text>
+          </View>
+          {state.nations.map((n) => {
+            const s = nationStats(state, n.id);
+            const l = computeLedger(state, n.id);
+            const traders = state.merchants.filter((m) => m.nation === n.id).length;
+            return (
+              <View
+                key={n.id}
+                style={[styles.tr, n.id === state.current && styles.trActive]}
+              >
+                <View style={[styles.colName, styles.nameCell]}>
+                  <View style={[styles.dot, { backgroundColor: n.color }]} />
+                  <Text style={[styles.td, !n.alive && styles.dead]} numberOfLines={1}>
+                    {n.name}
+                    {!n.alive ? ' ×' : ''}
+                  </Text>
+                </View>
+                <Text style={styles.td}>{s.cells}</Text>
+                <Text style={styles.td}>{s.units}</Text>
+                <Text style={styles.td}>{s.forts}</Text>
+                <Text style={styles.td}>{Math.floor(s.gold)}</Text>
+                <Text style={[styles.td, l.net >= 0 ? styles.plus : styles.minus]}>
+                  {l.net >= 0 ? '+' : ''}
+                  {l.net.toFixed(0)}
+                </Text>
+                <Text style={styles.td}>{traders}</Text>
+              </View>
+            );
+          })}
+        </View>
+      )}
+
+      <ScrollView style={styles.gridWrap} contentContainerStyle={{ paddingBottom: 8 }}>
         <ScrollView horizontal contentContainerStyle={{ paddingRight: 12 }}>
           <View style={{ width: COLS * HEX_W + HEX_W, height: ROWS * HEX_H * 0.75 + HEX_H * 0.3 }}>
             {state.cells.map(renderCell)}
           </View>
         </ScrollView>
       </ScrollView>
+
+      {/* 최근 사건 */}
+      <View style={styles.feed}>
+        {state.log.slice(-3).map((l, i) => (
+          <Text key={i} style={styles.feedLine} numberOfLines={1}>
+            · {l}
+          </Text>
+        ))}
+        {state.log.length === 0 && <Text style={styles.feedLine}>· 게임 시작</Text>}
+      </View>
 
       {selectedCell && (
         <View style={styles.panel}>
@@ -304,7 +416,7 @@ export default function GameScreen() {
             {selectedCell.encircled ? ' · 포위됨' : ''}
           </Text>
           {fortCheck?.ok ? (
-            <TouchableOpacity style={[styles.btn, styles.fortBtn]} onPress={buildFort}>
+            <TouchableOpacity style={[styles.btn, styles.fortBtn]} onPress={buildFortHandler()}>
               <Text style={styles.btnText}>요새 건설 ({DEFAULT_ECONOMY.fortCost}G)</Text>
             </TouchableOpacity>
           ) : (
@@ -315,34 +427,38 @@ export default function GameScreen() {
 
       <View style={styles.footer}>
         <View style={styles.row}>
-          <TouchableOpacity style={[styles.btn, styles.recruitBtn]} onPress={doRecruit}>
+          <TouchableOpacity
+            style={[styles.btn, styles.recruitBtn, !myTurn && styles.btnDim]}
+            onPress={() =>
+              setState((prev) => {
+                recruit(prev, PLAYER, DEFAULT_ECONOMY.maxRecruitPerTurn);
+                return bump(prev);
+              })
+            }
+            disabled={!myTurn}
+          >
             <Text style={styles.btnText}>징병 ({DEFAULT_ECONOMY.recruitCost}G)</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.logBtn]} onPress={() => setShowLog(true)}>
-            <Text style={styles.btnText}>기록</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.row}>
-          <TouchableOpacity style={[styles.btn, styles.endBtn]} onPress={endTurn}>
+          <TouchableOpacity
+            style={[styles.btn, styles.endBtn, !myTurn && styles.btnDim]}
+            onPress={endTurn}
+            disabled={!myTurn}
+          >
             <Text style={styles.btnText}>턴 종료</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.btn, styles.resetBtn]} onPress={reset}>
             <Text style={styles.btnText}>리셋</Text>
           </TouchableOpacity>
         </View>
-        <Text style={styles.standings}>
-          {state.nations
-            .map((n) => {
-              const s = nationStats(state, n.id);
-              return `${n.name} ${n.alive ? s.cells : '×'}`;
-            })
-            .join('  ·  ')}
-        </Text>
+        <TouchableOpacity onPress={() => setShowStats((v) => !v)}>
+          <Text style={styles.toggle}>{showStats ? '수치 숨기기' : '수치 보기'}</Text>
+        </TouchableOpacity>
       </View>
 
       {state.winner !== null && (
         <View style={styles.banner} pointerEvents="none">
           <Text style={styles.bannerText}>{state.nations[state.winner].name} 승리</Text>
+          <Text style={styles.bannerSub}>{state.turn}턴</Text>
         </View>
       )}
 
@@ -363,7 +479,15 @@ export default function GameScreen() {
                       <TouchableOpacity
                         key={d.id}
                         style={styles.destRow}
-                        onPress={() => chooseDestination(d)}
+                        onPress={() => {
+                          setState((prev) => {
+                            const m = prev.merchants.find((x) => x.id === merchantPick.id);
+                            const dest = prev.cells.find((c) => c.id === d.id);
+                            if (m && dest) sendMerchant(prev, m, dest);
+                            return bump(prev);
+                          });
+                          setMerchantPick(null);
+                        }}
                       >
                         <Text style={styles.destName}>
                           {ownerName}의 {d.castle ? '본진' : '요새'} ({d.row},{d.col})
@@ -377,25 +501,10 @@ export default function GameScreen() {
                     );
                   })}
             </ScrollView>
-            <TouchableOpacity style={[styles.btn, styles.endBtn]} onPress={() => setMerchantPick(null)}>
-              <Text style={styles.btnText}>닫기</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal visible={showLog} transparent animationType="slide">
-        <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>기록</Text>
-            <ScrollView style={{ maxHeight: 360 }}>
-              {[...state.log].reverse().map((l, i) => (
-                <Text key={i} style={styles.logLine}>
-                  · {l}
-                </Text>
-              ))}
-            </ScrollView>
-            <TouchableOpacity style={[styles.btn, styles.endBtn]} onPress={() => setShowLog(false)}>
+            <TouchableOpacity
+              style={[styles.btn, styles.endBtn]}
+              onPress={() => setMerchantPick(null)}
+            >
               <Text style={styles.btnText}>닫기</Text>
             </TouchableOpacity>
           </View>
@@ -403,6 +512,18 @@ export default function GameScreen() {
       </Modal>
     </View>
   );
+
+  function buildFortHandler() {
+    return () => {
+      if (!selectedCell) return;
+      setState((prev) => {
+        const c = prev.cells.find((x) => x.id === selectedCell.id)!;
+        startFort(prev, c, PLAYER);
+        return bump(prev);
+      });
+      setSelected(null);
+    };
+  }
 }
 
 /** 전투 연출 — 개입 없이 라운드별 전개를 보여준다 */
@@ -416,11 +537,7 @@ function CombatModal({
   if (!result) return null;
   const win = result.outcome === 'attacker-win';
   const headline =
-    result.outcome === 'stalemate'
-      ? '교착 — 밀어내지 못했다'
-      : win
-      ? '승리'
-      : '패배 — 물러났다';
+    result.outcome === 'stalemate' ? '교착 — 밀어내지 못했다' : win ? '승리' : '패배 — 물러났다';
 
   return (
     <Modal visible transparent animationType="fade">
@@ -463,18 +580,39 @@ function CombatModal({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#141414' },
-  header: { paddingTop: 44, paddingHorizontal: 16, paddingBottom: 10, backgroundColor: '#1f1f1f' },
-  title: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  gold: { color: '#fbbf24', fontSize: 15, fontWeight: 'bold', marginTop: 2 },
-  sub: { color: '#8b8b8b', fontSize: 11, marginTop: 3 },
-  plus: { color: '#34d399', fontSize: 13 },
-  minus: { color: '#f87171', fontSize: 13 },
-  repRow: { flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingVertical: 8 },
-  repItem: { flex: 1 },
-  repLabel: { color: '#cbd5e1', fontSize: 11, marginBottom: 3 },
-  bar: { height: 6, backgroundColor: 'rgba(255,255,255,0.12)', borderRadius: 3, overflow: 'hidden' },
-  fill: { height: '100%' },
-  gridWrap: { flex: 1, paddingHorizontal: 8 },
+  header: { paddingTop: 40, paddingHorizontal: 14, paddingBottom: 6, backgroundColor: '#1f1f1f' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  title: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
+  turnChip: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999 },
+  turnChipText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  gold: { color: '#fbbf24', fontSize: 14, fontWeight: 'bold', marginTop: 3 },
+  plus: { color: '#34d399' },
+  minus: { color: '#f87171' },
+
+  watchBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
+  chipOn: { backgroundColor: '#3b82f6' },
+  chipOff: { backgroundColor: '#374151' },
+  chipText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+
+  table: { marginHorizontal: 12, backgroundColor: '#1a1a1a', borderRadius: 8, paddingVertical: 4 },
+  trHead: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 3 },
+  tr: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
+  trActive: { backgroundColor: 'rgba(251,191,36,0.13)' },
+  th: { flex: 1, color: '#6b7280', fontSize: 10, textAlign: 'right' },
+  td: { flex: 1, color: '#e5e7eb', fontSize: 11, textAlign: 'right' },
+  colName: { flex: 2.2, textAlign: 'left' },
+  nameCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  dead: { color: '#6b7280', textDecorationLine: 'line-through' },
+
+  gridWrap: { flex: 1, paddingHorizontal: 6, marginTop: 6 },
   hex: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   hexInner: {
     position: 'absolute',
@@ -483,32 +621,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  icon: { position: 'absolute', top: 4, right: 4, fontSize: 13 },
-  merchant: { position: 'absolute', bottom: 4, left: 4, fontSize: 13 },
-  units: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
+  icon: { position: 'absolute', top: 3, right: 3, fontSize: 11 },
+  merchant: { position: 'absolute', bottom: 3, left: 3, fontSize: 11 },
+  units: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  shaken: { position: 'absolute', bottom: 2, right: 5, color: '#fca5a5', fontSize: 9 },
+  encircled: { position: 'absolute', top: 3, left: 4, color: '#fde68a', fontSize: 10 },
+
+  feed: { paddingHorizontal: 14, paddingVertical: 4, minHeight: 46 },
+  feedLine: { color: '#9ca3af', fontSize: 11, lineHeight: 15 },
+
   panel: { backgroundColor: '#1f1f1f', marginHorizontal: 12, borderRadius: 8, padding: 10 },
   panelTitle: { color: '#e5e7eb', fontSize: 12, marginBottom: 6 },
   hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic' },
-  footer: { backgroundColor: '#1f1f1f', padding: 12, gap: 8 },
-  row: { flexDirection: 'row', gap: 8 },
-  btn: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 14 },
+
+  footer: { backgroundColor: '#1f1f1f', padding: 10, gap: 6 },
+  row: { flexDirection: 'row', gap: 6 },
+  btn: { flex: 1, paddingVertical: 11, borderRadius: 8, alignItems: 'center' },
+  btnDim: { opacity: 0.4 },
+  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   endBtn: { backgroundColor: '#3b82f6' },
   resetBtn: { backgroundColor: '#ef4444' },
   recruitBtn: { backgroundColor: '#059669' },
-  logBtn: { backgroundColor: '#4b5563' },
   fortBtn: { backgroundColor: '#a16207' },
-  standings: { color: '#9ca3af', fontSize: 11, textAlign: 'center' },
+  toggle: { color: '#6b7280', fontSize: 11, textAlign: 'center' },
+
   banner: {
     position: 'absolute',
-    top: '45%',
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(0,0,0,0.85)',
+    top: '42%',
+    left: 24,
+    right: 24,
+    backgroundColor: 'rgba(0,0,0,0.88)',
     padding: 20,
     borderRadius: 12,
   },
   bannerText: { color: '#fbbf24', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
+  bannerSub: { color: '#9ca3af', fontSize: 13, textAlign: 'center', marginTop: 4 },
+
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.75)',
@@ -522,13 +670,7 @@ const styles = StyleSheet.create({
   roundNo: { color: '#fbbf24', fontSize: 12, width: 34, fontWeight: 'bold' },
   roundBody: { color: '#d1d5db', fontSize: 12, flex: 1 },
   summary: { color: '#9ca3af', fontSize: 12, marginVertical: 10 },
-  destRow: {
-    backgroundColor: '#141414',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
+  destRow: { backgroundColor: '#141414', borderRadius: 8, padding: 12, marginBottom: 8 },
   destName: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
   destInfo: { color: '#9ca3af', fontSize: 12, marginTop: 4 },
-  logLine: { color: '#d1d5db', fontSize: 12, marginBottom: 4 },
 });
