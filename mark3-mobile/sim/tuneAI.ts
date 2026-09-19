@@ -13,7 +13,7 @@
 
 import { makeRng, RNG } from '../src/services/combatSystem';
 import { playGame } from './gameSim';
-import { AIWeights, BASE_WEIGHTS, PERSONALITIES } from './ai';
+import { AIWeights, BASE_WEIGHTS, PERSONALITIES } from '../src/engine/ai';
 
 /** 각 가중치의 탐색 범위 */
 const BOUNDS: Record<keyof AIWeights, [number, number]> = {

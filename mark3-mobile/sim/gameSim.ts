@@ -1,40 +1,35 @@
 // 전체 게임 시뮬레이터 — 모든 나라를 AI가 둔다
 //
-//   npm run sim:game              5개국 기본 시뮬레이션
+//   npm run sim:game                    5개국 기본 시뮬레이션
 //   npm run sim:game -- --games 200 --nations 5 --size 11
 //   npm run sim:game -- --tournament
+//   npm run sim:game -- --trace         한 판을 추적
 //
-// 목적은 두 가지다.
-//  1. 새 전투 모델이 '전체 게임' 수준에서도 말이 되는지 — 한 번 이긴 쪽이
-//     그대로 굳어버리지 않는지, 게임이 언제 끝나는지.
-//  2. 어떤 전략이 이기는지 — 전투 승률이 높은 나라와 게임을 이기는 나라가
-//     같은지 다른지. 사용자가 지적한 바로 그 질문이다.
+// 화면과 같은 엔진(src/engine)을 쓴다. 규칙이 한 군데에만 있어야
+// 밸런스를 고칠 때 양쪽에 같이 반영된다.
 
 import { makeRng, RNG } from '../src/services/combatSystem';
 import {
-  createSimState,
-  SimState,
+  createGameState,
+  GameState,
   DEFAULT_ECONOMY,
   EconomyConfig,
-  applyUpkeep,
+  beginTurn,
   restUnmoved,
-  progressForts,
-  recomputeEncirclement,
   updateAliveFlags,
   nationStats,
-} from './engine';
-import { takeAITurn, AIWeights, PERSONALITIES } from './ai';
+  stepMerchants,
+  stepNeutrals,
+} from '../src/engine';
+import { takeAITurn, AIWeights, PERSONALITIES } from '../src/engine/ai';
 
 export interface GameResult {
-  winner: number | null; // null = 턴 제한 무승부
+  winner: number | null;
   turns: number;
-  /** 나라별 최종 지표 */
   finalCells: number[];
   finalUnits: number[];
-  /** 나라별 전투 통계 */
   attacksMade: number[];
   attacksWon: number[];
-  /** 열세(전력비<1)로 시도한 공격과 그중 성공 */
   underdogAttacks: number[];
   underdogWins: number[];
 }
@@ -48,54 +43,52 @@ export function playGame(
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): GameResult {
   const n = weightsPerNation.length;
-  const state: SimState = createSimState(n, rows, cols, rng, eco);
+  const state = createGameState(n, rows, cols, rng, eco);
+  for (const nat of state.nations) nat.isHuman = false;
 
   const attacksMade = new Array(n).fill(0);
   const attacksWon = new Array(n).fill(0);
   const underdogAttacks = new Array(n).fill(0);
   const underdogWins = new Array(n).fill(0);
 
-  let turn = 0;
-  while (turn < maxTurns) {
-    turn++;
-    state.turn = turn;
+  const snapshot = (turns: number, winner: number | null): GameResult => ({
+    winner,
+    turns,
+    finalCells: state.nations.map((x) => nationStats(state, x.id).cells),
+    finalUnits: state.nations.map((x) => nationStats(state, x.id).units),
+    attacksMade,
+    attacksWon,
+    underdogAttacks,
+    underdogWins,
+  });
 
+  for (let turn = 1; turn <= maxTurns; turn++) {
+    state.turn = turn;
     for (let id = 0; id < n; id++) {
       if (!state.nations[id].alive) continue;
+      state.current = id;
 
-      applyUpkeep(state, id, eco);
-      recomputeEncirclement(state);
-      const log = takeAITurn(state, id, weightsPerNation[id], eco, rng);
+      beginTurn(state, id, rng, eco);
+      const log = takeAITurn(state, id, weightsPerNation[id], rng, eco);
       restUnmoved(state, id, log.moved);
-      progressForts(state, id);
 
       for (const a of log.attacks) {
-        attacksMade[a.attacker]++;
-        if (a.outcome === 'attacker-win') attacksWon[a.attacker]++;
+        attacksMade[id]++;
+        if (a.result.outcome === 'attacker-win') attacksWon[id]++;
         if (a.powerRatio < 1) {
-          underdogAttacks[a.attacker]++;
-          if (a.outcome === 'attacker-win') underdogWins[a.attacker]++;
+          underdogAttacks[id]++;
+          if (a.result.outcome === 'attacker-win') underdogWins[id]++;
         }
       }
 
+      stepMerchants(state, eco);
+      stepNeutrals(state, rng);
       updateAliveFlags(state);
-      const alive = state.nations.filter((x) => x.alive);
-      if (alive.length <= 1) {
-        return {
-          winner: alive.length === 1 ? alive[0].id : null,
-          turns: turn,
-          finalCells: state.nations.map((x) => nationStats(state, x.id).cells),
-          finalUnits: state.nations.map((x) => nationStats(state, x.id).units),
-          attacksMade,
-          attacksWon,
-          underdogAttacks,
-          underdogWins,
-        };
-      }
+      if (state.winner !== null) return snapshot(turn, state.winner);
     }
   }
 
-  // 턴 제한 도달 — 영토가 가장 넓은 나라를 승자로 본다
+  // 턴 제한 — 영토가 가장 넓은 나라를 승자로 본다
   let best = -1;
   let bestCells = -1;
   for (const nat of state.nations) {
@@ -106,17 +99,7 @@ export function playGame(
       best = nat.id;
     }
   }
-
-  return {
-    winner: best >= 0 ? best : null,
-    turns: turn,
-    finalCells: state.nations.map((x) => nationStats(state, x.id).cells),
-    finalUnits: state.nations.map((x) => nationStats(state, x.id).units),
-    attacksMade,
-    attacksWon,
-    underdogAttacks,
-    underdogWins,
-  };
+  return snapshot(maxTurns, best >= 0 ? best : null);
 }
 
 function parseArg(name: string, fallback: number): number {
@@ -185,16 +168,14 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
   );
 }
 
-/** 성격끼리 같은 조건에서 붙인다 — 자리 이점을 없애기 위해 배치를 회전시킨다 */
 function runTournament(games: number, size: number, seed: number) {
   const names = Object.keys(PERSONALITIES);
   const n = names.length;
   const rng = makeRng(seed);
   const wins = new Array(n).fill(0);
   const played = new Array(n).fill(0);
-
-  // 5개국 게임을 반복하되, 매 판 참가자와 자리를 회전시킨다
   const seats = 5;
+
   for (let g = 0; g < games; g++) {
     const roster: number[] = [];
     for (let s = 0; s < seats; s++) roster.push((g + s) % n);
@@ -218,19 +199,19 @@ function runTournament(games: number, size: number, seed: number) {
     );
   }
   console.log('─'.repeat(50));
-  console.log(`(5자리 게임이므로 무작위 기준선은 20%)`);
+  console.log('(5자리 게임이므로 무작위 기준선은 20%)');
 }
 
-/** 한 판을 추적하며 주기적으로 상태를 찍는다 — 왜 전쟁이 안 나는지 보려면 이게 필요하다 */
 function runTrace(size: number, seed: number, nations: number) {
   const names = Object.keys(PERSONALITIES).slice(0, nations);
   const weights = names.map((k) => PERSONALITIES[k]);
   const rng = makeRng(seed);
   const eco = DEFAULT_ECONOMY;
-  const state = createSimState(nations, size, size, rng, eco);
+  const state: GameState = createGameState(nations, size, size, rng, eco);
+  for (const nat of state.nations) nat.isHuman = false;
 
   console.log(`\n한 판 추적 — ${nations}개국 · ${size}x${size} (전체 ${size * size}칸)`);
-  console.log('턴'.padStart(5) + names.map((n) => `${n}(칸/병/금)`.padStart(20)).join(''));
+  console.log('턴'.padStart(4) + names.map((n) => n.padStart(26)).join(''));
 
   let attacks = 0;
   const movesSince = new Array(nations).fill(0);
@@ -240,21 +221,21 @@ function runTrace(size: number, seed: number, nations: number) {
     state.turn = turn;
     for (let id = 0; id < nations; id++) {
       if (!state.nations[id].alive) continue;
-      applyUpkeep(state, id, eco);
-      recomputeEncirclement(state);
-      const log = takeAITurn(state, id, weights[id], eco, rng);
+      state.current = id;
+      beginTurn(state, id, rng, eco);
+      const log = takeAITurn(state, id, weights[id], rng, eco);
       attacks += log.attacks.length;
       attacksSince[id] += log.attacks.length;
       movesSince[id] += log.moved.size;
       restUnmoved(state, id, log.moved);
-      progressForts(state, id);
+      stepMerchants(state, eco);
+      stepNeutrals(state, rng);
       updateAliveFlags(state);
     }
     if (turn % 25 === 0 || turn === 1) {
       const row = names
         .map((_, i) => {
           const s = nationStats(state, i);
-          // 스택 수와 최대 스택 — 병력이 잘게 흩어져 있는지 보려면 이게 필요하다
           let stacks = 0;
           let biggest = 0;
           for (const c of state.cells) {
@@ -271,13 +252,13 @@ function runTrace(size: number, seed: number, nations: number) {
         .join('');
       console.log(String(turn).padStart(4) + row);
     }
+    if (state.winner !== null) {
+      console.log(`\n${state.nations[state.winner].name} 승리 (${turn}턴)`);
+      break;
+    }
   }
   const claimed = state.cells.filter((c) => c.owner !== null).length;
-  console.log(
-    `\n총 공격 ${attacks}회 · 점유된 칸 ${claimed}/${size * size} · 중립 ${
-      size * size - claimed
-    }칸 남음`
-  );
+  console.log(`\n총 공격 ${attacks}회 · 점유된 칸 ${claimed}/${size * size}`);
 }
 
 function main() {
@@ -286,17 +267,12 @@ function main() {
   const size = parseArg('size', 11);
   const seed = parseArg('seed', 4242);
 
-  if (process.argv.includes('--trace')) {
-    runTrace(size, seed, nations);
-  } else if (process.argv.includes('--tournament')) {
-    runTournament(games, size, seed);
-  } else {
-    runBasic(games, nations, size, seed);
-  }
+  if (process.argv.includes('--trace')) runTrace(size, seed, nations);
+  else if (process.argv.includes('--tournament')) runTournament(games, size, seed);
+  else runBasic(games, nations, size, seed);
 }
 
-// 이 파일은 playGame 을 다른 시뮬레이터(tuneAI 등)에 export 한다.
-// 가드 없이 main() 을 부르면 import 하는 것만으로 시뮬레이션이 통째로 한 번 돈다.
+// playGame 을 tuneAI 가 import 한다. 가드가 없으면 import 만으로 시뮬레이션이 한 번 돈다.
 if (process.argv[1] && process.argv[1].includes('gameSim')) {
   main();
 }

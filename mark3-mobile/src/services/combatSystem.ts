@@ -10,8 +10,6 @@
 //
 // 이 파일은 React에 의존하지 않는 순수 로직이다. 헤드리스로 실행 가능해야 한다.
 
-import { Cell } from '../models/GameState';
-
 export type RNG = () => number;
 
 /** 시드 고정 난수 생성기 (mulberry32). 시뮬레이터 재현용. */
@@ -344,22 +342,8 @@ function moraleDrop(
   return Math.max(0, drop);
 }
 
-// ─────────────────────────────────────────────────────────────
-// 기존 호출부 호환 어댑터
-// ─────────────────────────────────────────────────────────────
-
-export interface CombatResult {
-  details: {
-    winner: 'attacker' | 'defender';
-    attackerSurvivors: number;
-    defenderSurvivors: number;
-  };
-  /** 새 엔진의 전체 결과. 전투 연출 화면에서 라운드별로 펼쳐 보여준다. */
-  detailed: DetailedCombatResult;
-}
-
 /** 지형별 방어 계수 */
-export function terrainDefense(terrain: Cell['terrain']): number {
+export function terrainDefense(terrain?: 'plain' | 'forest' | 'mountain' | 'water' | 'desert'): number {
   switch (terrain) {
     case 'forest':
       return 1.25;
@@ -370,92 +354,4 @@ export function terrainDefense(terrain: Cell['terrain']): number {
     default:
       return 1.0;
   }
-}
-
-/** 셀을 전투 입력으로 변환 */
-export function sideFromCell(
-  cell: Cell,
-  fear: number,
-  justice: number,
-  isDefender: boolean
-): CombatSide {
-  let def = 1;
-  if (isDefender) {
-    def = terrainDefense(cell.terrain);
-    const fs = cell.fortState;
-    if (cell.building === 'fort' && fs && typeof fs !== 'string' && fs.stage === 'complete') {
-      def *= 1.3;
-    }
-  }
-  return {
-    units: cell.unitCount,
-    morale: cell.morale ?? 100,
-    exhaustion: cell.exhaustion ?? 0,
-    driftPP: cell.drift?.deltaPP ?? 0,
-    fear,
-    justice,
-    defenseMultiplier: def,
-    encircled: cell.encircled === true,
-  };
-}
-
-export function simulateCombat(
-  attacker: Cell,
-  defender: Cell,
-  attackerFear: number,
-  attackerJustice: number,
-  defenderFear: number,
-  defenderJustice = 50,
-  rng: RNG = Math.random
-): CombatResult {
-  const detailed = resolveCombat(
-    sideFromCell(attacker, attackerFear, attackerJustice, false),
-    sideFromCell(defender, defenderFear, defenderJustice, true),
-    rng
-  );
-
-  // 교착은 "공격 실패"로 취급한다 — 공격자는 제자리에 남고 수비자가 칸을 지킨다.
-  const winner: 'attacker' | 'defender' =
-    detailed.outcome === 'attacker-win' ? 'attacker' : 'defender';
-
-  return {
-    details: {
-      winner,
-      attackerSurvivors: detailed.attackerSurvivors,
-      defenderSurvivors: detailed.defenderSurvivors,
-    },
-    detailed,
-  };
-}
-
-export function simulateRetreat(
-  defender: Cell,
-  retreatStreak: number
-): { survivors: number } {
-  const baseSurvivalRate = 0.7;
-  const streakPenalty = Math.min(0.3, retreatStreak * 0.1);
-  const survivalRate = Math.max(0.3, baseSurvivalRate - streakPenalty);
-
-  return {
-    survivors: Math.max(1, Math.floor(defender.unitCount * survivalRate)),
-  };
-}
-
-export function simulateSurrender(
-  troops: number,
-  attackerFear: number,
-  attackerJustice: number
-): { deaths: number; recruited: number; escaped: number } {
-  const fearPower = Math.pow(attackerFear / 100, 2);
-  const justicePower = Math.pow(attackerJustice / 100, 2);
-
-  const executionRate = fearPower * 0.5;
-  const deaths = Math.floor(troops * executionRate);
-
-  const recruitRate = justicePower * 0.7;
-  const recruited = Math.floor((troops - deaths) * recruitRate);
-
-  const escaped = troops - deaths - recruited;
-
-  return { deaths, recruited, escaped };
 }
