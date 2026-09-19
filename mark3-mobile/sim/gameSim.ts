@@ -20,6 +20,12 @@ import {
   nationStats,
   stepMerchants,
   stepNeutrals,
+  collectTribute,
+  updateLoyalty,
+  stepVoluntarySubmission,
+  checkBlocVictory,
+  influenceOf,
+  vassalsOf,
 } from '../src/engine';
 import { takeAITurn, AIWeights, PERSONALITIES } from '../src/engine/ai';
 
@@ -37,6 +43,9 @@ export interface GameResult {
   defendedHeld: number[];
   /** 게임 종료 시점에 살아 있었는지 */
   survived: boolean[];
+  /** 종료 시점에 거느린 속국 수 / 스스로 속국이 되었는지 */
+  vassalsHeld: number[];
+  becameVassal: boolean[];
 }
 
 export function playGame(
@@ -70,6 +79,8 @@ export function playGame(
     defended,
     defendedHeld,
     survived: state.nations.map((x) => x.alive),
+    vassalsHeld: state.nations.map((x) => vassalsOf(state, x.id).length),
+    becameVassal: state.nations.map((x) => x.suzerain !== null),
   });
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -97,19 +108,23 @@ export function playGame(
 
       stepMerchants(state, eco);
       stepNeutrals(state, rng);
+      collectTribute(state, eco);
+      updateLoyalty(state, eco);
+      stepVoluntarySubmission(state, rng, eco);
       updateAliveFlags(state);
+      checkBlocVictory(state);
       if (state.winner !== null) return snapshot(turn, state.winner);
     }
   }
 
-  // 턴 제한 — 영토가 가장 넓은 나라를 승자로 본다
+  // 턴 제한 — 영향력(직할 + 속국)이 가장 큰 나라를 승자로 본다
   let best = -1;
-  let bestCells = -1;
+  let bestInfluence = -1;
   for (const nat of state.nations) {
-    if (!nat.alive) continue;
-    const s = nationStats(state, nat.id);
-    if (s.cells > bestCells) {
-      bestCells = s.cells;
+    if (!nat.alive || nat.suzerain !== null) continue;
+    const inf = influenceOf(state, nat.id, eco);
+    if (inf > bestInfluence) {
+      bestInfluence = inf;
       best = nat.id;
     }
   }
@@ -141,6 +156,8 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
   const defMade = new Array(nations).fill(0);
   const defHeld = new Array(nations).fill(0);
   const survivals = new Array(nations).fill(0);
+  const vassalTurns = new Array(nations).fill(0);
+  const wasVassal = new Array(nations).fill(0);
 
   for (let g = 0; g < games; g++) {
     const r = playGame(weights, size, size, rng);
@@ -156,6 +173,8 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
       defMade[i] += r.defended[i];
       defHeld[i] += r.defendedHeld[i];
       if (r.survived[i]) survivals[i]++;
+      vassalTurns[i] += r.vassalsHeld[i];
+      if (r.becameVassal[i]) wasVassal[i]++;
     }
   }
 
@@ -168,7 +187,9 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
       '공격수'.padStart(9) +
       '방어수'.padStart(9) +
       '방어성공'.padStart(10) +
-      '생존율'.padStart(9)
+      '생존율'.padStart(9) +
+      '속국수'.padStart(9) +
+      '복속율'.padStart(9)
   );
   console.log('─'.repeat(78));
   for (let i = 0; i < nations; i++) {
@@ -179,7 +200,9 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
         (atkMade[i] / games).toFixed(1).padStart(9) +
         (defMade[i] / games).toFixed(1).padStart(9) +
         (defMade[i] ? pct(defHeld[i] / defMade[i]) : '-').padStart(10) +
-        pct(survivals[i] / games).padStart(9)
+        pct(survivals[i] / games).padStart(9) +
+        (vassalTurns[i] / games).toFixed(2).padStart(9) +
+        pct(wasVassal[i] / games).padStart(9)
     );
   }
   console.log('─'.repeat(78));

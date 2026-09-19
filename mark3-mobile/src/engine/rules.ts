@@ -150,6 +150,9 @@ export function createGameState(
       taxRate: preset.taxRate,
       alive: true,
       isHuman: i === 0,
+      suzerain: null,
+      loyalty: 100,
+      vassalOrigin: null,
     });
   }
 
@@ -871,6 +874,37 @@ export function advanceTurn(state: GameState): void {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * 마지막 본진을 빼앗겼을 때의 처분.
+ * annex     그 나라는 멸망하고 영토가 전부 정복자에게 넘어간다. 행정비가 가팔라진다.
+ * vassalize 본진을 돌려주고 속국으로 둔다. 영토는 그대로, 대신 조공을 받는다.
+ */
+export function resolveCastleLoss(
+  state: GameState,
+  loserId: number,
+  winnerId: number,
+  choice: 'annex' | 'vassalize',
+  castle: Cell
+): void {
+  const loser = state.nations[loserId];
+  const winner = state.nations[winnerId];
+  if (!loser || !winner) return;
+
+  if (choice === 'vassalize') {
+    // 왕좌는 돌려주되 신하로 삼는다
+    castle.owner = loserId;
+    castle.units = Math.max(1, Math.floor(castle.units * 0.4));
+    return;
+  }
+
+  for (const c of state.cells) {
+    if (c.owner === loserId) c.owner = winnerId;
+  }
+  state.merchants = state.merchants.filter((m) => m.nation !== loserId);
+  loser.alive = false;
+  pushLog(state, `이(가) 에 병합되었습니다`);
 }
 
 export { DEFAULT_ECONOMY };

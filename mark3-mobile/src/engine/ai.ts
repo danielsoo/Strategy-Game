@@ -31,7 +31,10 @@ import {
   expectedTradeProfit,
   sendMerchant,
   plunderValue,
+  computeLedger,
+  resolveCastleLoss,
 } from './rules';
+import { vassalize } from './vassals';
 
 export interface AIWeights {
   territory: number;
@@ -82,7 +85,19 @@ export const BASE_WEIGHTS: AIWeights = {
 export const PERSONALITIES: Record<string, AIWeights> = {
   균형: { ...BASE_WEIGHTS },
   공격형: { ...BASE_WEIGHTS, aggression: 1.6, advance: 2.2, homeDefense: 0.3, castleAssault: 18 },
-  수비형: { ...BASE_WEIGHTS, aggression: 0.5, homeDefense: 2.5, advance: 0.3, fort: 5, terrain: 1.2 },
+  // 수비형은 '아무것도 안 하기'가 아니라 '적당히 넓히고 요새로 굳히기'다.
+  // advance 0.3 / expansion 1.0 으로 두면 1~2칸만 붙들고 있다가 남의 속국이 된다.
+  수비형: {
+    ...BASE_WEIGHTS,
+    aggression: 0.5,
+    homeDefense: 1.8,
+    advance: 0.4,
+    fort: 6,
+    terrain: 1.2,
+    expansion: 1.5,
+    territory: 1.4,
+    targetArmy: 24,
+  },
   확장형: { ...BASE_WEIGHTS, expansion: 2.6, territory: 2.2, aggression: 0.8, advance: 0.7 },
   집중형: { ...BASE_WEIGHTS, massing: 2.5, aggression: 1.2, advance: 1.4, targetArmy: 26 },
   경제형: { ...BASE_WEIGHTS, aggression: 0.4, expansion: 1.6, targetArmy: 30, homeDefense: 1.6 },
@@ -277,6 +292,34 @@ export interface AITurnLog {
   moved: Set<string>;
 }
 
+/**
+ * 마지막 본진을 빼앗았을 때 병합할지 속국으로 둘지 고른다.
+ *
+ * 순전히 계산이다. 병합하면 그 땅의 수입이 들어오지만 내 행정비가 가팔라진다.
+ * 속국으로 두면 조공만 들어오고 행정비는 그 나라가 낸다.
+ * 이미 넓은 나라일수록 부리는 쪽이 이득이 된다 — 역사가 그랬듯이.
+ */
+export function chooseVassalOrAnnex(
+  state: GameState,
+  winnerId: number,
+  loserId: number,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): 'annex' | 'vassalize' {
+  const mine = computeLedger(state, winnerId, eco);
+  const theirs = computeLedger(state, loserId, eco);
+
+  // 병합: 상대 수입을 얻지만 행정비가 (내 칸 + 상대 칸)^지수 로 뛴다
+  const adminNow = Math.pow(mine.cells, eco.adminExponent) * eco.adminCostPerCell;
+  const adminAfter =
+    Math.pow(mine.cells + theirs.cells, eco.adminExponent) * eco.adminCostPerCell;
+  const annexGain = theirs.income - (adminAfter - adminNow);
+
+  // 속국: 상대 순수입의 일부가 조공으로 들어온다. 행정비는 없다.
+  const tributeGain = Math.max(0, theirs.net) * eco.tributeRateConquest;
+
+  return annexGain >= tributeGain ? 'annex' : 'vassalize';
+}
+
 export function takeAITurn(
   state: GameState,
   nationId: number,
@@ -354,7 +397,24 @@ export function takeAITurn(
     if (!best || best.kind === 'stay') continue;
 
     if (best.kind === 'attack') {
-      log.attacks.push(performAttack(state, c, best.target, rng));
+      const wasCastle = best.target.castle;
+      const victim = best.target.owner;
+      const out = performAttack(state, c, best.target, rng, eco);
+      log.attacks.push(out);
+
+      // 마지막 본진을 빼앗았다면 병합할지 속국으로 둘지 정한다
+      if (
+        wasCastle &&
+        out.capturedCell &&
+        victim !== null &&
+        victim !== nationId &&
+        state.nations[victim]?.alive &&
+        !state.cells.some((x) => x.castle && x.owner === victim)
+      ) {
+        const choice = chooseVassalOrAnnex(state, nationId, victim, eco);
+        resolveCastleLoss(state, victim, nationId, choice, best.target);
+        if (choice === 'vassalize') vassalize(state, nationId, victim, 'conquest');
+      }
     } else {
       moveStack(c, best.target);
     }

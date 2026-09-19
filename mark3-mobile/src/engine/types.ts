@@ -70,6 +70,16 @@ export interface Nation {
   taxRate: number;
   alive: boolean;
   isHuman: boolean;
+  /** 종주국. null 이면 독립국. */
+  suzerain: number | null;
+  /** 속국일 때의 충성도 0~100. 0 이 되면 독립 전쟁을 일으킨다. */
+  loyalty: number;
+  /**
+   * 속국이 된 경위.
+   * conquest  본진을 잃고 강제로 복속 — 조공은 많지만 충성이 잘 깎인다
+   * voluntary 위협에 시달리다 정의로운 나라에 보호를 청함 — 조공은 적지만 안정적
+   */
+  vassalOrigin: 'conquest' | 'voluntary' | null;
 }
 
 export interface GameState {
@@ -125,6 +135,22 @@ export interface EconomyConfig {
   plunderCastleShare: number;
   plunderFortShare: number;
   plunderCellShare: number;
+
+  /**
+   * 속국이 종주국에 바치는 순수입 비율.
+   * 속국의 땅에는 종주국이 행정비를 내지 않는다. 그래서 제국이 커지는 길이
+   * '직접 먹기'에서 '부리기'로 옮겨간다 — adminExponent 와 짝을 이루는 장치다.
+   */
+  tributeRateConquest: number;
+  tributeRateVoluntary: number;
+  /** 정복 속국의 충성도 자연 감소 (턴당) */
+  loyaltyDecayConquest: number;
+  /** 종주국이 압도적으로 강하면 붙는 충성 보정의 상한 */
+  loyaltyPowerBonus: number;
+  /** 승리 판정에서 속국 영토를 직할 영토의 몇 배로 치는가 */
+  vassalInfluenceWeight: number;
+  /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
+  voluntarySubmitChance: number;
 }
 
 // 균형의 핵심은 세 가지다.
@@ -150,6 +176,12 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   plunderCastleShare: 0.25,
   plunderFortShare: 0.1,
   plunderCellShare: 0.02,
+  tributeRateConquest: 0.4,
+  tributeRateVoluntary: 0.2,
+  loyaltyDecayConquest: 1.2,
+  loyaltyPowerBonus: 2.5,
+  vassalInfluenceWeight: 0.5,
+  voluntarySubmitChance: 0.12,
 };
 
 export const NATION_PRESETS: Array<{ name: string; color: string; taxRate: number }> = [

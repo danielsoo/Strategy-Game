@@ -27,8 +27,22 @@ import {
   sendMerchant,
   nationStats,
   pushLog,
+  collectTribute,
+  updateLoyalty,
+  stepVoluntarySubmission,
+  checkBlocVictory,
+  vassalsOf,
+  vassalize,
+  resolveCastleLoss,
+  influenceOf,
 } from '../engine';
-import { takeAITurn, PERSONALITIES, LEARNED_WEIGHTS, AIWeights } from '../engine/ai';
+import {
+  takeAITurn,
+  PERSONALITIES,
+  LEARNED_WEIGHTS,
+  AIWeights,
+  chooseVassalOrAnnex,
+} from '../engine/ai';
 
 const ROWS = 11;
 const COLS = 11;
@@ -88,7 +102,11 @@ function playOneNation(s: GameState, rng: RNG): void {
     }
     stepMerchants(s);
     stepNeutrals(s, rng);
+    collectTribute(s);
+    updateLoyalty(s);
+    stepVoluntarySubmission(s, rng);
     updateAliveFlags(s);
+    checkBlocVictory(s);
   }
 
   // 다음 살아있는 나라로. 한 바퀴 돌면 턴이 오른다.
@@ -118,6 +136,8 @@ export default function GameScreen() {
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
   const [showStats, setShowStats] = useState(true);
+  /** 마지막 본진을 빼앗았을 때의 처분 선택 */
+  const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
 
   const me = state.nations[PLAYER];
   const ledger = useMemo(() => computeLedger(state, PLAYER), [state]);
@@ -175,8 +195,22 @@ export default function GameScreen() {
       const from = prev.cells.find((c) => c.id === selectedCell.id)!;
       const to = prev.cells.find((c) => c.id === cell.id)!;
       if (isHostile(from, to)) {
+        const wasCastle = to.castle;
+        const victim = to.owner;
         const outcome = performAttack(prev, from, to, rng);
         setCombat(outcome.result);
+
+        // 마지막 본진을 빼앗았다면 처분을 플레이어가 고른다
+        if (
+          wasCastle &&
+          outcome.capturedCell &&
+          victim !== null &&
+          victim !== PLAYER &&
+          prev.nations[victim]?.alive &&
+          !prev.cells.some((x) => x.castle && x.owner === victim)
+        ) {
+          setConquest({ victim, castleId: to.id });
+        }
       } else if (to.units === 0 || (to.owner === PLAYER && !to.neutral)) {
         moveStack(from, to);
       }
@@ -192,7 +226,11 @@ export default function GameScreen() {
       restUnmoved(prev, PLAYER, new Set());
       stepMerchants(prev);
       stepNeutrals(prev, rng);
+      collectTribute(prev);
+      updateLoyalty(prev);
+      stepVoluntarySubmission(prev, rng);
       updateAliveFlags(prev);
+      checkBlocVictory(prev);
       prev.current = PLAYER;
       // 사람 차례를 마친 뒤 AI 들을 차례로 돌린다
       const n = prev.nations.length;
@@ -204,7 +242,11 @@ export default function GameScreen() {
           restUnmoved(prev, i, log.moved);
           stepMerchants(prev);
           stepNeutrals(prev, rng);
+          collectTribute(prev);
+          updateLoyalty(prev);
+          stepVoluntarySubmission(prev, rng);
           updateAliveFlags(prev);
+          checkBlocVictory(prev);
         }
       }
       prev.turn++;
@@ -349,12 +391,13 @@ export default function GameScreen() {
         <View style={styles.table}>
           <View style={styles.trHead}>
             <Text style={[styles.th, styles.colName]}>나라</Text>
+            <Text style={styles.th}>영향력</Text>
             <Text style={styles.th}>영토</Text>
             <Text style={styles.th}>병력</Text>
             <Text style={styles.th}>요새</Text>
             <Text style={styles.th}>골드</Text>
             <Text style={styles.th}>수지</Text>
-            <Text style={styles.th}>무역</Text>
+            <Text style={styles.th}>속국</Text>
           </View>
           {state.nations.map((n) => {
             const s = nationStats(state, n.id);
@@ -368,10 +411,14 @@ export default function GameScreen() {
                 <View style={[styles.colName, styles.nameCell]}>
                   <View style={[styles.dot, { backgroundColor: n.color }]} />
                   <Text style={[styles.td, !n.alive && styles.dead]} numberOfLines={1}>
+                    {n.suzerain !== null ? '└ ' : ''}
                     {n.name}
                     {!n.alive ? ' ×' : ''}
                   </Text>
                 </View>
+                <Text style={[styles.td, styles.influence]}>
+                  {n.suzerain === null ? influenceOf(state, n.id).toFixed(0) : '-'}
+                </Text>
                 <Text style={styles.td}>{s.cells}</Text>
                 <Text style={styles.td}>{s.units}</Text>
                 <Text style={styles.td}>{s.forts}</Text>
@@ -380,7 +427,13 @@ export default function GameScreen() {
                   {l.net >= 0 ? '+' : ''}
                   {l.net.toFixed(0)}
                 </Text>
-                <Text style={styles.td}>{traders}</Text>
+                <Text style={styles.td}>
+                  {n.suzerain !== null
+                    ? `└충${Math.round(n.loyalty)}`
+                    : vassalsOf(state, n.id).length > 0
+                    ? `${vassalsOf(state, n.id).length}국`
+                    : '-'}
+                </Text>
               </View>
             );
           })}
@@ -463,6 +516,67 @@ export default function GameScreen() {
       )}
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
+
+      {/* 본진 함락 — 병합할까 속국으로 둘까 */}
+      <Modal visible={!!conquest} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            {conquest && (
+              <>
+                <Text style={styles.modalTitle}>
+                  🏴 {state.nations[conquest.victim].name}의 본진 함락
+                </Text>
+                <Text style={styles.hint}>
+                  {(() => {
+                    const rec = chooseVassalOrAnnex(state, PLAYER, conquest.victim);
+                    const theirs = computeLedger(state, conquest.victim);
+                    return `상대 영토 ${theirs.cells}칸 · 순수입 ${theirs.net.toFixed(
+                      0
+                    )}/턴 — 계산상 유리한 쪽: ${rec === 'annex' ? '병합' : '속국화'}`;
+                  })()}
+                </Text>
+
+                <TouchableOpacity
+                  style={[styles.btn, styles.resetBtn, { marginTop: 12 }]}
+                  onPress={() => {
+                    setState((prev) => {
+                      const castle = prev.cells.find((c) => c.id === conquest.castleId)!;
+                      resolveCastleLoss(prev, conquest.victim, PLAYER, 'annex', castle);
+                      updateAliveFlags(prev);
+                      checkBlocVictory(prev);
+                      return bump(prev);
+                    });
+                    setConquest(null);
+                  }}
+                >
+                  <Text style={styles.btnText}>병합 — 땅을 전부 차지한다</Text>
+                </TouchableOpacity>
+                <Text style={styles.hint}>영토가 늘지만 행정비가 가팔라진다</Text>
+
+                <TouchableOpacity
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 10 }]}
+                  onPress={() => {
+                    setState((prev) => {
+                      const castle = prev.cells.find((c) => c.id === conquest.castleId)!;
+                      resolveCastleLoss(prev, conquest.victim, PLAYER, 'vassalize', castle);
+                      vassalize(prev, PLAYER, conquest.victim, 'conquest');
+                      updateAliveFlags(prev);
+                      checkBlocVictory(prev);
+                      return bump(prev);
+                    });
+                    setConquest(null);
+                  }}
+                >
+                  <Text style={styles.btnText}>속국으로 둔다 — 조공을 받는다</Text>
+                </TouchableOpacity>
+                <Text style={styles.hint}>
+                  행정비 없이 조공만 받는다. 대신 충성도가 떨어지면 반란을 일으킨다.
+                </Text>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={!!merchantPick} transparent animationType="slide">
         <View style={styles.overlay}>
@@ -611,6 +725,7 @@ const styles = StyleSheet.create({
   nameCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   dead: { color: '#6b7280', textDecorationLine: 'line-through' },
+  influence: { color: '#fbbf24', fontWeight: 'bold' },
 
   gridWrap: { flex: 1, paddingHorizontal: 6, marginTop: 6 },
   hex: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
