@@ -7,7 +7,7 @@
 // 더 나은 값을 찾으면 그걸로 갈아끼운다.
 
 import { hexDistance } from '../utils/hexGrid';
-import { RNG } from '../services/combatSystem';
+import { RNG, terrainDefense } from '../services/combatSystem';
 import {
   Cell,
   GameState,
@@ -292,6 +292,77 @@ type Action =
   | { kind: 'move'; score: number; target: Cell }
   | { kind: 'attack'; score: number; target: Cell };
 
+/**
+ * 부대의 태세.
+ *   press    수가 앞선다 — 적극적으로 들이댄다
+ *   hold     비슷하거나 원군이 오는 중 — 자리를 지키며 기다린다
+ *   withdraw 수가 크게 밀리고 도와줄 이가 없다 — 지연하며 뒤로 뺀다
+ *
+ * 이게 없으면 부대는 매 턴 점수가 가장 높은 행동을 그냥 실행한다.
+ * 기다린다는 개념도, 물러난다는 개념도 없어서 열세인 부대가 그대로 갈려나간다.
+ */
+type Posture = 'press' | 'even' | 'hold' | 'withdraw';
+
+interface Assessment {
+  posture: Posture;
+  /** 주변 적 전력 (거리로 감쇠) */
+  enemyNear: number;
+  /** 곧 닿을 수 있는 아군 전력 */
+  helpNear: number;
+  ratio: number;
+}
+
+function assessPosture(ctx: Ctx, c: Cell, myPower: number): Assessment {
+  let enemyNear = 0;
+  let helpNear = 0;
+
+  for (const x of ctx.state.cells) {
+    if (x.units <= 0 || x.id === c.id) continue;
+    const d = hexDistance(c.row, c.col, x.row, x.col);
+    if (d > 2) continue;
+    const hostile = x.neutral || x.owner !== ctx.me;
+    if (hostile) {
+      // 당장 맞붙을 적만 센다. 반경을 넓히고 완만하게 감쇠시키면 주변 적이
+      // 전부 합산되어 거의 언제나 열세로 판정되고, 모두가 눈치만 보다 게임이 멎는다.
+      enemyNear += cellPower(x, false) / (d * d);
+    } else if (x.owner === ctx.me && !x.neutral) {
+      helpNear += cellPower(x, false) / (1 + d);
+    }
+  }
+
+  if (enemyNear <= 0) return { posture: 'even', enemyNear, helpNear, ratio: 99 };
+
+  const ratio = myPower / enemyNear;
+  const ratioWithHelp = (myPower + helpNear) / enemyNear;
+
+  // 중립 구간이 있어야 한다. 애매한 상황까지 '대기'로 묶으면 아무도 안 싸운다.
+  //
+  // 문턱은 성격을 따른다. 태세를 모두에게 똑같이 적용하면 aggression 가중치를
+  // 덮어써서 공격형조차 눈치를 보게 된다. 대담한 나라는 더 낮은 전력비에서도
+  // 밀어붙이고, 신중한 나라는 더 확실할 때만 움직인다.
+  const boldness = Math.max(0.4, ctx.w.aggression);
+  const pressAt = 1.15 / boldness;
+  const withdrawAt = 0.6 / boldness;
+
+  let posture: Posture;
+  if (ratio >= pressAt) posture = 'press';
+  else if (ratio <= withdrawAt) posture = ratioWithHelp >= 1.0 ? 'hold' : 'withdraw';
+  else posture = 'even';
+
+  return { posture, enemyNear, helpNear, ratio };
+}
+
+/** 이 칸이 후퇴지로 얼마나 좋은가 — 적에게서 멀고, 방어가 되고, 본거지에 가까울수록 */
+function retreatValue(ctx: Ctx, n: Cell): number {
+  let pressure = 0;
+  for (const x of neighbors(ctx.state, n)) {
+    if (x.units > 0 && (x.neutral || x.owner !== ctx.me)) pressure += cellPower(x, false);
+  }
+  const terrain = terrainDefense(n.terrain) + (n.fortStage === 4 ? 0.4 : 0) + (n.castle ? 0.3 : 0);
+  const homeward = 6 / (1 + minDist(n, ctx.hubs.length > 0 ? ctx.hubs : ctx.homes));
+  return terrain * 4 + homeward - pressure * 0.9;
+}
+
 function scoreActions(ctx: Ctx, c: Cell): Action[] {
   const w = ctx.w;
   const myPower = cellPower(c, false);
@@ -312,12 +383,24 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
   const holdingCritical = (c.castle || c.fortStage === 4) && enemyAdjacent > 0;
   const holdBonus = holdingCritical ? w.homeDefense * 12 + enemyAdjacent * 0.8 : 0;
 
+  // 전력비에 따라 태세를 정한다
+  const a = assessPosture(ctx, c, myPower);
+
+  // 원군을 기다릴 때는 좋은 자리에서 버티는 것 자체가 값어치가 있다.
+  // 물러날 때도 제자리에서 한 번 더 막아보는 선택지는 남겨둔다.
+  // 대기 보너스는 '정말로 밀릴 때'만. 애매할 때까지 주면 전원이 눌러앉는다.
+  const waitBonus =
+    a.posture === 'hold'
+      ? (terrainDefense(c.terrain) - 0.9) * 6 + Math.min(6, a.helpNear * 0.3)
+      : 0;
+
   actions.push({
     kind: 'stay',
     score:
       positionValue(ctx, c) -
-      idlePenalty +
+      (a.posture === 'withdraw' || a.posture === 'hold' ? idlePenalty * 0.4 : idlePenalty) +
       holdBonus +
+      waitBonus +
       (c.exhaustion > 50 ? w.units * c.units * 0.2 : 0),
   });
 
@@ -338,7 +421,20 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       // 비용은 '내 군대 전체'가 아니라 '예상 사상자'다.
       const cost = w.units * c.units * 0.35;
       const pAdj = Math.min(1, p * w.aggression);
-      actions.push({ kind: 'attack', score: pAdj * prize - (1 - pAdj) * cost, target: n });
+      // 수가 앞서면 적극적으로, 밀리면 소극적으로. 물러나는 중엔 웬만하면 안 친다.
+      const postureMul =
+        a.posture === 'press'
+          ? 1.35
+          : a.posture === 'even'
+          ? 1.0
+          : a.posture === 'hold'
+          ? 0.6
+          : 0.25;
+      actions.push({
+        kind: 'attack',
+        score: (pAdj * prize - (1 - pAdj) * cost) * postureMul,
+        target: n,
+      });
       continue;
     }
 
@@ -368,7 +464,18 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       const eff = cellEfficiency(n, ctx.hubs, ctx.eco);
       const fresh = n.owner !== ctx.me ? 1.5 : 0.2;
       const gain = w.expansion * w.territory * (2 * eff - 0.4) * fresh + positionValue(ctx, n);
-      actions.push({ kind: 'move', score: gain - riskAt(ctx, n, c.units, myPower), target: n });
+
+      if (a.posture === 'withdraw') {
+        // 지연하며 뒤로. 그냥 도망가는 게 아니라 막을 수 있는 자리로 물러난다.
+        // 적 압박이 적고, 지형이 받쳐주고, 본거지에 가까운 칸을 고른다.
+        actions.push({
+          kind: 'move',
+          score: retreatValue(ctx, n) * w.homeDefense * 1.6 + gain * 0.25,
+          target: n,
+        });
+      } else {
+        actions.push({ kind: 'move', score: gain - riskAt(ctx, n, c.units, myPower), target: n });
+      }
     }
   }
 
