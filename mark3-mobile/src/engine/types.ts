@@ -102,17 +102,36 @@ export interface EconomyConfig {
   adminRange: number;
   /** 칸 하나를 유지하는 데 드는 행정 비용. 먼 땅은 순손실이 되어야 한다. */
   adminCostPerCell: number;
+  /**
+   * 행정 비용이 영토 규모에 대해 가속하는 지수.
+   *
+   * 이 값 하나가 "확장이 지배 전략인가"를 거의 혼자 결정한다. 측정값:
+   *   1.00  확장형 92%  (선형이면 요새 몇 개로 상쇄되어 눈덩이가 멈추지 않는다)
+   *   1.30  확장형 58%
+   *   1.38  확장형 22% · 공격형 39% · 균형 35% · 경제형 18%   ← 현재
+   *   1.45  확장형  8%  (과교정 — 넓히면 무조건 손해가 된다)
+   */
+  adminExponent: number;
   /** 무역상이 목적지에서 받는 배수 (본진 / 요새) */
   merchantCastleMultiplier: number;
   merchantFortMultiplier: number;
   /** 무역상 1명이 들고 나가는 원금 */
   merchantStake: number;
+  /**
+   * 점령 시 상대 국고에서 빼앗는 비율.
+   * 부(富)가 손댈 수 없는 숫자로 남아 있으면 선두를 되돌리는 힘이 없다.
+   * 돈을 뺏을 수 있어야 "부유한 나라가 표적이 된다"가 성립한다.
+   */
+  plunderCastleShare: number;
+  plunderFortShare: number;
+  plunderCellShare: number;
 }
 
-// 균형의 핵심은 두 가지다.
+// 균형의 핵심은 세 가지다.
 //  1. 시작 국가가 흑자여야 한다. 본진 수입 < 초기 병력 유지비면 모두가 개전 전에
 //     파산해 병력이 이탈하고, 무방비가 된 본진을 먼저 확장한 나라가 주워간다.
-//  2. 대제국은 요새 없이는 적자여야 한다. 그래야 확장이 지배 전략이 되지 않는다.
+//  2. 제국은 커질수록 유지가 가팔라져야 한다 (adminExponent).
+//  3. 부는 뺏을 수 있어야 한다. 그래야 선두의 국고가 표적이 된다.
 export const DEFAULT_ECONOMY: EconomyConfig = {
   cellIncome: 2,
   castleIncome: 25,
@@ -124,9 +143,13 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   startingGold: 150,
   adminRange: 2.5,
   adminCostPerCell: 0.4,
+  adminExponent: 1.38,
   merchantCastleMultiplier: 2.0,
   merchantFortMultiplier: 1.5,
   merchantStake: 60,
+  plunderCastleShare: 0.25,
+  plunderFortShare: 0.1,
+  plunderCellShare: 0.02,
 };
 
 export const NATION_PRESETS: Array<{ name: string; color: string; taxRate: number }> = [

@@ -27,6 +27,7 @@ const BOUNDS: Record<keyof AIWeights, [number, number]> = {
   advance: [0, 3],
   expansion: [0, 4],
   terrain: [0, 2],
+  wealth: [0, 4],
   targetArmy: [8, 40],
 };
 

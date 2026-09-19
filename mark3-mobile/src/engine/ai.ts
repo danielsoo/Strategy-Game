@@ -30,6 +30,7 @@ import {
   merchantDestinations,
   expectedTradeProfit,
   sendMerchant,
+  plunderValue,
 } from './rules';
 
 export interface AIWeights {
@@ -44,8 +45,23 @@ export interface AIWeights {
   advance: number;
   expansion: number;
   terrain: number;
+  /**
+   * 상대의 부(富)를 표적 가치로 환산하는 정도.
+   * 이 값이 크면 AI 는 "가장 강한 나라"가 아니라 "가장 부유한 나라"를 노린다.
+   * 선두가 쌓은 국고가 곧 표적이 되므로, 눈덩이를 되돌리는 힘으로 작동한다.
+   */
+  wealth: number;
   /** 영토에 비례해 늘어나는 목표 병력의 기준값 */
   targetArmy: number;
+}
+
+/**
+ * 골드를 평가 점수로 옮긴다. 제곱근을 쓰는 이유는 국고가 수만 단위로 커져도
+ * 다른 항을 완전히 지워버리지 않게 하기 위해서다. 그래도 기본값에서는
+ * 영토·병력보다 앞선다 — 우선순위는 돈, 그다음이 국력이다.
+ */
+export function wealthValue(gold: number, w: AIWeights): number {
+  return w.wealth * Math.sqrt(Math.max(0, gold));
 }
 
 export const BASE_WEIGHTS: AIWeights = {
@@ -59,6 +75,7 @@ export const BASE_WEIGHTS: AIWeights = {
   advance: 1,
   expansion: 1,
   terrain: 0.5,
+  wealth: 1,
   targetArmy: 18,
 };
 
@@ -83,6 +100,7 @@ export const LEARNED_WEIGHTS: AIWeights = {
   advance: 0.47,
   expansion: 2.19,
   terrain: 0.52,
+  wealth: 1,
   targetArmy: 21.25,
 };
 
@@ -128,7 +146,10 @@ function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat'>): Cell | null {
   for (const h of ctx.enemyHomes) {
     const defense = localStrength(ctx.state, h, h.owner);
     const dist = minDist(h, ctx.homes);
-    const score = ctx.w.castleAssault / (1 + defense * 0.5) - dist * 0.6;
+    // 부유한 나라가 우선 표적이다. 국고를 쌓아둔 선두가 저절로 매를 번다.
+    const gold = h.owner !== null ? ctx.state.nations[h.owner].gold : 0;
+    const prize = ctx.w.castleAssault + wealthValue(gold, ctx.w);
+    const score = prize / (1 + defense * 0.5) - dist * 0.6;
     if (score > bestScore) {
       bestScore = score;
       best = h;
@@ -211,7 +232,10 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       const p = estimateWinProb(myPower, cellPower(n, true));
       // 적 병력을 없애는 것이 이기는 주된 방법이다. 이 항이 작으면
       // AI 가 평화롭게 빈 땅만 먹고 전쟁을 아예 하지 않는다.
+      // 약탈 기대액이 먼저다. 땅과 병력은 그다음.
+      const loot = plunderValue(ctx.state, n, ctx.eco);
       const prize =
+        wealthValue(loot, w) +
         w.territory +
         w.units * n.units * 1.4 +
         (n.castle ? w.castleAssault : 0) +

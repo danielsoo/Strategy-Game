@@ -227,7 +227,7 @@ export function computeLedger(
     else income += eco.cellIncome * cellEfficiency(c, hubs, eco);
   }
   const upkeep = units * eco.unitUpkeep;
-  const admin = cells * eco.adminCostPerCell;
+  const admin = Math.pow(cells, eco.adminExponent) * eco.adminCostPerCell;
   return { income, upkeep, admin, net: income - upkeep - admin, cells, units };
 }
 
@@ -238,7 +238,30 @@ export function applyUpkeep(
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): void {
   const n = state.nations[nationId];
-  const l = computeLedger(state, nationId, eco);
+  let l = computeLedger(state, nationId, eco);
+
+  // 적자라면 먼저 땅이 떨어져 나간다.
+  // 군대부터 해산시키면 영토만 남은 좀비 국가가 되어 게임이 끝나지 않는다.
+  // 관리 못 하는 변두리가 먼저 이탈해야 제국이 감당 가능한 크기로 줄어든다.
+  if (l.net < 0 && n.gold + l.net < 0) {
+    const hubs = adminHubs(state, nationId);
+    const sheddable = state.cells
+      .filter((c) => c.owner === nationId && !c.castle && c.fortStage === 0 && c.units === 0)
+      .sort((a, b) => cellEfficiency(a, hubs, eco) - cellEfficiency(b, hubs, eco));
+
+    let shed = 0;
+    for (const c of sheddable) {
+      if (l.net >= 0) break;
+      c.owner = null;
+      c.hasRoad = false;
+      shed++;
+      l = computeLedger(state, nationId, eco);
+    }
+    if (shed > 0) {
+      pushLog(state, `${n.name}: 유지하지 못한 변두리 ${shed}칸이 이탈했습니다`);
+    }
+  }
+
   n.gold += l.net;
 
   if (n.gold < 0) {
@@ -355,11 +378,29 @@ export interface AttackOutcome {
   toId: string;
 }
 
+/** 이 칸을 빼앗았을 때 상대 국고에서 가져오는 액수 */
+export function plunderValue(
+  state: GameState,
+  target: Cell,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): number {
+  if (target.owner === null) return 0;
+  const victim = state.nations[target.owner];
+  if (!victim) return 0;
+  const share = target.castle
+    ? eco.plunderCastleShare
+    : target.fortStage === 4
+    ? eco.plunderFortShare
+    : eco.plunderCellShare;
+  return Math.max(0, Math.floor(victim.gold * share));
+}
+
 export function performAttack(
   state: GameState,
   from: Cell,
   to: Cell,
-  rng: RNG
+  rng: RNG,
+  eco: EconomyConfig = DEFAULT_ECONOMY
 ): AttackOutcome {
   const powerRatio = cellPower(from, false) / Math.max(0.001, cellPower(to, true));
   const res = resolveCombat(sideOf(state, from, false), sideOf(state, to, true), rng);
@@ -373,6 +414,19 @@ export function performAttack(
 
   if (res.outcome === 'attacker-win') {
     captured = true;
+
+    // 약탈 — 전쟁이 돈이 되어야 부유한 나라가 표적이 된다.
+    // 약탈은 공포를 키우고 정의를 깎는다.
+    const loot = plunderValue(state, to, eco);
+    if (loot > 0 && to.owner !== null && from.owner !== null) {
+      const victim = state.nations[to.owner];
+      const raider = state.nations[from.owner];
+      victim.gold = Math.max(0, victim.gold - loot);
+      raider.gold += loot;
+      raider.fear = clamp(raider.fear + 2, 0, 100);
+      raider.justice = clamp(raider.justice - 1, 0, 100);
+      pushLog(state, `${raider.name}: ${victim.name}에게서 ${loot}G를 약탈했습니다`);
+    }
     // 수비측 생존자는 인접 빈 칸으로 후퇴, 없으면 흩어진다
     const refuge = neighbors(state, to).find((n) => n.units === 0 && !n.castle);
     if (res.defenderSurvivors > 0 && refuge) {
@@ -547,8 +601,12 @@ export function stepNeutrals(state: GameState, rng: RNG): void {
     if (best) moveStack(b, best);
   }
 
-  // 무역상이 돌아다니면 이따금 강도가 나타난다
-  if (state.merchants.length > 0 && rng() < 0.08) {
+  // 무역상이 돌아다니면 이따금 강도가 나타난다.
+  // 판에 도는 돈이 많을수록 자주 나타난다 — 부는 그 자체로 위험을 부른다.
+  let richest = 0;
+  for (const n of state.nations) if (n.alive && n.gold > richest) richest = n.gold;
+  const banditChance = 0.08 + Math.min(0.14, richest / 20000);
+  if (state.merchants.length > 0 && rng() < banditChance) {
     const m = state.merchants[Math.floor(rng() * state.merchants.length)];
     const spot = state.cells.find(
       (c) =>
