@@ -179,7 +179,8 @@ function findDistress(
     if (shortfall <= 0) continue; // 혼자 감당되면 부르지 않는다
     // 본진과 요새는 잃으면 타격이 크므로 더 크게 부른다
     const weight = c.castle ? 2.5 : c.fortStage === 4 ? 1.8 : 1;
-    out.push({ cell: c, severity: shortfall * weight });
+    // 위급함 = 모자란 전력 + 거기서 잃게 될 병력. 둘 다 걸려 있다.
+    out.push({ cell: c, severity: (shortfall + c.units) * weight });
   }
   return out;
 }
@@ -261,11 +262,15 @@ function positionValue(ctx: Ctx, c: Cell): number {
   v += w.advance * Math.max(0, 14 - dist) * 1.0;
 
   // 압박받는 아군 쪽으로 끌린다. 가까울수록 세게 당긴다.
+  //
+  // 크기가 중요하다. 전진 항은 거리 1에서 advance×13 (기본값 기준 약 18)에
+  // 달하는데, 지원 항이 한 자릿수면 사실상 무시되어 부대들이 끝까지
+  // 따로 논다. 위급한 아군 옆에 있을 때는 원정보다 우선해야 한다.
   for (const d of ctx.distress) {
     if (d.cell.id === c.id) continue;
     const dd = hexDistance(c.row, c.col, d.cell.row, d.cell.col);
     if (dd > 5) continue; // 너무 멀면 가봐야 늦는다
-    v += w.support * (d.severity / (1 + dd * dd * 0.6));
+    v += w.support * (d.severity * 2.5) / (1 + dd * 1.3);
   }
   return v;
 }
@@ -338,9 +343,20 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
     }
 
     if (n.units > 0 && n.owner === ctx.me && !n.neutral) {
+      // 합류 가치는 병력 수에만 비례하면 안 된다. 그러면 1~2명짜리 부대가
+      // 합칠 이유를 못 찾아 자잘하게 흩어진 채로 각자 싸우다 각개격파당한다.
+      // 주변 적 앞에서 내가 약할수록 뭉쳐야 한다.
+      const weakness = enemyAdjacent / Math.max(1, myPower);
+      const urge = 1 + Math.min(2.5, weakness * 1.5);
+      const merged = c.units + n.units;
       actions.push({
         kind: 'move',
-        score: w.massing * Math.min(c.units, n.units) + positionValue(ctx, n) - w.territory,
+        score:
+          w.massing * Math.min(c.units, n.units) * urge +
+          // 합쳐서 의미 있는 덩어리가 되는지도 본다
+          w.massing * Math.min(6, merged) * 0.8 +
+          positionValue(ctx, n) -
+          w.territory,
         target: n,
       });
       continue;

@@ -199,16 +199,40 @@ export function stepVoluntarySubmission(
  * 살아있는 모든 나라가 한 진영(우두머리와 그 속국들)에 속하면 그 우두머리의 승리다.
  * 전멸시킬 필요가 없다 — 부려도 이긴다.
  */
-export function checkBlocVictory(state: GameState): void {
+export function checkBlocVictory(
+  state: GameState,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): void {
+  if (state.winner !== null) return;
   const alive = state.nations.filter((n) => n.alive);
   if (alive.length === 0) return;
+
+  // 모두가 한 진영이면 패권 승리
   const leaders = new Set(alive.map((n) => blocLeader(state, n.id)));
   if (leaders.size === 1) {
     const [leader] = [...leaders];
-    if (state.winner === null) {
-      state.winner = leader;
-      pushLog(state, `${state.nations[leader].name}이(가) 패권을 잡았습니다`);
-    }
+    state.winner = leader;
+    pushLog(state, `${state.nations[leader].name}이(가) 패권을 잡았습니다`);
+    return;
+  }
+
+  // 압도적 우위 승리.
+  //
+  // 부대가 뭉치고 서로 도우면서 잘 죽지 않게 되자 게임의 절반이 턴 제한에
+  // 걸렸다. 끝까지 다 잡아먹어야만 이기는 구조면 후반이 늘어진다.
+  // 지도의 절반 가까이를 쥐고 2위를 두 배 이상 앞서면 승부는 난 것이다.
+  const total = state.rows * state.cols;
+  const scores = [...leaders]
+    .map((id) => ({ id, inf: influenceOf(state, id, eco) }))
+    .sort((a, b) => b.inf - a.inf);
+  const top = scores[0];
+  const second = scores[1];
+  if (top && top.inf >= total * 0.55 && (!second || top.inf >= second.inf * 2.5)) {
+    state.winner = top.id;
+    pushLog(
+      state,
+      `${state.nations[top.id].name}이(가) 압도적 우위로 승리했습니다 (영향력 ${top.inf.toFixed(0)})`
+    );
   }
 }
 
