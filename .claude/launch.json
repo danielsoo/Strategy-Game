@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mark3-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "mark3-mobile", "run", "web"],
+      "port": 19006
+    }
+  ]
+}

@@ -31,3 +31,12 @@ Carthage/Build/
 
 # macOS에서 생성되는 숨김 파일
 .DS_Store
+
+# ─ Expo ────────────────────────────────────────────────
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# ─ Claude Code ─────────────────────────────────────────
+.claude/settings.local.json
