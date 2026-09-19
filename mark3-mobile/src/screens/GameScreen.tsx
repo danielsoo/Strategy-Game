@@ -601,7 +601,7 @@ export default function GameScreen() {
           />
         </Svg>
         <View style={styles.hexContent}>
-          {buildingIcon && <Text style={styles.buildingIcon}>{buildingIcon}</Text>}
+          {buildingIcon !== '' && <Text style={styles.buildingIcon}>{buildingIcon}</Text>}
           {cell.unitCount > 0 && (
             <Text style={styles.cellText}>{cell.unitCount}</Text>
           )}
