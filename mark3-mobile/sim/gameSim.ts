@@ -32,6 +32,11 @@ export interface GameResult {
   attacksWon: number[];
   underdogAttacks: number[];
   underdogWins: number[];
+  /** 받은 공격과 그중 막아낸 횟수 */
+  defended: number[];
+  defendedHeld: number[];
+  /** 게임 종료 시점에 살아 있었는지 */
+  survived: boolean[];
 }
 
 export function playGame(
@@ -50,6 +55,8 @@ export function playGame(
   const attacksWon = new Array(n).fill(0);
   const underdogAttacks = new Array(n).fill(0);
   const underdogWins = new Array(n).fill(0);
+  const defended = new Array(n).fill(0);
+  const defendedHeld = new Array(n).fill(0);
 
   const snapshot = (turns: number, winner: number | null): GameResult => ({
     winner,
@@ -60,6 +67,9 @@ export function playGame(
     attacksWon,
     underdogAttacks,
     underdogWins,
+    defended,
+    defendedHeld,
+    survived: state.nations.map((x) => x.alive),
   });
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -78,6 +88,10 @@ export function playGame(
         if (a.powerRatio < 1) {
           underdogAttacks[id]++;
           if (a.result.outcome === 'attacker-win') underdogWins[id]++;
+        }
+        if (a.defenderNation !== null) {
+          defended[a.defenderNation]++;
+          if (a.result.outcome !== 'attacker-win') defendedHeld[a.defenderNation]++;
         }
       }
 
@@ -124,6 +138,9 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
   const atkWon = new Array(nations).fill(0);
   const udMade = new Array(nations).fill(0);
   const udWon = new Array(nations).fill(0);
+  const defMade = new Array(nations).fill(0);
+  const defHeld = new Array(nations).fill(0);
+  const survivals = new Array(nations).fill(0);
 
   for (let g = 0; g < games; g++) {
     const r = playGame(weights, size, size, rng);
@@ -136,6 +153,9 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
       atkWon[i] += r.attacksWon[i];
       udMade[i] += r.underdogAttacks[i];
       udWon[i] += r.underdogWins[i];
+      defMade[i] += r.defended[i];
+      defHeld[i] += r.defendedHeld[i];
+      if (r.survived[i]) survivals[i]++;
     }
   }
 
@@ -146,8 +166,9 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
       '게임승률'.padStart(10) +
       '전투승률'.padStart(10) +
       '공격수'.padStart(9) +
-      '열세공격'.padStart(10) +
-      '열세성공'.padStart(10)
+      '방어수'.padStart(9) +
+      '방어성공'.padStart(10) +
+      '생존율'.padStart(9)
   );
   console.log('─'.repeat(78));
   for (let i = 0; i < nations; i++) {
@@ -156,8 +177,9 @@ function runBasic(games: number, nations: number, size: number, seed: number) {
         pct(wins[i] / games).padStart(10) +
         (atkMade[i] ? pct(atkWon[i] / atkMade[i]) : '-').padStart(10) +
         (atkMade[i] / games).toFixed(1).padStart(9) +
-        (udMade[i] / games).toFixed(1).padStart(10) +
-        (udMade[i] ? pct(udWon[i] / udMade[i]) : '-').padStart(10)
+        (defMade[i] / games).toFixed(1).padStart(9) +
+        (defMade[i] ? pct(defHeld[i] / defMade[i]) : '-').padStart(10) +
+        pct(survivals[i] / games).padStart(9)
     );
   }
   console.log('─'.repeat(78));

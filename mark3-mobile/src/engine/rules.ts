@@ -371,6 +371,9 @@ function clearStack(c: Cell): void {
 
 export interface AttackOutcome {
   result: DetailedCombatResult;
+  /** 공격국 / 피격국. 방어 성적을 집계하려면 필요하다. */
+  attackerNation: number | null;
+  defenderNation: number | null;
   /** 공격 시점 전력비. 1 미만이면 열세의 공격. */
   powerRatio: number;
   capturedCell: boolean;
@@ -402,6 +405,8 @@ export function performAttack(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): AttackOutcome {
+  const attackerNationId = from.neutral ? null : from.owner;
+  const defenderNationId = to.neutral ? null : to.owner;
   const powerRatio = cellPower(from, false) / Math.max(0.001, cellPower(to, true));
   const res = resolveCombat(sideOf(state, from, false), sideOf(state, to, true), rng);
 
@@ -469,7 +474,15 @@ export function performAttack(
     }
   }
 
-  return { result: res, powerRatio, capturedCell: captured, fromId: from.id, toId: to.id };
+  return {
+    result: res,
+    attackerNation: attackerNationId,
+    defenderNation: defenderNationId,
+    powerRatio,
+    capturedCell: captured,
+    fromId: from.id,
+    toId: to.id,
+  };
 }
 
 export function moveStack(from: Cell, to: Cell): void {
