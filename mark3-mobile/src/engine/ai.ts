@@ -35,6 +35,7 @@ import {
   resolveCastleLoss,
 } from './rules';
 import { vassalize } from './vassals';
+import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 
 export interface AIWeights {
   territory: number;
@@ -60,6 +61,12 @@ export interface AIWeights {
    * 모른 척한다. 실제 전쟁은 얻어맞는 곳으로 병력이 몰린다.
    */
   support: number;
+  /**
+   * 미탐색 지역을 밝히려는 성향.
+   * 안개 속에서는 모르는 곳이 곧 위험이자 기회다. 정찰하지 않으면 적이
+   * 어디에 얼마나 있는지도 모른 채 둬야 한다.
+   */
+  explore: number;
   /** 영토에 비례해 늘어나는 목표 병력의 기준값 */
   targetArmy: number;
 }
@@ -86,6 +93,7 @@ export const BASE_WEIGHTS: AIWeights = {
   terrain: 0.5,
   wealth: 1,
   support: 1,
+  explore: 1,
   targetArmy: 18,
 };
 
@@ -136,6 +144,7 @@ export const LEARNED_WEIGHTS: AIWeights = {
   terrain: 0.78,
   wealth: 1.22,
   support: 0.38,
+  explore: 1,
   targetArmy: 19.96,
 };
 
@@ -208,12 +217,21 @@ function localStrength(state: GameState, center: Cell, owner: number | null): nu
   return total;
 }
 
-/** 적 본진 중 '약하고 가까운' 곳을 이번 원정의 목표로 고른다 */
+/**
+ * 적 본진 중 '약하고 가까운' 곳을 이번 원정의 목표로 고른다.
+ *
+ * 안개 때문에 아직 못 본 본진은 후보가 아니다. 어디 있는지도 모르는 곳을
+ * 향해 진군할 수는 없다. 그래서 초반에는 정찰이 곧 전략이 된다.
+ */
 function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress'>): Cell | null {
   let best: Cell | null = null;
   let bestScore = -Infinity;
   for (const h of ctx.enemyHomes) {
-    const defense = localStrength(ctx.state, h, h.owner);
+    if (!isExplored(ctx.state, ctx.me, h)) continue;
+    // 지금 안 보이면 마지막으로 본 기억으로 판단한다
+    const defense = isVisible(ctx.state, ctx.me, h)
+      ? localStrength(ctx.state, h, h.owner)
+      : (knownCell(ctx.state, ctx.me, h)?.units ?? 0) * 1.2;
     const dist = minDist(h, ctx.homes);
     // 부유한 나라가 우선 표적이다. 국고를 쌓아둔 선두가 저절로 매를 번다.
     const gold = h.owner !== null ? ctx.state.nations[h.owner].gold : 0;
@@ -462,6 +480,8 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
       const eff = cellEfficiency(n, ctx.hubs, ctx.eco);
+      // 안개를 걷는 것 자체가 값어치다. 모르는 곳은 위험이자 기회다.
+      const scout = w.explore * unexploredCount(ctx.state, ctx.me, n, 2) * 0.6;
       const fresh = n.owner !== ctx.me ? 1.5 : 0.2;
       const gain = w.expansion * w.territory * (2 * eff - 0.4) * fresh + positionValue(ctx, n);
 
@@ -470,11 +490,15 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
         // 적 압박이 적고, 지형이 받쳐주고, 본거지에 가까운 칸을 고른다.
         actions.push({
           kind: 'move',
-          score: retreatValue(ctx, n) * w.homeDefense * 1.6 + gain * 0.25,
+          score: retreatValue(ctx, n) * w.homeDefense * 1.6 + gain * 0.25 + scout * 0.2,
           target: n,
         });
       } else {
-        actions.push({ kind: 'move', score: gain - riskAt(ctx, n, c.units, myPower), target: n });
+        actions.push({
+          kind: 'move',
+          score: gain + scout - riskAt(ctx, n, c.units, myPower),
+          target: n,
+        });
       }
     }
   }
@@ -528,7 +552,10 @@ export function takeAITurn(
   const log: AITurnLog = { attacks: [], recruited: 0, fortsStarted: 0, moved };
 
   const homes = state.cells.filter((c) => c.castle && c.owner === nationId);
-  const enemyHomes = state.cells.filter((c) => c.castle && c.owner !== nationId);
+  // 안개 속에서는 '내가 아는' 적 본진만 셈에 넣는다
+  const enemyHomes = state.cells.filter(
+    (c) => c.castle && c.owner !== nationId && isExplored(state, nationId, c)
+  );
   const hubs = adminHubs(state, nationId);
   const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco };
   const ctx: Ctx = {

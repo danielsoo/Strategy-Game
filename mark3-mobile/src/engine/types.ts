@@ -8,6 +8,8 @@
 //  2. 부대가 떠나도 칸의 소유권은 남는다. 소유권이 부대와 함께 사라지면
 //     "영토 = 현재 부대 수"가 되어 경제도 전선도 성립하지 않는다.
 
+import type { NationVision } from './vision';
+
 export type Terrain = 'plain' | 'forest' | 'mountain' | 'desert';
 
 /** 칸의 소유 국가. null 은 어느 나라도 차지하지 않은 땅. */
@@ -104,6 +106,8 @@ export interface GameState {
   current: number;
   /** 최근 이벤트 — 화면에 띄우고 오래된 것은 버린다 */
   log: string[];
+  /** 나라별 시야. 인덱스는 nation.id 와 같다. */
+  vision: NationVision[];
   winner: number | null;
 }
 
@@ -162,6 +166,10 @@ export interface EconomyConfig {
   vassalInfluenceWeight: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
+  /** 부대가 보는 거리 */
+  visionRadiusUnit: number;
+  /** 본진·완공 요새가 보는 거리 */
+  visionRadiusHub: number;
   /**
    * 맵에서 중립 세력이 지키고 있는 칸의 비율.
    *
@@ -211,6 +219,8 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   voluntarySubmitChance: 0.12,
+  visionRadiusUnit: 2,
+  visionRadiusHub: 3,
   neutralDensity: 0.08,
   graceTurnsBase: 2,
   graceTurnsJustice: 4,

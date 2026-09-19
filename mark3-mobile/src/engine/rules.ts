@@ -23,6 +23,7 @@ import {
   NeutralKind,
   Terrain,
 } from './types';
+import { createVision, recomputeVision } from './vision';
 
 // ─────────────────────────────────────────────────────────────
 // 격자 조회
@@ -104,6 +105,7 @@ export function createGameState(
     current: 0,
     log: [],
     winner: null,
+    vision: [],
   };
 
   // 본진을 원형으로 고르게 배치한다
@@ -157,6 +159,9 @@ export function createGameState(
     });
   }
 
+  // 나라별 시야를 만들고 시작 위치를 밝힌다
+  for (let i = 0; i < nationCount; i++) state.vision.push(createVision(cells.length));
+
   // 중립 세력이 땅을 지킨다. 빈 땅이 공짜면 확장이 언제나 전투보다 이득이 된다.
   const mercCount = Math.max(nationCount, Math.round(rows * cols * eco.neutralDensity));
   for (let i = 0; i < mercCount; i++) {
@@ -168,6 +173,8 @@ export function createGameState(
     pick.units = 3 + Math.floor(rng() * 3);
     pick.neutral = 'mercenary';
   }
+
+  for (let i = 0; i < nationCount; i++) recomputeVision(state, i, eco);
 
   return state;
 }
@@ -944,6 +951,7 @@ export function beginTurn(
   progressForts(state, nationId);
   trySpawnMerchant(state, nationId, eco);
   recomputeEncirclement(state);
+  recomputeVision(state, nationId, eco);
 }
 
 /**

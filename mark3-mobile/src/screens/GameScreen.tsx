@@ -37,6 +37,10 @@ import {
   vassalize,
   resolveCastleLoss,
   influenceOf,
+  recomputeVision,
+  isVisible,
+  isExplored,
+  knownCell,
 } from '../engine';
 import {
   takeAITurn,
@@ -64,6 +68,21 @@ const AI_LABELS = ['학습형', '학습형', '확장형', '수비형', '공격�
 const HEX = 26;
 const HEX_W = Math.sqrt(3) * HEX;
 const HEX_H = HEX * 2;
+
+const HEX_POINTS = [
+  [HEX_W * 0.5, 0],
+  [HEX_W, HEX_H * 0.25],
+  [HEX_W, HEX_H * 0.75],
+  [HEX_W * 0.5, HEX_H],
+  [0, HEX_H * 0.75],
+  [0, HEX_H * 0.25],
+]
+  .map((p) => `${p[0]},${p[1]}`)
+  .join(' ');
+
+const hexX = (c: { row: number; col: number }) =>
+  c.col * HEX_W + (c.row % 2 === 0 ? 0 : HEX_W * 0.5);
+const hexY = (c: { row: number; col: number }) => c.row * HEX_H * 0.75;
 
 const SPEEDS: Array<{ label: string; ms: number }> = [
   { label: '느리게', ms: 900 },
@@ -232,6 +251,7 @@ export default function GameScreen() {
         actedRef.current.add(to.id);
       }
       updateAliveFlags(prev);
+      recomputeVision(prev, PLAYER); // 움직였으면 보이는 범위도 바뀐다
       return bump(prev);
     });
     setSelected(null);
@@ -298,64 +318,99 @@ export default function GameScreen() {
   // ── 렌더 ────────────────────────────────────────────────
 
   const renderCell = (cell: Cell) => {
-    let fill = '#242424';
-    if (cell.owner !== null) fill = state.nations[cell.owner].color + (cell.units > 0 ? '' : '55');
-    if (cell.neutral) fill = NEUTRAL_COLOR[cell.neutral];
+    // 관전 중에는 안개를 걷고 전체를 보여준다. 플레이 중에는 내가 아는 만큼만.
+    const seen = watching || isVisible(state, PLAYER, cell);
+    const known = watching || isExplored(state, PLAYER, cell);
+    const mem = known && !seen ? knownCell(state, PLAYER, cell) : null;
+
+    if (!known) {
+      // 한 번도 못 가본 곳 — 지형조차 모른다
+      return (
+        <View key={cell.id} style={[styles.hex, { left: hexX(cell), top: hexY(cell) }]}>
+          <Svg width={HEX_W} height={HEX_H}>
+            <Polygon points={HEX_POINTS} fill="#0c0c0c" stroke="#161616" strokeWidth={0.5} />
+          </Svg>
+        </View>
+      );
+    }
 
     const isSel = cell.id === selected;
-    const isSpent = !watching && cell.owner === PLAYER && cell.units > 0 && actedRef.current.has(cell.id);
+    const isSpent =
+      !watching && cell.owner === PLAYER && cell.units > 0 && actedRef.current.has(cell.id);
     const isActive = cell.owner !== null && cell.owner === state.current && watching;
+
+    // 기억만 있는 칸은 지형과 건물만 안다. 지금 누가 서 있는지는 모른다.
+    const shownOwner = seen ? cell.owner : mem?.owner ?? null;
+    const shownCastle = seen ? cell.castle : mem?.castle ?? false;
+    const shownFort = seen ? cell.fortStage : mem?.fortStage ?? 0;
+    const shownTerrain = seen ? cell.terrain : mem?.terrain ?? 'plain';
+
+    let fill = '#242424';
+    if (seen) {
+      if (cell.owner !== null) fill = state.nations[cell.owner].color + (cell.units > 0 ? '' : '55');
+      if (cell.neutral) fill = NEUTRAL_COLOR[cell.neutral];
+    } else {
+      // 기억 속의 땅 — 지형만 어렴풋이
+      fill =
+        shownTerrain === 'mountain'
+          ? '#2b2b33'
+          : shownTerrain === 'forest'
+          ? '#1f2a1f'
+          : shownTerrain === 'desert'
+          ? '#332e22'
+          : '#1e1e1e';
+    }
     if (movable.has(cell.id) && !isSel) fill = '#fbbf24';
 
     let icon = '';
-    if (cell.castle) icon = '🏴';
-    else if (cell.fortStage === 4) icon = '🏰';
-    else if (cell.fortStage > 0) icon = '🏗️';
-    else if (cell.neutral === 'bandit') icon = '🦹';
-    else if (cell.neutral === 'mercenary') icon = '⚔️';
+    if (shownCastle) icon = '🏴';
+    else if (shownFort === 4) icon = '🏰';
+    else if (seen && cell.fortStage > 0) icon = '🏗️';
+    else if (seen && cell.neutral === 'bandit') icon = '🦹';
+    else if (seen && cell.neutral === 'mercenary') icon = '⚔️';
 
-    const merchant = state.merchants.find((m) => m.row === cell.row && m.col === cell.col);
-
-    const xOff = cell.row % 2 === 0 ? 0 : HEX_W * 0.5;
-    const x = cell.col * HEX_W + xOff;
-    const y = cell.row * HEX_H * 0.75;
-
-    const points = [
-      [HEX_W * 0.5, 0],
-      [HEX_W, HEX_H * 0.25],
-      [HEX_W, HEX_H * 0.75],
-      [HEX_W * 0.5, HEX_H],
-      [0, HEX_H * 0.75],
-      [0, HEX_H * 0.25],
-    ]
-      .map((p) => `${p[0]},${p[1]}`)
-      .join(' ');
+    const merchant = seen
+      ? state.merchants.find((m) => m.row === cell.row && m.col === cell.col)
+      : undefined;
 
     return (
       <TouchableOpacity
         key={cell.id}
-        style={[styles.hex, { left: x, top: y }]}
+        style={[styles.hex, { left: hexX(cell), top: hexY(cell) }]}
         onPress={() => onCellPress(cell)}
         activeOpacity={0.8}
       >
         <Svg width={HEX_W} height={HEX_H}>
           <Polygon
-            points={points}
+            points={HEX_POINTS}
             fill={fill}
+            fillOpacity={seen ? 1 : 0.85}
             stroke={
-              isSel ? '#fff' : isActive ? '#fde68a' : cell.hasRoad ? '#a16207' : 'rgba(0,0,0,0.35)'
+              isSel
+                ? '#fff'
+                : isActive
+                ? '#fde68a'
+                : seen && cell.hasRoad
+                ? '#a16207'
+                : 'rgba(0,0,0,0.35)'
             }
-            strokeWidth={isSel ? 3 : isActive ? 2 : cell.hasRoad ? 2 : 0.5}
+            strokeWidth={isSel ? 3 : isActive ? 2 : seen && cell.hasRoad ? 2 : 0.5}
           />
         </Svg>
         <View style={styles.hexInner} pointerEvents="none">
-          {icon !== '' && <Text style={styles.icon}>{icon}</Text>}
+          {icon !== '' && <Text style={[styles.icon, !seen && styles.faded]}>{icon}</Text>}
           {merchant && <Text style={styles.merchant}>🚚</Text>}
-          {cell.units > 0 && (
+          {seen && cell.units > 0 && (
             <Text style={[styles.units, isSpent && styles.spent]}>{cell.units}</Text>
           )}
-          {cell.units > 0 && cell.morale < 60 && <Text style={styles.shaken}>▼</Text>}
-          {cell.encircled && <Text style={styles.encircled}>◌</Text>}
+          {/* 기억 속의 주인만 점으로 남긴다 — 지금도 그런지는 모른다 */}
+          {!seen && shownOwner !== null && (
+            <View
+              style={[styles.memoryDot, { backgroundColor: state.nations[shownOwner].color }]}
+            />
+          )}
+          {seen && cell.units > 0 && cell.morale < 60 && <Text style={styles.shaken}>▼</Text>}
+          {seen && cell.encircled && <Text style={styles.encircled}>◌</Text>}
         </View>
       </TouchableOpacity>
     );
@@ -445,7 +500,14 @@ export default function GameScreen() {
           {state.nations.map((n) => {
             const s = nationStats(state, n.id);
             const l = computeLedger(state, n.id);
-            const traders = state.merchants.filter((m) => m.nation === n.id).length;
+            // 안개를 지도에서만 걷어내고 표에서 다 보여주면 의미가 없다.
+            // 내 나라와 내 속국은 훤히 알고, 남의 사정은 본 만큼만 안다.
+            const open = watching || n.id === PLAYER || n.suzerain === PLAYER;
+            // 남의 영토는 '내가 본 적 있는 그들의 땅' 수로 센다
+            const seenCells = open
+              ? s.cells
+              : state.cells.filter((c) => c.owner === n.id && isExplored(state, PLAYER, c)).length;
+            const discovered = open || seenCells > 0;
             return (
               <View
                 key={n.id}
@@ -455,20 +517,19 @@ export default function GameScreen() {
                   <View style={[styles.dot, { backgroundColor: n.color }]} />
                   <Text style={[styles.td, !n.alive && styles.dead]} numberOfLines={1}>
                     {n.suzerain !== null ? '└ ' : ''}
-                    {n.name}
-                    {!n.alive ? ' ×' : ''}
+                    {discovered ? n.name : '미발견'}
+                    {!n.alive && discovered ? ' ×' : ''}
                   </Text>
                 </View>
                 <Text style={[styles.td, styles.influence]}>
-                  {n.suzerain === null ? influenceOf(state, n.id).toFixed(0) : '-'}
+                  {!open ? '?' : n.suzerain === null ? influenceOf(state, n.id).toFixed(0) : '-'}
                 </Text>
-                <Text style={styles.td}>{s.cells}</Text>
-                <Text style={styles.td}>{s.units}</Text>
-                <Text style={styles.td}>{s.forts}</Text>
-                <Text style={styles.td}>{Math.floor(s.gold)}</Text>
-                <Text style={[styles.td, l.net >= 0 ? styles.plus : styles.minus]}>
-                  {l.net >= 0 ? '+' : ''}
-                  {l.net.toFixed(0)}
+                <Text style={styles.td}>{open ? s.cells : discovered ? `${seenCells}+` : '?'}</Text>
+                <Text style={styles.td}>{open ? s.units : '?'}</Text>
+                <Text style={styles.td}>{open ? s.forts : '?'}</Text>
+                <Text style={styles.td}>{open ? Math.floor(s.gold) : '?'}</Text>
+                <Text style={[styles.td, open && l.net < 0 ? styles.minus : styles.plus]}>
+                  {open ? `${l.net >= 0 ? '+' : ''}${l.net.toFixed(0)}` : '?'}
                 </Text>
                 <Text style={styles.td}>
                   {n.suzerain !== null
@@ -795,6 +856,9 @@ const styles = StyleSheet.create({
   units: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
   /** 이번 턴에 이미 움직인 부대 */
   spent: { color: 'rgba(255,255,255,0.4)' },
+  /** 기억 속의 정보 — 지금도 그런지는 모른다 */
+  faded: { opacity: 0.35 },
+  memoryDot: { width: 5, height: 5, borderRadius: 3, opacity: 0.45 },
   shaken: { position: 'absolute', bottom: 2, right: 5, color: '#fca5a5', fontSize: 9 },
   encircled: { position: 'absolute', top: 3, left: 4, color: '#fde68a', fontSize: 10 },
 
