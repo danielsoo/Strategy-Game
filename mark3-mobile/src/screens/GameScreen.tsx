@@ -138,6 +138,13 @@ export default function GameScreen() {
   const [showStats, setShowStats] = useState(true);
   /** 마지막 본진을 빼앗았을 때의 처분 선택 */
   const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
+  /**
+   * 이번 턴에 이미 움직인 내 부대들 (부대가 도착한 칸의 id).
+   * 제한이 없으면 한 부대로 맵을 가로지르며 연속 공격이 가능해 게임이 성립하지 않는다.
+   * 상태가 아니라 ref 인 이유는, 엔진이 상태를 제자리에서 고치고 그때마다
+   * bump() 로 다시 그리므로 별도 리렌더 신호가 필요 없기 때문이다.
+   */
+  const actedRef = useRef<Set<string>>(new Set());
 
   const me = state.nations[PLAYER];
   const ledger = useMemo(() => computeLedger(state, PLAYER), [state]);
@@ -177,6 +184,7 @@ export default function GameScreen() {
     if (!selected) {
       if (cell.owner === PLAYER && cell.units > 0 && !cell.neutral) {
         if (cell.fortStage > 0 && cell.fortStage < 4) return;
+        if (actedRef.current.has(cell.id)) return; // 이번 턴엔 이미 움직였다
         setSelected(cell.id);
       }
       return;
@@ -199,6 +207,8 @@ export default function GameScreen() {
         const victim = to.owner;
         const outcome = performAttack(prev, from, to, rng);
         setCombat(outcome.result);
+        // 이겨서 밀고 들어갔으면 목표 칸에, 아니면 제자리에 남는다
+        actedRef.current.add(outcome.capturedCell ? to.id : from.id);
 
         // 마지막 본진을 빼앗았다면 처분을 플레이어가 고른다
         if (
@@ -213,6 +223,9 @@ export default function GameScreen() {
         }
       } else if (to.units === 0 || (to.owner === PLAYER && !to.neutral)) {
         moveStack(from, to);
+        // 합류한 경우에도 도착 칸을 소진 처리한다.
+        // 아니면 A를 B에 합친 뒤 B를 또 움직여 사실상 두 번 움직이게 된다.
+        actedRef.current.add(to.id);
       }
       updateAliveFlags(prev);
       return bump(prev);
@@ -223,7 +236,9 @@ export default function GameScreen() {
   const endTurn = () => {
     setSelected(null);
     setState((prev) => {
-      restUnmoved(prev, PLAYER, new Set());
+      // 움직인 부대는 쉬지 못한다. 빈 집합을 넘기면 플레이어만 피로가 안 쌓여
+      // 사기·피로 모델이 사람 쪽에서만 무력해진다.
+      restUnmoved(prev, PLAYER, actedRef.current);
       stepMerchants(prev);
       stepNeutrals(prev, rng);
       collectTribute(prev);
@@ -252,6 +267,7 @@ export default function GameScreen() {
       prev.turn++;
       prev.current = PLAYER;
       if (prev.nations[PLAYER].alive && prev.winner === null) beginTurn(prev, PLAYER, rng);
+      actedRef.current = new Set();
       return bump(prev);
     });
   };
@@ -272,6 +288,7 @@ export default function GameScreen() {
     });
     setSelected(null);
     setCombat(null);
+    actedRef.current = new Set();
   };
 
   // ── 렌더 ────────────────────────────────────────────────
@@ -282,6 +299,7 @@ export default function GameScreen() {
     if (cell.neutral) fill = NEUTRAL_COLOR[cell.neutral];
 
     const isSel = cell.id === selected;
+    const isSpent = !watching && cell.owner === PLAYER && cell.units > 0 && actedRef.current.has(cell.id);
     const isActive = cell.owner !== null && cell.owner === state.current && watching;
     if (movable.has(cell.id) && !isSel) fill = '#fbbf24';
 
@@ -329,7 +347,9 @@ export default function GameScreen() {
         <View style={styles.hexInner} pointerEvents="none">
           {icon !== '' && <Text style={styles.icon}>{icon}</Text>}
           {merchant && <Text style={styles.merchant}>🚚</Text>}
-          {cell.units > 0 && <Text style={styles.units}>{cell.units}</Text>}
+          {cell.units > 0 && (
+            <Text style={[styles.units, isSpent && styles.spent]}>{cell.units}</Text>
+          )}
           {cell.units > 0 && cell.morale < 60 && <Text style={styles.shaken}>▼</Text>}
           {cell.encircled && <Text style={styles.encircled}>◌</Text>}
         </View>
@@ -632,7 +652,7 @@ export default function GameScreen() {
       if (!selectedCell) return;
       setState((prev) => {
         const c = prev.cells.find((x) => x.id === selectedCell.id)!;
-        startFort(prev, c, PLAYER);
+        if (startFort(prev, c, PLAYER)) actedRef.current.add(c.id); // 수비대로 묶인다
         return bump(prev);
       });
       setSelected(null);
@@ -739,6 +759,8 @@ const styles = StyleSheet.create({
   icon: { position: 'absolute', top: 3, right: 3, fontSize: 11 },
   merchant: { position: 'absolute', bottom: 3, left: 3, fontSize: 11 },
   units: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  /** 이번 턴에 이미 움직인 부대 */
+  spent: { color: 'rgba(255,255,255,0.4)' },
   shaken: { position: 'absolute', bottom: 2, right: 5, color: '#fca5a5', fontSize: 9 },
   encircled: { position: 'absolute', top: 3, left: 4, color: '#fde68a', fontSize: 10 },
 
