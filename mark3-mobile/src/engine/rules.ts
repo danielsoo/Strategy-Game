@@ -157,11 +157,11 @@ export function createGameState(
     });
   }
 
-  // 중립 용병 몇 무리를 맵 가운데 쪽에 뿌린다
-  const mercCount = Math.max(2, Math.floor(nationCount * 0.8));
+  // 중립 세력이 땅을 지킨다. 빈 땅이 공짜면 확장이 언제나 전투보다 이득이 된다.
+  const mercCount = Math.max(nationCount, Math.round(rows * cols * eco.neutralDensity));
   for (let i = 0; i < mercCount; i++) {
     const cand = state.cells.filter(
-      (c) => c.owner === null && c.units === 0 && distToNearestCastle(state, c) >= 3
+      (c) => c.owner === null && c.units === 0 && distToNearestCastle(state, c) >= 2
     );
     if (cand.length === 0) break;
     const pick = cand[Math.floor(rng() * cand.length)];

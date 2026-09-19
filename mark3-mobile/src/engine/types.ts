@@ -162,6 +162,14 @@ export interface EconomyConfig {
   vassalInfluenceWeight: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
+  /**
+   * 맵에서 중립 세력이 지키고 있는 칸의 비율.
+   *
+   * 이게 낮으면 빈 땅이 공짜라서, 걸어 들어가 칠하는 것이 싸우는 것보다
+   * 언제나 이득이 된다. 자가대전 학습이 "전진 0, 집결 0"으로 수렴한 이유가
+   * 이것이었다. 땅을 얻으려면 싸워야 전투력이 값어치를 갖는다.
+   */
+  neutralDensity: number;
   /** 급여가 밀려도 버티는 기본 턴 수 */
   graceTurnsBase: number;
   /** 정의 100 일 때 더 버티는 턴 수. 정의로운 군주는 외상으로도 따른다. */
@@ -203,6 +211,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   voluntarySubmitChance: 0.12,
+  neutralDensity: 0.08,
   graceTurnsBase: 2,
   graceTurnsJustice: 4,
   forageIncomePerUnit: 0.8,
