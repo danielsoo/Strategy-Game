@@ -59,10 +59,11 @@ export interface Cell {
   // 길/다리 관련
   hasRoad?: boolean;            // 이 셀에 길이 있는지
 
-  drift?: { deltaPP: number; last?: 'dead'|'alive'};
+  drift?: { deltaPP: number; last?: 'dead'|'alive'};  // 누적 전투 보정 (기세/베테랑)
   retreatStreak?: number;
-  encircled?: boolean;
-  exhausted?: boolean;
+  encircled?: boolean;        // 적에게 둘러싸임 (매 턴 계산)
+  morale?: number;            // 사기 0~100. 전투는 병력이 아니라 이게 꺾여서 끝난다
+  exhaustion?: number;        // 피로 0~100. 연속 이동·전투로 누적, 전투력과 사기를 깎는다
 }
 
 export interface GameState {
@@ -100,11 +101,12 @@ export function createInitialGameState(
         owner: null,
         unitCount: 0,
         terrain: 'plain',
-        exhausted: false,
         drift: { deltaPP: 0 },
         retreatStreak: 0,
         fortState: 'none',
         encircled: false,
+        morale: 100,
+        exhaustion: 0,
       });
     }
   }
