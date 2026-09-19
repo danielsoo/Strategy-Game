@@ -38,6 +38,11 @@ export interface Cell {
   neutral?: NeutralKind;
   /** 무역상이 닦아놓은 길 */
   hasRoad?: boolean;
+  /**
+   * 이 성이 마지막으로 징병한 턴.
+   * 성 하나는 한 턴에 한 명만 뽑는다. 여러 성을 가지면 그만큼 더 뽑을 수 있다.
+   */
+  recruitedTurn?: number;
 }
 
 export type MerchantPhase = 'idle' | 'outbound' | 'atTarget' | 'returning';
@@ -170,7 +175,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   fortIncome: 8,
   unitUpkeep: 0.7,
   recruitCost: 18,
-  maxRecruitPerTurn: 3,
+  maxRecruitPerTurn: 1,
   fortCost: 120,
   startingGold: 150,
   adminRange: 2.5,

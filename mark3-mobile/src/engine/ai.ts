@@ -548,7 +548,7 @@ export function takeAITurn(
     myCells++;
   }
   if (homes.length > 0 && myUnits < w.targetArmy + myCells * 0.6) {
-    log.recruited = recruit(state, nationId, eco.maxRecruitPerTurn, eco);
+    log.recruited = recruit(state, nationId, eco);
   }
 
   // 2. 요새 — 거점에서 먼 땅을 쓸모 있게 만드는 수단이다

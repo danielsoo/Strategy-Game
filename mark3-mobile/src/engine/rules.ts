@@ -568,26 +568,54 @@ export function startFort(
   return true;
 }
 
+/**
+ * 징병은 성마다 이루어지고, 한 성은 한 턴에 한 번만 뽑는다.
+ * 성을 여럿 가지면 그만큼 더 뽑을 수 있고, 같은 성에서 몰아 뽑을 수는 없다.
+ *
+ * 본진이 하나도 없으면 완공 요새가 임시 수도가 되므로(promoteCapitalIfNeeded)
+ * 여기서는 성만 보면 된다.
+ */
+export function recruitableCastles(state: GameState, nationId: number): Cell[] {
+  return state.cells.filter(
+    (c) => c.castle && c.owner === nationId && c.recruitedTurn !== state.turn
+  );
+}
+
+export function canRecruitAt(
+  state: GameState,
+  cell: Cell,
+  nationId: number,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): boolean {
+  if (!cell.castle || cell.owner !== nationId) return false;
+  if (cell.recruitedTurn === state.turn) return false;
+  return state.nations[nationId].gold >= eco.recruitCost;
+}
+
+/** 성 한 곳에서 징병한다. 성공하면 true. */
+export function recruitAt(
+  state: GameState,
+  cell: Cell,
+  nationId: number,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): boolean {
+  if (!canRecruitAt(state, cell, nationId, eco)) return false;
+  state.nations[nationId].gold -= eco.recruitCost;
+  cell.units += eco.maxRecruitPerTurn;
+  cell.recruitedTurn = state.turn;
+  return true;
+}
+
+/** 뽑을 수 있는 모든 성에서 한 번씩. 실제로 뽑은 성의 수를 돌려준다. */
 export function recruit(
   state: GameState,
   nationId: number,
-  count: number,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): number {
-  const n = state.nations[nationId];
-  // 본진이 없으면 완공 요새가 임시 수도 노릇을 한다.
-  // 본진 상실이 곧 징병 불가로 이어지면 회복할 방법이 사라진다.
-  const home =
-    state.cells.find((c) => c.castle && c.owner === nationId) ??
-    state.cells.find((c) => c.fortStage === 4 && c.owner === nationId);
-  if (!home) return 0;
   let made = 0;
-  while (made < count && n.gold >= eco.recruitCost) {
-    n.gold -= eco.recruitCost;
-    home.units += 1;
-    made++;
+  for (const c of recruitableCastles(state, nationId)) {
+    if (recruitAt(state, c, nationId, eco)) made++;
   }
-  if (made > 0) home.morale = Math.min(100, home.morale);
   return made;
 }
 

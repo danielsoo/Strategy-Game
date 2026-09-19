@@ -27,6 +27,7 @@ import {
   sendMerchant,
   nationStats,
   pushLog,
+  recruitableCastles,
   collectTribute,
   updateLoyalty,
   stepVoluntarySubmission,
@@ -147,6 +148,8 @@ export default function GameScreen() {
   const actedRef = useRef<Set<string>>(new Set());
 
   const me = state.nations[PLAYER];
+  // 성 하나당 한 턴에 한 번. 성이 많으면 그만큼 더 뽑는다.
+  const readyCastles = recruitableCastles(state, PLAYER).length;
   const ledger = useMemo(() => computeLedger(state, PLAYER), [state]);
   const myTurn = !watching && state.current === PLAYER && state.winner === null;
 
@@ -501,16 +504,24 @@ export default function GameScreen() {
       <View style={styles.footer}>
         <View style={styles.row}>
           <TouchableOpacity
-            style={[styles.btn, styles.recruitBtn, !myTurn && styles.btnDim]}
+            style={[
+              styles.btn,
+              styles.recruitBtn,
+              (!myTurn || readyCastles === 0) && styles.btnDim,
+            ]}
             onPress={() =>
               setState((prev) => {
-                recruit(prev, PLAYER, DEFAULT_ECONOMY.maxRecruitPerTurn);
+                recruit(prev, PLAYER);
                 return bump(prev);
               })
             }
-            disabled={!myTurn}
+            disabled={!myTurn || readyCastles === 0}
           >
-            <Text style={styles.btnText}>징병 ({DEFAULT_ECONOMY.recruitCost}G)</Text>
+            <Text style={styles.btnText}>
+              {readyCastles > 0
+                ? `징병 ${readyCastles}성 (${DEFAULT_ECONOMY.recruitCost * readyCastles}G)`
+                : '징병 완료'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.btn, styles.endBtn, !myTurn && styles.btnDim]}
