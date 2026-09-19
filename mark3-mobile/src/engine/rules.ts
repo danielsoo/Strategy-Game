@@ -839,6 +839,17 @@ export function updateAliveFlags(state: GameState): void {
     if (s.castles === 0 && s.units === 0) {
       n.alive = false;
       state.merchants = state.merchants.filter((m) => m.nation !== n.id);
+      // 멸망한 나라는 종속 관계에서도 빠진다. 거느리던 속국은 풀려난다.
+      n.suzerain = null;
+      n.vassalOrigin = null;
+      for (const v of state.nations) {
+        if (v.alive && v.suzerain === n.id) {
+          v.suzerain = null;
+          v.vassalOrigin = null;
+          v.loyalty = 50;
+          pushLog(state, `${v.name}이(가) 종주국을 잃고 풀려났습니다`);
+        }
+      }
       pushLog(state, `${n.name}이(가) 멸망했습니다`);
     }
   }

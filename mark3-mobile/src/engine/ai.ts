@@ -103,21 +103,35 @@ export const PERSONALITIES: Record<string, AIWeights> = {
   경제형: { ...BASE_WEIGHTS, aggression: 0.4, expansion: 1.6, targetArmy: 30, homeDefense: 1.6 },
 };
 
-/** sim/tuneAI.ts 의 자가대전이 수렴한 값 (손으로 만든 성격 4종 상대 63.3%) */
+/** 토너먼트에 학습 결과도 참가시킨다 (아래에서 PERSONALITIES 에 더한다) */
+
+/**
+ * sim/tuneAI.ts 의 자가대전이 수렴한 값 (손으로 만든 성격 4종 상대 61.7%).
+ *
+ * 약탈·속국·초선형 행정비가 들어온 뒤 다시 학습한 결과다. 이전 값과 비교하면
+ * 무엇이 바뀌었는지가 그대로 보인다.
+ *   advance  0.47 → 1.42  본진을 치면 속국이 되니 전진할 이유가 생겼다
+ *   massing  0.14 → 0.61  본진을 실제로 떨어뜨리려면 병력을 모아야 한다
+ *   castleAssault 15.0 → 18.4  본진의 값이 올랐다
+ *   wealth   (신규) 0.42  기본값 1.0 보다 낮게 골랐다 — 돈을 쫓는 것은
+ *                          생각만큼 이득이 아니라는 뜻이다
+ */
 export const LEARNED_WEIGHTS: AIWeights = {
-  territory: 1.77,
-  units: 1.04,
-  castleAssault: 15.03,
-  fort: 3.44,
-  aggression: 0.88,
-  massing: 0.14,
-  homeDefense: 0.27,
-  advance: 0.47,
-  expansion: 2.19,
-  terrain: 0.52,
-  wealth: 1,
-  targetArmy: 21.25,
+  territory: 2.35,
+  units: 1.52,
+  castleAssault: 18.39,
+  fort: 1.9,
+  aggression: 0.96,
+  massing: 0.61,
+  homeDefense: 0.4,
+  advance: 1.42,
+  expansion: 2.58,
+  terrain: 0.45,
+  wealth: 0.42,
+  targetArmy: 22.81,
 };
+
+PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
 
 interface Ctx {
   state: GameState;

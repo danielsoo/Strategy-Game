@@ -52,12 +52,12 @@ const PLAYER = 0;
 /** 나라별 AI 성격. 0번 자리는 사람이 둘 때는 쓰이지 않고, 관전 모드에서만 쓰인다. */
 const AI_WEIGHTS: AIWeights[] = [
   LEARNED_WEIGHTS,
-  PERSONALITIES['공격형'],
+  LEARNED_WEIGHTS, // 가장 센 상대를 하나는 만나야 한다 (토너먼트 68%)
   PERSONALITIES['확장형'],
   PERSONALITIES['수비형'],
-  PERSONALITIES['집중형'],
+  PERSONALITIES['공격형'],
 ];
-const AI_LABELS = ['학습된 AI', '공격형', '확장형', '수비형', '집중형'];
+const AI_LABELS = ['학습형', '학습형', '확장형', '수비형', '공격형'];
 
 const HEX = 26;
 const HEX_W = Math.sqrt(3) * HEX;
