@@ -775,6 +775,12 @@ function CombatModal({
               열세 결사항전 +{result.attackerResolvePP.toFixed(0)}%p
             </Text>
           )}
+          {(result.attackerSupport > 0 || result.defenderSupport > 0) && (
+            <Text style={styles.resolve}>
+              협공 — 아군 +{result.attackerSupport.toFixed(1)} · 적군 +
+              {result.defenderSupport.toFixed(1)}
+            </Text>
+          )}
           <ScrollView style={{ maxHeight: 300 }}>
             {result.rounds.map((r) => (
               <View key={r.round} style={styles.roundRow}>

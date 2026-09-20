@@ -382,10 +382,37 @@ function repOf(state: GameState, c: Cell): { fear: number; justice: number } {
   return n ? { fear: n.fear, justice: n.justice } : { fear: 50, justice: 50 };
 }
 
-function sideOf(state: GameState, c: Cell, isDefender: boolean): CombatSide {
+/**
+ * 이 칸 주위에서 같은 편이 보태줄 수 있는 전력 (자기 자신은 뺀다).
+ * 협공은 붙어 있는 부대만 셈에 넣는다 — 전선이 이어져 있어야 한다.
+ */
+export function flankingSupport(
+  state: GameState,
+  around: Cell,
+  side: Cell,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): number {
+  let total = 0;
+  for (const n of neighbors(state, around)) {
+    if (n.id === side.id || n.units <= 0) continue;
+    const sameSide = side.neutral ? n.neutral === side.neutral : !n.neutral && n.owner === side.owner;
+    if (!sameSide) continue;
+    // 지친 부대는 거들 힘도 없다
+    total += n.units * (1 - (n.exhaustion / 100) * 0.5);
+  }
+  return total * eco.flankSupport;
+}
+
+function sideOf(
+  state: GameState,
+  c: Cell,
+  isDefender: boolean,
+  supportUnits = 0
+): CombatSide {
   const rep = repOf(state, c);
   return {
     units: c.units,
+    supportUnits,
     morale: c.morale,
     exhaustion: c.exhaustion,
     driftPP: c.driftPP,
@@ -461,7 +488,16 @@ export function performAttack(
   const attackerNationId = from.neutral ? null : from.owner;
   const defenderNationId = to.neutral ? null : to.owner;
   const powerRatio = cellPower(from, false) / Math.max(0.001, cellPower(to, true));
-  const res = resolveCombat(sideOf(state, from, false), sideOf(state, to, true), rng);
+  // 협공 — 전투가 벌어지는 칸에 붙어 있는 아군이 전력을 보탠다.
+  // 공격측은 목표 칸 주위의 아군이, 수비측은 자기 칸 주위의 아군이 거든다.
+  const attSupport = flankingSupport(state, to, from, eco);
+  const defSupport = flankingSupport(state, to, to, eco);
+
+  const res = resolveCombat(
+    sideOf(state, from, false, attSupport),
+    sideOf(state, to, true, defSupport),
+    rng
+  );
 
   from.driftPP = clamp(from.driftPP + res.attackerDriftDelta, -15, 15);
   to.driftPP = clamp(to.driftPP + res.defenderDriftDelta, -15, 15);

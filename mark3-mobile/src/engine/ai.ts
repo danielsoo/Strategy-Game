@@ -33,6 +33,7 @@ import {
   plunderValue,
   computeLedger,
   resolveCastleLoss,
+  flankingSupport,
 } from './rules';
 import { vassalize } from './vassals';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
@@ -424,7 +425,10 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
 
   for (const n of neighbors(ctx.state, c)) {
     if (isHostile(c, n)) {
-      const p = estimateWinProb(myPower, cellPower(n, true));
+      // 협공을 셈에 넣는다. 규칙만 바뀌고 AI 가 모르면 행동은 그대로다.
+      const myFlank = flankingSupport(ctx.state, n, c, ctx.eco);
+      const theirFlank = flankingSupport(ctx.state, n, n, ctx.eco);
+      const p = estimateWinProb(myPower + myFlank, cellPower(n, true) + theirFlank);
       // 적 병력을 없애는 것이 이기는 주된 방법이다. 이 항이 작으면
       // AI 가 평화롭게 빈 땅만 먹고 전쟁을 아예 하지 않는다.
       // 약탈 기대액이 먼저다. 땅과 병력은 그다음.

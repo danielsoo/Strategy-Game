@@ -166,6 +166,14 @@ export interface EconomyConfig {
   vassalInfluenceWeight: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
+  /**
+   * 협공 계수 — 전투 칸에 인접한 아군이 전력의 몇 할을 보태는가.
+   *
+   * 행동 횟수가 부대 수에 비례하는 탓에 쪼개는 쪽이 언제나 이득이었다.
+   * 자가대전 학습이 massing 을 매번 0 으로 고른 이유가 이것이다.
+   * 협공은 기동성을 뺏지 않으면서 전선을 이루고 뭉치는 것에 값을 준다.
+   */
+  flankSupport: number;
   /** 부대가 보는 거리 */
   visionRadiusUnit: number;
   /** 본진·완공 요새가 보는 거리 */
@@ -219,6 +227,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   voluntarySubmitChance: 0.12,
+  flankSupport: 0.3,
   visionRadiusUnit: 2,
   visionRadiusHub: 3,
   neutralDensity: 0.08,

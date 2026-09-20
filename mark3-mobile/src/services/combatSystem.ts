@@ -102,6 +102,14 @@ export const DEFAULT_COMBAT_CONFIG: CombatConfig = {
 
 export interface CombatSide {
   units: number;
+  /**
+   * 인접한 아군이 보태주는 전력 (병력 환산).
+   *
+   * 이게 없으면 쪼개는 쪽이 언제나 이득이다. 행동 횟수가 부대 수에 비례하기
+   * 때문이다 — 40명 한 덩어리는 턴당 한 번, 10명 네 덩어리는 네 번 친다.
+   * 협공은 기동성을 뺏지 않으면서 뭉쳐 있는 것에 값을 준다.
+   */
+  supportUnits?: number;
   morale?: number; // 기본 100
   exhaustion?: number; // 0~100, 기본 0
   driftPP?: number; // 누적 기세, 기본 0
@@ -141,6 +149,9 @@ export interface DetailedCombatResult {
   /** 열세 보정이 실제로 얼마나 붙었는지 (연출/디버깅용) */
   attackerResolvePP: number;
   defenderResolvePP: number;
+  /** 협공으로 보태진 전력 (연출용) */
+  attackerSupport: number;
+  defenderSupport: number;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -148,7 +159,7 @@ export interface DetailedCombatResult {
 // ─────────────────────────────────────────────────────────────
 
 function basePower(side: CombatSide, cfg: CombatConfig): number {
-  const units = Math.max(0, side.units);
+  const units = Math.max(0, side.units) + Math.max(0, side.supportUnits ?? 0);
   const drift = side.driftPP ?? 0;
   const def = side.defenseMultiplier ?? 1;
   const exh = clamp(side.exhaustion ?? 0, 0, 100);
@@ -308,6 +319,8 @@ export function resolveCombat(
     defenderDriftDelta: clamp(defDrift, -cfg.driftCapPP, cfg.driftCapPP),
     attackerResolvePP: attResolve,
     defenderResolvePP: defResolve,
+    attackerSupport: attacker.supportUnits ?? 0,
+    defenderSupport: defender.supportUnits ?? 0,
   };
 }
 
