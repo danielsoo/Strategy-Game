@@ -221,18 +221,33 @@ export function checkBlocVictory(
   //
   // 부대가 뭉치고 서로 도우면서 잘 죽지 않게 되자 게임의 절반이 턴 제한에
   // 걸렸다. 끝까지 다 잡아먹어야만 이기는 구조면 후반이 늘어진다.
-  // 지도의 절반 가까이를 쥐고 2위를 두 배 이상 앞서면 승부는 난 것이다.
-  // 판은 사각 격자 안에 깎아낸 육각형이다. 격자 넓이로 세면 실제보다 4분의 1쯤
-  // 크게 잡혀, 압도적 우위 승리가 의도보다 어려워진다.
+  //
+  // 처음엔 '판 전체의 55%'로 걸었는데, 그건 판이 커질수록 닿을 수 없는 선이다.
+  // 큰 판일수록 끝까지 아무도 안 가진 땅이 많아, 이긴 나라조차 전체의
+  // 절반을 못 쥔다. 재보니 21x21 에서는 영향력 승리가 120판 중 한 번도 안 났고
+  // (11x11 은 58%), 그래서 이기는 길이 전멸뿐이 되어 오래 버티는 쪽이 이겼다
+  // — 넓은 판에서 웅크리기가 지배 전략이 된 이유다.
+  //
+  // 그래서 '차지된 땅'을 기준으로 삼는다. 아무도 안 가진 빈 땅은 셈에서 뺀다.
+  // 판 크기와 무관하게 같은 뜻이 된다 — "사람이 사는 땅의 절반 넘게 쥐었고
+  // 2위를 두 배 이상 앞선다".
+  //
+  // 다만 바닥은 둔다. 초반에 두 나라가 두 칸씩 들고 있을 때 한쪽이 세 칸이
+  // 되었다고 이기면 안 된다.
   const total = state.cells.reduce((n, c) => (c.offMap ? n : n + 1), 0);
+  const claimed = state.cells.reduce(
+    (n, c) => (!c.offMap && c.owner !== null && !c.neutral ? n + 1 : n),
+    0
+  );
   const scores = [...leaders]
     .map((id) => ({ id, inf: influenceOf(state, id, eco) }))
     .sort((a, b) => b.inf - a.inf);
   const top = scores[0];
   const second = scores[1];
-  if (top && top.inf >= total * 0.55 && (!second || top.inf >= second.inf * 2.5)) {
+  const bar = Math.max(claimed * 0.6, total * 0.2);
+  if (top && top.inf >= bar && (!second || top.inf >= second.inf * 2.5)) {
     state.winner = top.id;
-    state.winReason = `영향력 ${top.inf.toFixed(0)} — 판의 절반을 넘기고 2위를 두 배 이상 앞섰습니다`;
+    state.winReason = `영향력 ${top.inf.toFixed(0)} — 차지된 땅의 절반을 넘기고 2위를 두 배 이상 앞섰습니다`;
     pushLog(
       state,
       `${state.nations[top.id].name}이(가) 압도적 우위로 승리했습니다 (영향력 ${top.inf.toFixed(0)})`
