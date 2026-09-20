@@ -8,7 +8,9 @@ import {
   Modal,
   useWindowDimensions,
   Dimensions,
+  Platform,
 } from 'react-native';
+import Board3D from './Board3D';
 import Svg, { Polygon } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
 import {
@@ -374,6 +376,9 @@ export default function GameScreen() {
   const [showStats, setShowStats] = useState(true);
   // 처음 켜면 한 번 띄운다. 규칙을 모르고 만나면 "왜 안 움직이지?" 가 된다.
   const [showHelp, setShowHelp] = useState(true);
+  // 3D 는 웹에서만. 네이티브는 expo-gl 위에서 따로 붙여야 한다.
+  const [use3D, setUse3D] = useState(false);
+  const can3D = Platform.OS === 'web';
   /** 마지막 본진을 빼앗았을 때의 처분 선택 */
   const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
   /**
@@ -843,10 +848,23 @@ export default function GameScreen() {
           if (!wide) setChromeH(Math.max(0, winH - e.nativeEvent.layout.height));
         }}
       >
-        {lay && (
-          <View style={{ width: lay.width, height: lay.height }}>
-            {state.cells.map((c) => renderCell(c, lay))}
+        {use3D && can3D ? (
+          <View style={{ width: boardBox.width, height: boardBox.height }}>
+            <Board3D
+              state={state}
+              player={PLAYER}
+              watching={watching}
+              selected={selected}
+              movable={movable}
+              onCellPress={onCellPress}
+            />
           </View>
+        ) : (
+          lay && (
+            <View style={{ width: lay.width, height: lay.height }}>
+              {state.cells.map((c) => renderCell(c, lay))}
+            </View>
+          )
         )}
       </View>
 
@@ -958,6 +976,11 @@ export default function GameScreen() {
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowHelp(true)}>
             <Text style={styles.toggle}>도움말</Text>
           </TouchableOpacity>
+          {can3D && (
+            <TouchableOpacity style={{ flex: 1 }} onPress={() => setUse3D((v) => !v)}>
+              <Text style={styles.toggle}>{use3D ? '2D 로' : '3D 로'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
