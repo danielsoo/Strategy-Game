@@ -79,6 +79,7 @@ export function recomputeVision(
 
   for (const e of eyes) {
     for (const c of state.cells) {
+      if (c.offMap) continue;
       if (hexDistance(e.cell.row, e.cell.col, c.row, c.col) > e.radius) continue;
       const i = idxOf(state, c);
       v.visible[i] = true;
@@ -146,6 +147,7 @@ export function unexploredCount(state: GameState, nationId: number, around: Cell
   if (!v) return 0;
   let n = 0;
   for (const c of state.cells) {
+    if (c.offMap) continue; // 판 밖은 '모르는 곳'이 아니라 없는 곳이다
     if (hexDistance(around.row, around.col, c.row, c.col) > radius) continue;
     if (!v.explored[idxOf(state, c)]) n++;
   }

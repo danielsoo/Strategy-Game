@@ -31,7 +31,22 @@ import { createVision, recomputeVision } from './vision';
 
 export function cellAt(state: GameState, row: number, col: number): Cell | null {
   if (row < 0 || row >= state.rows || col < 0 || col >= state.cols) return null;
-  return state.cells[row * state.cols + col];
+  const c = state.cells[row * state.cols + col];
+  return c && c.offMap ? null : c;
+}
+
+/** 판 안에 실제로 쓰이는 칸들 */
+export function playableCells(state: GameState): Cell[] {
+  return state.cells.filter((c) => !c.offMap);
+}
+
+/** 사각 격자 안에 깎아낼 육각형의 반지름과 중심 */
+export function boardShape(rows: number, cols: number) {
+  return {
+    centerRow: Math.floor(rows / 2),
+    centerCol: Math.floor(cols / 2),
+    radius: Math.floor(Math.min(rows, cols) / 2),
+  };
 }
 
 export function cellById(state: GameState, id: string): Cell | null {
@@ -71,9 +86,16 @@ export function createGameState(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): GameState {
+  // 판은 사각형이 아니라 육각형이다. 사각 격자를 만들고 바깥을 깎아낸다.
+  // 그래야 모든 나라가 중심에서 같은 거리에 놓일 수 있다 — 사각 판에서는
+  // 모서리에 앉은 나라가 구조적으로 불리하다.
+  const shape = boardShape(rows, cols);
+
   const cells: Cell[] = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
+      const outside =
+        hexDistance(r, c, shape.centerRow, shape.centerCol) > shape.radius;
       const roll = rng();
       const terrain: Terrain =
         roll < 0.6 ? 'plain' : roll < 0.8 ? 'forest' : roll < 0.92 ? 'mountain' : 'desert';
@@ -93,6 +115,7 @@ export function createGameState(
         castle: false,
         fortStage: 0,
         encircled: false,
+        offMap: outside,
       });
     }
   }
@@ -123,10 +146,21 @@ export function createGameState(
     r = Math.max(1, Math.min(rows - 2, r));
     c = Math.max(1, Math.min(cols - 2, c));
 
-    let home = cellAt(state, r, c)!;
-    if (home.owner !== null) {
-      const alt = neighbors(state, home).find((n) => n.owner === null);
-      if (alt) home = alt;
+    // 깎아낸 바깥이나 이미 남이 앉은 자리면 가장 가까운 빈 칸으로 옮긴다
+    let home = cellAt(state, r, c);
+    if (!home || home.owner !== null) {
+      let best: Cell | null = null;
+      let bestD = Infinity;
+      for (const x of state.cells) {
+        if (x.offMap || x.owner !== null) continue;
+        const d = hexDistance(x.row, x.col, r, c);
+        if (d < bestD) {
+          bestD = d;
+          best = x;
+        }
+      }
+      if (!best) continue;
+      home = best;
     }
 
     home.owner = i;
@@ -169,7 +203,7 @@ export function createGameState(
   const mercCount = Math.max(nationCount, Math.round(rows * cols * eco.neutralDensity));
   for (let i = 0; i < mercCount; i++) {
     const cand = state.cells.filter(
-      (c) => c.owner === null && c.units === 0 && distToNearestCastle(state, c) >= 2
+      (c) => !c.offMap && c.owner === null && c.units === 0 && distToNearestCastle(state, c) >= 2
     );
     if (cand.length === 0) break;
     const pick = cand[Math.floor(rng() * cand.length)];

@@ -77,24 +77,59 @@ const AI_WEIGHTS: AIWeights[] = [
 ];
 const AI_LABELS = ['학습형', '학습형', '확장형', '수비형', '공격형'];
 
-const HEX = 26;
-const HEX_W = Math.sqrt(3) * HEX;
-const HEX_H = HEX * 2;
+/**
+ * 칸 크기는 고정값이 아니라 화면에서 정한다.
+ *
+ * 판이 육각형이라 실제로 칸이 놓인 범위만 재야 한다 — 사각 격자의 모서리는
+ * 깎여 비어 있으므로, 그것까지 넣고 계산하면 판이 쓸데없이 작아진다.
+ */
+function layout(cells: Cell[], maxW: number, maxH: number) {
+  const on = cells.filter((c) => !c.offMap);
+  if (on.length === 0 || maxW <= 0 || maxH <= 0) return null;
 
-const HEX_POINTS = [
-  [HEX_W * 0.5, 0],
-  [HEX_W, HEX_H * 0.25],
-  [HEX_W, HEX_H * 0.75],
-  [HEX_W * 0.5, HEX_H],
-  [0, HEX_H * 0.75],
-  [0, HEX_H * 0.25],
-]
-  .map((p) => `${p[0]},${p[1]}`)
-  .join(' ');
+  let minCol = Infinity;
+  let maxCol = -Infinity;
+  let minRow = Infinity;
+  let maxRow = -Infinity;
+  let anyOddRow = false;
+  for (const c of on) {
+    if (c.col < minCol) minCol = c.col;
+    if (c.col > maxCol) maxCol = c.col;
+    if (c.row < minRow) minRow = c.row;
+    if (c.row > maxRow) maxRow = c.row;
+    if (c.row % 2 === 1) anyOddRow = true;
+  }
 
-const hexX = (c: { row: number; col: number }) =>
-  c.col * HEX_W + (c.row % 2 === 0 ? 0 : HEX_W * 0.5);
-const hexY = (c: { row: number; col: number }) => c.row * HEX_H * 0.75;
+  // 가로: 칸 수 + 홀수 행이 반 칸 밀린 만큼. 세로: 행마다 0.75 씩 겹친다.
+  const wUnits = maxCol - minCol + 1 + (anyOddRow ? 0.5 : 0);
+  const hUnits = (maxRow - minRow) * 0.75 + 1;
+  const hex = Math.min(maxW / (Math.sqrt(3) * wUnits), maxH / (2 * hUnits));
+
+  const w = Math.sqrt(3) * hex;
+  const h = hex * 2;
+  return {
+    hex,
+    w,
+    h,
+    points: [
+      [w * 0.5, 0],
+      [w, h * 0.25],
+      [w, h * 0.75],
+      [w * 0.5, h],
+      [0, h * 0.75],
+      [0, h * 0.25],
+    ]
+      .map((p) => `${p[0]},${p[1]}`)
+      .join(' '),
+    x: (c: { row: number; col: number }) =>
+      (c.col - minCol) * w + (c.row % 2 === 0 ? 0 : w * 0.5),
+    y: (c: { row: number; col: number }) => (c.row - minRow) * h * 0.75,
+    width: wUnits * w,
+    height: hUnits * h,
+  };
+}
+
+type Layout = NonNullable<ReturnType<typeof layout>>;
 
 const SPEEDS: Array<{ label: string; ms: number }> = [
   { label: '느리게', ms: 900 },
@@ -181,6 +216,13 @@ export default function GameScreen() {
    * bump() 로 다시 그리므로 별도 리렌더 신호가 필요 없기 때문이다.
    */
   const actedRef = useRef<Set<string>>(new Set());
+
+  /** 판을 그릴 수 있는 실제 크기. onLayout 으로 받는다. */
+  const [boardBox, setBoardBox] = useState({ width: 0, height: 0 });
+  const lay = useMemo(
+    () => layout(state.cells, boardBox.width, boardBox.height),
+    [state.cells, boardBox.width, boardBox.height]
+  );
 
   const me = state.nations[PLAYER];
   // 성 하나당 한 턴에 한 번. 성이 많으면 그만큼 더 뽑는다.
@@ -342,7 +384,8 @@ export default function GameScreen() {
 
   // ── 렌더 ────────────────────────────────────────────────
 
-  const renderCell = (cell: Cell) => {
+  const renderCell = (cell: Cell, lay: Layout) => {
+    if (cell.offMap) return null; // 깎여나간 바깥은 그리지 않는다
     // 관전 중에는 안개를 걷고 전체를 보여준다. 플레이 중에는 내가 아는 만큼만.
     const seen = watching || isVisible(state, PLAYER, cell);
     const known = watching || isExplored(state, PLAYER, cell);
@@ -351,9 +394,9 @@ export default function GameScreen() {
     if (!known) {
       // 한 번도 못 가본 곳 — 지형조차 모른다
       return (
-        <View key={cell.id} style={[styles.hex, { left: hexX(cell), top: hexY(cell) }]}>
-          <Svg width={HEX_W} height={HEX_H}>
-            <Polygon points={HEX_POINTS} fill="#0c0c0c" stroke="#161616" strokeWidth={0.5} />
+        <View key={cell.id} style={[styles.hex, { left: lay.x(cell), top: lay.y(cell) }]}>
+          <Svg width={lay.w} height={lay.h}>
+            <Polygon points={lay.points} fill="#0c0c0c" stroke="#161616" strokeWidth={0.5} />
           </Svg>
         </View>
       );
@@ -401,13 +444,13 @@ export default function GameScreen() {
     return (
       <TouchableOpacity
         key={cell.id}
-        style={[styles.hex, { left: hexX(cell), top: hexY(cell) }]}
+        style={[styles.hex, { left: lay.x(cell), top: lay.y(cell) }]}
         onPress={() => onCellPress(cell)}
         activeOpacity={0.8}
       >
-        <Svg width={HEX_W} height={HEX_H}>
+        <Svg width={lay.w} height={lay.h}>
           <Polygon
-            points={HEX_POINTS}
+            points={lay.points}
             fill={fill}
             fillOpacity={seen ? 1 : 0.85}
             stroke={
@@ -422,7 +465,10 @@ export default function GameScreen() {
             strokeWidth={isSel ? 3 : isActive ? 2 : seen && cell.hasRoad ? 2 : 0.5}
           />
         </Svg>
-        <View style={styles.hexInner} pointerEvents="none">
+        <View
+          style={[styles.hexInner, { width: lay.w, height: lay.h }]}
+          pointerEvents="none"
+        >
           {icon !== '' && <Text style={[styles.icon, !seen && styles.faded]}>{icon}</Text>}
           {merchant && <Text style={styles.merchant}>🚚</Text>}
           {seen && cell.units > 0 && (
@@ -569,18 +615,17 @@ export default function GameScreen() {
         </View>
       )}
 
-      <ScrollView style={styles.gridWrap} contentContainerStyle={{ paddingBottom: 8 }}>
-        <ScrollView horizontal contentContainerStyle={{ paddingRight: 12 }}>
-          <View
-            style={{
-              width: state.cols * HEX_W + HEX_W,
-              height: state.rows * HEX_H * 0.75 + HEX_H * 0.3,
-            }}
-          >
-            {state.cells.map(renderCell)}
+      {/*
+        판은 남은 공간을 꽉 채운다. onLayout 으로 실제로 받은 크기를 재서
+        칸 크기를 거기 맞춘다 — 고정 픽셀로 두면 화면마다 잘리거나 남는다.
+      */}
+      <View style={styles.gridWrap} onLayout={(e) => setBoardBox(e.nativeEvent.layout)}>
+        {lay && (
+          <View style={{ width: lay.width, height: lay.height }}>
+            {state.cells.map((c) => renderCell(c, lay))}
           </View>
-        </ScrollView>
-      </ScrollView>
+        )}
+      </View>
 
       {/* 최근 사건 */}
       <View style={styles.feed}>
@@ -904,12 +949,19 @@ const styles = StyleSheet.create({
   dead: { color: '#6b7280', textDecorationLine: 'line-through' },
   influence: { color: '#fbbf24', fontWeight: 'bold' },
 
-  gridWrap: { flex: 1, paddingHorizontal: 6, marginTop: 6 },
+  // minHeight 0 이 없으면 flex 항목이 자기 내용보다 작아지지 않는다. 판이
+  // 남은 공간을 먹고 아래 버튼을 화면 밖으로 밀어낸다.
+  gridWrap: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    marginTop: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   hex: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
   hexInner: {
     position: 'absolute',
-    width: HEX_W,
-    height: HEX_H,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -924,7 +976,7 @@ const styles = StyleSheet.create({
   shaken: { position: 'absolute', bottom: 2, right: 5, color: '#fca5a5', fontSize: 9 },
   encircled: { position: 'absolute', top: 3, left: 4, color: '#fde68a', fontSize: 10 },
 
-  feed: { paddingHorizontal: 14, paddingVertical: 4, minHeight: 46 },
+  feed: { paddingHorizontal: 14, paddingVertical: 2, minHeight: 20 },
   feedLine: { color: '#9ca3af', fontSize: 11, lineHeight: 15 },
 
   panel: { backgroundColor: '#1f1f1f', marginHorizontal: 12, borderRadius: 8, padding: 10 },

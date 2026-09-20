@@ -56,18 +56,25 @@ export function getHexCardinalOffsets(row: number): Array<{ dr: number; dc: numb
  * offset coordinates를 axial coordinates로 변환 후 거리 계산
  */
 export function hexDistance(row1: number, col1: number, row2: number, col2: number): number {
-  // offset → axial 변환
-  const q1 = col1;
-  const r1 = row1 - Math.floor((col1 - (col1 & 1)) / 2);
-  
-  const q2 = col2;
-  const r2 = row2 - Math.floor((col2 - (col2 & 1)) / 2);
-  
-  // axial → cube 변환 (s = -q - r)
-  const s1 = -q1 - r1;
-  const s2 = -q2 - r2;
-  
-  // cube coordinates에서 거리 계산
-  return (Math.abs(q1 - q2) + Math.abs(r1 - r2) + Math.abs(s1 - s2)) / 2;
+  const a = toAxial(row1, col1);
+  const b = toAxial(row2, col2);
+  const dq = a.q - b.q;
+  const dr = a.r - b.r;
+  // cube 에서 s = -q - r 이므로 ds = -(dq + dr)
+  return (Math.abs(dq) + Math.abs(dr) + Math.abs(dq + dr)) / 2;
+}
+
+/**
+ * offset → axial.
+ *
+ * 이 격자는 홀수 행이 오른쪽으로 반 칸 밀린 배치다(odd-r). 화면의
+ * hexX 도, 위의 이웃 표도 그 전제로 쓰여 있다.
+ *
+ * 예전 구현은 여기서만 열 기준(odd-q)으로 변환하고 있었다. 이웃 표와
+ * 좌표계가 어긋나 있어서 거리가 실제 인접 관계와 맞지 않았고, 시야 반경과
+ * 행정 거리가 한 축으로 찌그러져 있었다.
+ */
+function toAxial(row: number, col: number): { q: number; r: number } {
+  return { q: col - (row - (row & 1)) / 2, r: row };
 }
 
