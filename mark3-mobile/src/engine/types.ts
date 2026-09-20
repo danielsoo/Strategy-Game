@@ -284,7 +284,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   startingGold: 150,
   adminRange: 2.5,
   adminCostPerCell: 0.4,
-  adminExponent: 1.31,
+  adminExponent: 1.45,
   merchantCastleMultiplier: 2.0,
   merchantFortMultiplier: 1.5,
   merchantStake: 60,

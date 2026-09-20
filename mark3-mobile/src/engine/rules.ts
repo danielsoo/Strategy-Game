@@ -139,8 +139,20 @@ export function createGameState(
   const cc = (cols - 1) / 2;
   const radius = Math.min(rows, cols) * 0.38;
 
+  // 자리와 위치의 짝을 매 판 섞는다.
+  //
+  // 각도로 찍은 위치는 육각 격자에서 고르지 않다. 5인에서 재보니 0번 자리만
+  // 가장 가까운 이웃이 5칸이고 나머지는 4칸이었고, 그게 승률 30% 대 18% 로
+  // 그대로 나타났다. 배치가 고정이면 그 이점이 매 판 같은 자리에 간다.
+  // 완벽히 고르게 놓을 수는 없으니, 누가 그 자리를 받을지를 운에 맡긴다.
+  const slots = Array.from({ length: nationCount }, (_, i) => i);
+  for (let i = slots.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [slots[i], slots[j]] = [slots[j], slots[i]];
+  }
+
   for (let i = 0; i < nationCount; i++) {
-    const angle = (2 * Math.PI * i) / nationCount - Math.PI / 2;
+    const angle = (2 * Math.PI * slots[i]) / nationCount - Math.PI / 2;
     let r = Math.round(cr + radius * Math.sin(angle));
     let c = Math.round(cc + radius * Math.cos(angle));
     r = Math.max(1, Math.min(rows - 2, r));
