@@ -15,6 +15,7 @@
 import { RNG } from '../services/combatSystem';
 import { GameState, Nation, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { pushLog, nationStats, computeLedger, cellPower, neighbors, isFoeCell, blocOf } from './rules';
+import { hexDistance } from '../utils/hexGrid';
 import { vassalsOf, nationPower, breakVassalage } from './vassals';
 
 /** 속국이 저울질할 때 쓰는 값들 */
@@ -117,14 +118,16 @@ export function assessVassal(
   };
 }
 
-export type OrderKind = 'attack' | 'reinforce' | 'tax';
+export type OrderKind = 'garrison' | 'march' | 'attack' | 'tax';
 export type OrderResponse = 'obey' | 'feign' | 'refuse';
 
 export interface VassalOrder {
   kind: OrderKind;
   /** attack: 칠 나라 */
   target?: number;
-  /** reinforce: 보낼 병력 · tax: 더 걷는 비율 */
+  /** garrison·march: 어디에 */
+  destId?: string;
+  /** garrison·march: 몇 명 · tax: 더 걷는 비율 */
   amount: number;
   issuedTurn: number;
   /** 이 턴까지 이행해야 한다 */
@@ -147,11 +150,16 @@ export function orderCost(state: GameState, vassal: Nation, order: VassalOrder):
   if (order.kind === 'tax') {
     return { burden: Math.min(1, order.amount * 2.5), label: `조공 +${(order.amount * 100).toFixed(0)}%` };
   }
-  if (order.kind === 'reinforce') {
+  if (order.kind === 'garrison' || order.kind === 'march') {
     const mine = nationStats(state, vassal.id).units;
+    const dest = order.destId ? state.cells.find((c) => c.id === order.destId) : null;
+    // 멀수록, 많이 떼어낼수록 부담이다
+    const home = state.cells.find((c) => c.castle && c.owner === vassal.id);
+    const far =
+      dest && home ? hexDistance(dest.row, dest.col, home.row, home.col) / 16 : 0.2;
     return {
-      burden: Math.min(1, order.amount / Math.max(1, mine)),
-      label: `파병 ${order.amount}명`,
+      burden: Math.min(1, (order.amount / Math.max(1, mine)) * 0.7 + far),
+      label: order.kind === 'garrison' ? `${order.amount}명 주둔` : `${order.amount}명 이동`,
     };
   }
   // 공격은 상대가 셀수록 부담이 크다
@@ -181,13 +189,17 @@ export function decideResponse(
 
   // 너무 센 주인에게는 그냥 따른다. 버티는 값이 없다.
   // 반대로 주인이 다른 전선에 묶여 있으면 배짱이 생긴다.
+  // 힘의 격차가 가장 크게 말한다. 혼자서는 못 버티는 속국은 마음이 떠나 있어도
+  // 일단 따른다 — 안 따를 수가 없으니까. 반대로 살아남을 자신이 서면
+  // 충성이 남아 있어도 명령은 흘려듣기 시작한다.
   const willing =
-    vassal.loyalty / 100 + (lord.justice - 50) / 200 + (0.5 - a.survival) * 0.8;
+    0.35 + (vassal.loyalty / 100) * 0.6 + (lord.justice - 50) / 200 + (0.5 - a.survival) * 1.2;
   if (willing > burden + 0.15) return 'obey';
 
-  // 안 따르기로 했다. 들켰을 때 감당할 수 있는가 —
-  // 살아남을 자신이 있을수록 대놓고 거부한다.
-  return rng() < a.survival * 0.8 ? 'refuse' : 'feign';
+  // 안 따르기로 했다. 그렇다고 대놓고 말하지는 않는다 —
+  // 거부는 그 자리에서 드러나고 응징을 부른다. 토벌을 견딜 자신이 설 때만
+  // 그 값을 치른다. 그래서 불복의 기본형은 '듣는 척'이다.
+  return rng() < Math.max(0, a.survival - 0.35) * 1.2 ? 'refuse' : 'feign';
 }
 
 /** 종주국이 명령을 내린다 */
@@ -197,7 +209,7 @@ export function issueOrder(
   vassalId: number,
   kind: OrderKind,
   rng: RNG,
-  opts: { target?: number; amount?: number; turns?: number } = {}
+  opts: { target?: number; destId?: string; amount?: number; turns?: number } = {}
 ): VassalOrder | null {
   const lord = state.nations[lordId];
   const vassal = state.nations[vassalId];
@@ -207,6 +219,7 @@ export function issueOrder(
   const order: VassalOrder = {
     kind,
     target: opts.target,
+    destId: opts.destId,
     amount: opts.amount ?? (kind === 'tax' ? 0.15 : 3),
     issuedTurn: state.turn,
     deadline: state.turn + (opts.turns ?? 8),
@@ -228,10 +241,36 @@ export function issueOrder(
 }
 
 /**
+ * 명령이 실제로 이행되고 있는가 — 지도에서 직접 읽는다.
+ *
+ * 이게 핵심이다. progress 를 '순종이면 0.34씩 올린다' 같은 카운터로 두면
+ * 명령이 장부상으로만 이행된다. 병력이 정말 그 자리에 갔는지, 정말 그 나라를
+ * 쳤는지를 세야 '듣는 척'이 성립한다 — 속국이 겉으로 받들어도 지도는 안 속는다.
+ */
+export function measureProgress(state: GameState, vassal: Nation, order: VassalOrder): number {
+  // 조공은 지도가 아니라 국고에 남는다 — stepOrders 가 실제로 옮긴 만큼 올린다
+  if (order.kind === 'tax') return order.progress;
+
+  // 공격은 지도에 자취가 남지 않는다 — 친 순간에만 안다.
+  // 그래서 ai.ts 의 전투 처리가 progress 를 올려준다.
+  if (order.kind === 'attack') return order.progress;
+
+  const dest = order.destId ? state.cells.find((c) => c.id === order.destId) : null;
+  if (!dest) return 1;
+  const radius = order.kind === 'garrison' ? 1 : 2;
+  let there = 0;
+  for (const c of state.cells) {
+    if (c.owner !== vassal.id || c.units <= 0 || c.neutral) continue;
+    if (hexDistance(c.row, c.col, dest.row, dest.col) <= radius) there += c.units;
+  }
+  return Math.min(1, there / Math.max(1, order.amount));
+}
+
+/**
  * 매 턴 명령의 진행을 본다.
  *
- * 순종은 저절로 차오르고 태업은 제자리다. 기한이 지나면 드러난다 —
- * 그 전에도 종주국이 눈치챌 수 있다. 눈치는 정의보다 공포가 밝다.
+ * 기한이 지나면 드러난다 — 그 전에도 종주국이 눈치챌 수 있다.
+ * 눈치는 정의보다 공포가 밝다.
  */
 export function stepOrders(state: GameState, rng: RNG, eco: EconomyConfig = DEFAULT_ECONOMY): void {
   for (const v of state.nations) {
@@ -243,12 +282,29 @@ export function stepOrders(state: GameState, rng: RNG, eco: EconomyConfig = DEFA
     }
     const o = v.order;
 
+    // 말이 아니라 지도를 본다
+    o.progress = Math.max(o.progress, measureProgress(state, v, o));
+
+    /**
+     * 추가 조공은 한 번에 털어내는 게 아니라 매 턴 나간다.
+     * 이걸 '이행이 끝나는 시점에 한 번' 으로 두면 태업하는 속국과 순종하는
+     * 속국이 국고에서 구별되지 않는다 — 돈이 실제로 움직여야 명령이다.
+     */
+    if (o.kind === 'tax' && o.response === 'obey') {
+      const span = Math.max(1, o.deadline - o.issuedTurn);
+      const due = Math.floor(computeLedger(state, v.id, eco).income * o.amount);
+      const paid = Math.max(0, Math.min(v.gold, due));
+      if (paid > 0) {
+        v.gold -= paid;
+        lord.gold += paid;
+      }
+      o.progress = Math.min(1, o.progress + 1 / span);
+    }
+
     if (o.response === 'obey') {
-      o.progress = Math.min(1, o.progress + 0.34);
       if (o.progress >= 1) {
         // 이행했다. 신뢰가 쌓인다.
         v.loyalty = Math.min(100, v.loyalty + 3);
-        if (o.kind === 'tax') lord.gold += Math.floor(v.gold * o.amount);
         pushLog(state, `${v.name}이(가) 명령을 이행했습니다`);
         v.order = undefined;
         continue;

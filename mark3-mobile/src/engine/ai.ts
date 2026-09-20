@@ -239,6 +239,13 @@ function refreshOrder(ctx: Ctx, c: Cell, enemyAdjacent: number): Cell | null {
     return null;
   }
 
+  // 종주국이 부른 자리가 있으면 그게 우선이다
+  if (ctx.rally) {
+    if (!c.order || c.order.destId !== ctx.rally.id) {
+      c.order = { destId: ctx.rally.id, age: 0 };
+    }
+  }
+
   let dest = c.order ? ctx.state.cells.find((x) => x.id === c.order!.destId) ?? null : null;
   const arrived = dest ? hexDistance(c.row, c.col, dest.row, dest.col) <= 1 : false;
   const stale = c.order ? c.order.age >= ORDER.maxAge : false;
@@ -266,6 +273,8 @@ export interface Ctx {
   eco: EconomyConfig;
   /** 지금 압박받고 있는 내 진지들. 가까운 부대를 끌어당긴다. */
   distress: Array<{ cell: Cell; severity: number }>;
+  /** 종주국이 부른 자리. 명령을 받들 때만 채워진다. */
+  rally: Cell | null;
 }
 
 /**
@@ -327,7 +336,7 @@ function localStrength(state: GameState, center: Cell, owner: number | null): nu
  * 안개 때문에 아직 못 본 본진은 후보가 아니다. 어디 있는지도 모르는 곳을
  * 향해 진군할 수는 없다. 그래서 초반에는 정찰이 곧 전략이 된다.
  */
-function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress'>): Cell | null {
+function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress' | 'rally'>): Cell | null {
   let best: Cell | null = null;
   let bestScore = -Infinity;
   for (const h of ctx.enemyHomes) {
@@ -698,20 +707,67 @@ function governVassals(
     return;
   }
 
+  // 속국의 본성 — 명령은 이 자리를 기준으로 재야 한다.
+  // 종주국 형편만 보고 고르면 지도 반대편으로 부르게 되고, 속국은 따를 마음이
+  // 있어도 기한 안에 닿지 못한다. 그러면 순종과 태업이 지도에서 구별되지 않는다.
+  const vHome =
+    state.cells.find((c) => c.castle && c.owner === v.id) ??
+    state.cells.find((c) => c.owner === v.id) ??
+    null;
+
+  // 칠 상대는 '가장 큰 나라'가 아니라 '속국이 닿을 수 있는 적'이다
   let foe: number | null = null;
-  let worst = 0;
+  let best = Infinity;
   for (const n of state.nations) {
     if (!n.alive || blocOf(state, n.id) === nationId) continue;
-    const power = nationStats(state, n.id).cells;
-    if (power > worst) {
-      worst = power;
+    let near = Infinity;
+    for (const c of state.cells) {
+      if (c.owner !== n.id || c.neutral) continue;
+      const d = vHome ? hexDistance(c.row, c.col, vHome.row, vHome.col) : 0;
+      if (d < near) near = d;
+    }
+    if (near < best) {
+      best = near;
       foe = n.id;
     }
   }
-  if (foe !== null && rng() < 0.6) {
-    issueOrder(state, nationId, v.id, 'attack', rng, { target: foe });
+
+  const roll = rng();
+  if (foe !== null && roll < 0.4) {
+    // 닿는 데 걸리는 시간만큼은 줘야 한다. 못 지킬 기한은 명령이 아니라 구실이다.
+    const turns = Math.max(8, Math.min(24, Math.round((Number.isFinite(best) ? best : 6) * 1.6) + 6));
+    issueOrder(state, nationId, v.id, 'attack', rng, { target: foe, turns });
+    return;
+  }
+
+  // 내 최전선 — 적과 맞닿은 내 칸 중 하나로 부른다
+  const front = state.cells.filter(
+    (c) =>
+      c.owner === nationId &&
+      !c.neutral &&
+      neighbors(state, c).some((n) => isFoeCell(state, nationId, n))
+  );
+  // 그 중 속국에게 가장 가까운 자리. 먼 전선에 부르는 건 부리는 게 아니라 버리는 것이다.
+  let dest: Cell | null = null;
+  let closest = Infinity;
+  for (const c of front) {
+    const d = vHome ? hexDistance(c.row, c.col, vHome.row, vHome.col) : 0;
+    if (d < closest) {
+      closest = d;
+      dest = c;
+    }
+  }
+  if (dest) {
+    // 기한은 거리가 정한다. 열 칸 떨어진 곳에 여덟 턴을 주면 그건 못 지킬 명령이다.
+    const turns = Math.max(6, Math.min(20, Math.round(closest * 1.6) + 4));
+    const army = nationStats(state, v.id).units;
+    issueOrder(state, nationId, v.id, roll < 0.7 ? 'march' : 'garrison', rng, {
+      destId: dest.id,
+      amount: Math.max(2, Math.min(6, Math.floor(army * 0.35))),
+      turns,
+    });
   } else {
-    issueOrder(state, nationId, v.id, 'reinforce', rng, { amount: 3 });
+    issueOrder(state, nationId, v.id, 'tax', rng, { amount: 0.1 });
   }
 }
 
@@ -784,7 +840,40 @@ export function* takeAITurnGen(
     target: pickTarget(partial),
     homeThreat: computeHomeThreat(state, nationId, homes),
     distress: findDistress(state, nationId),
+    rally: null,
   };
+
+  /**
+   * 받든 명령은 실제 행동으로 옮긴다.
+   *
+   * 이게 없으면 '순종'이 장부상의 숫자일 뿐이다. 주둔·이동은 그 자리를
+   * 부대들의 목적지로 삼고, 공격은 그 나라의 성을 이번 원정의 목표로 삼는다.
+   * 태업하는 속국은 이 갈래를 타지 않으므로 지도에 아무 일도 일어나지 않는다 —
+   * 그래서 들킨다.
+   */
+  const myOrder = state.nations[nationId]?.order;
+  if (myOrder && myOrder.response === 'obey') {
+    if (myOrder.destId) {
+      ctx.rally = state.cells.find((c) => c.id === myOrder.destId) ?? null;
+    } else if (myOrder.kind === 'attack' && myOrder.target !== undefined) {
+      // 본성을 노리되, 아직 못 봤으면 눈에 보이는 그 나라 땅 중 가장 가까운 곳.
+      // 성만 찾으면 정찰이 안 된 상대에게는 명령이 아무 일도 일으키지 못한다.
+      const home = state.cells.find((c) => c.castle && c.owner === nationId) ?? null;
+      let pick: Cell | null = null;
+      let bestD = Infinity;
+      for (const c of state.cells) {
+        if (c.owner !== myOrder.target || c.neutral) continue;
+        if (!isExplored(state, nationId, c)) continue;
+        const d = home ? hexDistance(c.row, c.col, home.row, home.col) : 0;
+        const score = c.castle ? d - 100 : d;
+        if (score < bestD) {
+          bestD = score;
+          pick = c;
+        }
+      }
+      if (pick) ctx.target = pick;
+    }
+  }
 
   // 0. 속국 다루기 — 명령을 내리고, 안 듣는 놈은 손본다
   governVassals(state, nationId, w, rng, eco);
@@ -895,6 +984,18 @@ export function* takeAITurnGen(
       }
       const out = performAttack(state, c, best.target, rng, eco, forced, defenseNoise);
       log.attacks.push(out);
+
+      // 진격 명령을 받들었다면 실제로 친 것만 셈에 넣는다
+      const ord = state.nations[nationId]?.order;
+      if (
+        ord &&
+        ord.kind === 'attack' &&
+        ord.response === 'obey' &&
+        out.defenderNation !== null &&
+        blocOf(state, out.defenderNation) === blocOf(state, ord.target ?? -1)
+      ) {
+        ord.progress = Math.min(1, ord.progress + 0.5);
+      }
 
       // 마지막 본진을 빼앗았다면 병합할지 속국으로 둘지 정한다
       if (
