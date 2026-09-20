@@ -57,7 +57,17 @@ import {
   isVisible,
   isExplored,
   knownCell,
+  stepOrders,
+  stepRebellion,
+  issueOrder,
+  punishVassal,
+  orderCost,
+  blocOf,
+  assessVassal,
+  nationPower,
 } from '../engine';
+import type { OrderKind, Punishment } from '../engine';
+import VassalPanel from './VassalPanel';
 import {
   takeAITurn,
   PERSONALITIES,
@@ -348,6 +358,14 @@ function playOneNation(s: GameState, rng: RNG, aiPolicy?: Policy): void {
     stepNeutrals(s, rng);
     collectTribute(s);
     updateLoyalty(s);
+    /**
+     * 명령과 반란은 여기서 돈다.
+     *
+     * 이게 빠져 있어서 속국 명령 체계가 시뮬레이터에서만 살아 있었다 —
+     * 실제로 플레이하는 판에서는 명령을 내려도 아무 일도 일어나지 않았다.
+     */
+    stepOrders(s, rng);
+    stepRebellion(s, rng);
     stepVoluntarySubmission(s, rng);
     updateAliveFlags(s);
     checkBlocVictory(s);
@@ -411,6 +429,14 @@ export default function GameScreen() {
    * 답을 받으면 멈춘 자리에서 이어 돌린다.
    */
   const [defenseAsk, setDefenseAsk] = useState<DefenseRequest | null>(null);
+  // 종주국 집무실 — 속국에게 명령을 내린다
+  const [showVassals, setShowVassals] = useState(false);
+  /** 지도에서 자리를 고르는 중. 이 동안 칸을 누르면 이동이 아니라 명령이 된다. */
+  const [placing, setPlacing] = useState<{ vassalId: number; kind: 'garrison' | 'march' } | null>(
+    null
+  );
+  const [orderNote, setOrderNote] = useState<string | null>(null);
+
   const pendingRef = useRef<{ gen: ReturnType<typeof takeAITurnGen>; idx: number } | null>(null);
   /**
    * 이번 턴에 이미 움직인 내 부대들 (부대가 도착한 칸의 id).
@@ -476,6 +502,14 @@ export default function GameScreen() {
   const selectedCell = selected ? state.cells.find((c) => c.id === selected) ?? null : null;
   // 갈 수 있는 칸. 행군력이 모자라거나 합쳐서 상한을 넘으면 후보가 아니다.
   // AI 와 같은 판정을 쓴다 — 규칙이 두 군데에 있으면 반드시 갈라진다.
+  /** 내 속국들. 이 목록이 비면 집무실 버튼 자체를 띄우지 않는다. */
+  const myVassals = useMemo(() => vassalsOf(state, PLAYER), [state]);
+  /** 불이행이 드러나 응징을 기다리는 속국 수 — 버튼에 바로 띄운다 */
+  const pendingPunish = useMemo(
+    () => myVassals.filter((v) => v.order?.revealed).length,
+    [myVassals]
+  );
+
   const movable = useMemo(() => {
     if (!selectedCell || !myTurn) return new Set<string>();
     const out = new Set<string>();
@@ -492,6 +526,12 @@ export default function GameScreen() {
 
   const onCellPress = (cell: Cell) => {
     if (!myTurn) return;
+
+    // 명령할 자리를 고르는 중이면 이동이 아니라 발령이다
+    if (placing) {
+      issueAt(cell);
+      return;
+    }
 
     const merchantHere = state.merchants.find(
       (m) => m.nation === PLAYER && m.phase === 'idle' && m.row === cell.row && m.col === cell.col
@@ -552,6 +592,80 @@ export default function GameScreen() {
       return bump(prev);
     });
     setSelected(null);
+  };
+
+  /**
+   * 고른 자리로 명령을 내린다.
+   *
+   * issueOrder 가 null 을 주는 경우가 있고, 그 이유를 플레이어에게 말해줘야
+   * 한다. 아무 반응이 없으면 버튼이 고장난 줄 안다.
+   */
+  const issueAt = (cell: Cell) => {
+    const req = placing;
+    if (!req) return;
+    const v = state.nations[req.vassalId];
+    if (!v) return;
+
+    const army = nationStats(state, req.vassalId).units;
+    const amount = Math.max(2, Math.min(6, Math.floor(army * 0.35)));
+    let issued = false;
+
+    setState((prev) => {
+      const out = issueOrder(prev, PLAYER, req.vassalId, req.kind, rng, {
+        destId: cell.id,
+        amount,
+        turns: 10,
+      });
+      issued = out !== null;
+      return bump(prev);
+    });
+
+    setPlacing(null);
+    setOrderNote(
+      issued
+        ? v.name + '에게 명령했다 — ' + (req.kind === 'garrison' ? '주둔' : '이동') +
+          ' ' + amount + '명. 따를지는 저쪽이 정한다.'
+        : v.name + '은(는) 이미 그 자리에 가 있다. 아무것도 바뀌지 않는 명령은 내릴 수 없다.'
+    );
+    setShowVassals(true);
+  };
+
+  /** 자리가 필요 없는 명령 — 공격과 조공 */
+  const issuePlain = (vassalId: number, kind: OrderKind, target?: number) => {
+    const v = state.nations[vassalId];
+    if (!v) return;
+    let issued = false;
+    setState((prev) => {
+      const out = issueOrder(prev, PLAYER, vassalId, kind, rng, {
+        target,
+        amount: kind === 'tax' ? 0.15 : 3,
+        turns: 12,
+      });
+      issued = out !== null;
+      return bump(prev);
+    });
+    const foeName = target !== undefined ? state.nations[target]?.name ?? '' : '';
+    setOrderNote(
+      !issued
+        ? v.name + '에게 지금 내릴 수 있는 명령이 아니다.'
+        : kind === 'attack'
+          ? v.name + '에게 ' + foeName + ' 공격을 명했다. 정말 치는지는 전장을 봐야 안다.'
+          : v.name + '에게 조공을 더 걷기로 했다.'
+    );
+  };
+
+  const doPunish = (vassalId: number, kind: Punishment) => {
+    const v = state.nations[vassalId];
+    setState((prev) => {
+      punishVassal(prev, PLAYER, vassalId, kind);
+      updateAliveFlags(prev);
+      return bump(prev);
+    });
+    setOrderNote(
+      kind === 'war'
+        ? (v?.name ?? '') + '을(를) 토벌한다. 속국 관계는 끝났다.'
+        : (v?.name ?? '') + '을(를) 벌했다. 다른 속국들이 지켜보고 있다.'
+    );
   };
 
   /** 한 나라의 턴을 마친 뒤 공통으로 도는 것들 */
@@ -1036,6 +1150,23 @@ export default function GameScreen() {
             <Text style={styles.btnText}>리셋</Text>
           </TouchableOpacity>
         </View>
+        {myVassals.length > 0 && (
+          <View style={styles.row}>
+            <TouchableOpacity
+              style={[styles.btn, styles.vassalBtn, !myTurn && styles.btnDim]}
+              onPress={() => {
+                setOrderNote(null);
+                setShowVassals(true);
+              }}
+              disabled={!myTurn}
+            >
+              <Text style={styles.btnText}>
+                속국 {myVassals.length}
+                {pendingPunish > 0 ? ' · 불이행 ' + pendingPunish : ''}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {/* 판 짜기를 바꾸면 새 판으로 시작한다 */}
         <View style={styles.row}>
           {MODES.map((m, i) => (
@@ -1095,6 +1226,41 @@ export default function GameScreen() {
           <Text style={styles.bannerSub}>
             {state.turn}턴 · {state.winReason ?? '승리 조건 달성'}
           </Text>
+        </View>
+      )}
+
+      <VassalPanel
+        visible={showVassals && !placing}
+        state={state}
+        playerId={PLAYER}
+        note={orderNote}
+        onClose={() => setShowVassals(false)}
+        onPickPlace={(vassalId, kind) => {
+          setShowVassals(false);
+          setSelected(null);
+          setOrderNote(null);
+          setPlacing({ vassalId, kind });
+        }}
+        onOrder={issuePlain}
+        onPunish={doPunish}
+      />
+
+      {/* 자리를 고르는 동안은 지도가 주인공이다. 무엇을 고르는 중인지만 띄운다. */}
+      {placing && (
+        <View style={styles.placing}>
+          <Text style={styles.placingText}>
+            {state.nations[placing.vassalId]?.name}에게{' '}
+            {placing.kind === 'garrison' ? '진 칠 자리' : '옮겨갈 자리'}를 고르세요
+          </Text>
+          <TouchableOpacity
+            style={styles.placingCancel}
+            onPress={() => {
+              setPlacing(null);
+              setShowVassals(true);
+            }}
+          >
+            <Text style={styles.btnText}>취소</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1450,6 +1616,7 @@ const styles = StyleSheet.create({
   endBtn: { backgroundColor: '#3b82f6' },
   resetBtn: { backgroundColor: '#ef4444' },
   modeBtn: { backgroundColor: '#475569' },
+  vassalBtn: { backgroundColor: '#7c3aed' },
   recruitBtn: { backgroundColor: '#059669' },
   fortBtn: { backgroundColor: '#a16207' },
   toggle: { color: '#6b7280', fontSize: 11, textAlign: 'center' },
@@ -1462,6 +1629,29 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.88)',
     padding: 20,
     borderRadius: 12,
+  },
+  /*
+    고르는 중이라는 표시. 처음엔 화면 전체를 가로지르게 했더니 턴 수와 국고를
+    덮어서, 명령 하나 내리려다 판을 못 보게 됐다. 지도 위에만 얹는다.
+  */
+  placing: {
+    position: 'absolute',
+    top: 10,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(124,58,237,0.96)',
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+  },
+  placingText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  placingCancel: {
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 999,
   },
   bannerText: { color: '#fbbf24', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
   bannerSub: { color: '#9ca3af', fontSize: 13, textAlign: 'center', marginTop: 4 },
