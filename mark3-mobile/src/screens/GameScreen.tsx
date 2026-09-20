@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import Board3D from './Board3D';
+import { DIFFICULTIES, difficultyPolicy } from '../engine/difficulty';
 import Svg, { Polygon } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
 import {
@@ -63,6 +64,7 @@ import {
   LEARNED_WEIGHTS,
   AIWeights,
   chooseVassalOrAnnex,
+  Policy,
 } from '../engine/ai';
 
 const PLAYER = 0;
@@ -308,14 +310,19 @@ function bump(s: GameState): GameState {
 }
 
 /** 지금 차례인 나라 하나를 AI 로 두고, 다음 살아있는 나라로 넘긴다. */
-function playOneNation(s: GameState, rng: RNG): void {
+/** AI 나라에만 수입 배수를 건다. 사람은 늘 1.0 이다. */
+function applyHandicap(s: GameState, mul: number): void {
+  for (const nat of s.nations) nat.incomeMul = nat.id === PLAYER ? 1 : mul;
+}
+
+function playOneNation(s: GameState, rng: RNG, aiPolicy?: Policy): void {
   if (s.winner !== null) return;
   const id = s.current;
   const nation = s.nations[id];
 
   if (nation.alive) {
     beginTurn(s, id, rng);
-    const log = takeAITurn(s, id, AI_WEIGHTS[id] ?? PERSONALITIES['균형'], rng);
+    const log = takeAITurn(s, id, AI_WEIGHTS[id] ?? PERSONALITIES['균형'], rng, undefined, aiPolicy);
     restUnmoved(s, id, log.moved);
     for (const a of log.attacks) {
       const res = a.result;
@@ -365,6 +372,7 @@ export default function GameScreen() {
   const [state, setState] = useState<GameState>(() => {
     const size = SIZES[startSize.current];
     const s = createGameState(MODES[0].nations, size, size, rng);
+    applyHandicap(s, DIFFICULTIES[2].incomeMul);
     beginTurn(s, PLAYER, rng);
     return s;
   });
@@ -379,6 +387,10 @@ export default function GameScreen() {
   // 3D 는 웹에서만. 네이티브는 expo-gl 위에서 따로 붙여야 한다.
   const [use3D, setUse3D] = useState(Platform.OS === 'web');
   const can3D = Platform.OS === 'web';
+  const [diffIdx, setDiffIdx] = useState(2); // 보통
+  const difficulty = DIFFICULTIES[diffIdx];
+  // 난이도는 '수를 고르는 방식'으로 들어간다. 평가식은 그대로 두고 고르는 데서만 흔든다.
+  const aiPolicy = useMemo(() => difficultyPolicy(difficulty, rng), [difficulty, rng]);
   /** 마지막 본진을 빼앗았을 때의 처분 선택 */
   const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
   /**
@@ -435,7 +447,7 @@ export default function GameScreen() {
     if (!watching || state.winner !== null) return;
     const t = setTimeout(() => {
       setState((prev) => {
-        playOneNation(prev, rng);
+        playOneNation(prev, rng, aiPolicy);
         return bump(prev);
       });
     }, SPEEDS[speedIdx].ms);
@@ -543,7 +555,14 @@ export default function GameScreen() {
         prev.current = i;
         if (prev.nations[i].alive && prev.winner === null) {
           beginTurn(prev, i, rng);
-          const log = takeAITurn(prev, i, AI_WEIGHTS[i] ?? PERSONALITIES['균형'], rng);
+          const log = takeAITurn(
+            prev,
+            i,
+            AI_WEIGHTS[i] ?? PERSONALITIES['균형'],
+            rng,
+            undefined,
+            aiPolicy
+          );
           restUnmoved(prev, i, log.moved);
           stepMerchants(prev);
           stepNeutrals(prev, rng);
@@ -569,13 +588,15 @@ export default function GameScreen() {
     });
   };
 
-  const reset = (idx = modeIdx, sIdx = sizeIdx) => {
+  const reset = (idx = modeIdx, sIdx = sizeIdx, dIdx = diffIdx) => {
     setWatching(false);
     setModeIdx(idx);
     setSizeIdx(sIdx);
+    setDiffIdx(dIdx);
     setState(() => {
       const size = SIZES[sIdx];
       const s = createGameState(MODES[idx].nations, size, size, rng);
+      applyHandicap(s, DIFFICULTIES[dIdx].incomeMul);
       beginTurn(s, PLAYER, rng);
       return s;
     });
@@ -956,8 +977,20 @@ export default function GameScreen() {
           ))}
         </View>
         <Text style={styles.toggle}>
-          판 크기 — {SIZES[sizeIdx]}x{SIZES[sizeIdx]} 격자 · {tileCount(SIZES[sizeIdx])}칸
+          난이도 {difficulty.label} · 판 {SIZES[sizeIdx]}x{SIZES[sizeIdx]} ·{' '}
+          {tileCount(SIZES[sizeIdx])}칸
         </Text>
+        <View style={styles.row}>
+          {DIFFICULTIES.map((d, i) => (
+            <TouchableOpacity
+              key={d.label}
+              style={[styles.sizeBtn, i !== diffIdx && styles.btnDim]}
+              onPress={() => reset(modeIdx, sizeIdx, i)}
+            >
+              <Text style={styles.sizeText}>{d.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
         <View style={styles.row}>
           {SIZES.map((sz, i) => (
             <TouchableOpacity

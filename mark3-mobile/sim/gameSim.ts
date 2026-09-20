@@ -66,11 +66,14 @@ export function playGame(
   eco: EconomyConfig = DEFAULT_ECONOMY,
   record?: RecordOptions,
   /** 나라별로 수를 고르는 방식. 비워두면 손으로 쓴 평가식을 쓴다. */
-  policies?: (Policy | undefined)[]
+  policies?: (Policy | undefined)[],
+  /** 판을 만든 직후 한 번 불린다. 난이도 핸디캡처럼 나라에 값을 박을 때 쓴다. */
+  setup?: (state: GameState) => void
 ): GameResult {
   const n = weightsPerNation.length;
   const state = createGameState(n, rows, cols, rng, eco);
   for (const nat of state.nations) nat.isHuman = false;
+  setup?.(state);
 
   const attacksMade = new Array(n).fill(0);
   const attacksWon = new Array(n).fill(0);

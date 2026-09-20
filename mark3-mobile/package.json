@@ -19,7 +19,8 @@
     "sim:probe": "tsx sim/probe.ts",
     "sim:command": "tsx sim/command.ts",
     "sim:concentration": "tsx sim/concentration.ts",
-    "sim:balance": "tsx sim/balance.ts"
+    "sim:balance": "tsx sim/balance.ts",
+    "sim:difficulty": "tsx sim/difficulty.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",

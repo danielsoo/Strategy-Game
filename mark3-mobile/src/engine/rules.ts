@@ -312,6 +312,8 @@ export function computeLedger(
     income += units * eco.forageIncomePerUnit * (0.5 + fear / 100);
   }
 
+  income *= state.nations[nationId]?.incomeMul ?? 1;
+
   const upkeep = units * eco.unitUpkeep;
   const admin = Math.pow(cells, eco.adminExponent) * eco.adminCostPerCell;
   return { income, upkeep, admin, net: income - upkeep - admin, cells, units };

@@ -125,6 +125,13 @@ export interface Nation {
    * voluntary 위협에 시달리다 정의로운 나라에 보호를 청함 — 조공은 적지만 안정적
    */
   vassalOrigin: 'conquest' | 'voluntary' | null;
+  /**
+   * 이 나라의 수입 배수. 난이도 핸디캡에 쓴다.
+   *
+   * 판단 품질로 만드는 난이도에는 천장이 있다 — AI 의 최선보다 세게는 못
+   * 만든다. 그 위는 이렇게 자원으로 올린다.
+   */
+  incomeMul?: number;
 }
 
 export interface GameState {
