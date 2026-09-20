@@ -186,7 +186,48 @@ const HELP: Array<{ title: string; body: string }> = [
 ];
 
 /** 넓은 화면에서 왼쪽 정보 칸의 너비 */
-const PANE_W = 430;
+const PANE_W = 300;
+
+/** 세로로 쌓을 때 판 위아래가 쓰는 대략의 높이 (머리말 + 표 + 사건 + 버튼) */
+const CHROME_H = 300;
+
+/**
+ * 판이 실제로 차지하는 칸 수. 가로는 홀수 행이 반 칸 밀린 만큼 더 넓다.
+ * layout() 과 같은 셈이지만, 어느 배치를 쓸지 먼저 정하려면 상자 크기 없이
+ * 이 값만 있으면 된다.
+ */
+function boardUnits(cells: Cell[]): { w: number; h: number } {
+  let minCol = Infinity;
+  let maxCol = -Infinity;
+  let minRow = Infinity;
+  let maxRow = -Infinity;
+  let odd = false;
+  for (const c of cells) {
+    if (c.offMap) continue;
+    if (c.col < minCol) minCol = c.col;
+    if (c.col > maxCol) maxCol = c.col;
+    if (c.row < minRow) minRow = c.row;
+    if (c.row > maxRow) maxRow = c.row;
+    if (c.row % 2 === 1) odd = true;
+  }
+  if (minCol === Infinity) return { w: 1, h: 1 };
+  return { w: maxCol - minCol + 1 + (odd ? 0.5 : 0), h: (maxRow - minRow) * 0.75 + 1 };
+}
+
+/**
+ * 옆에 두는 배치가 더 나은가.
+ *
+ * 창이 세로로 길면 옆에 두는 쪽이 오히려 손해다. 육각 판은 가로:세로가
+ * 1.17:1 쯤인데, 왼쪽 칸이 가로를 먹으면 가로가 먼저 차서 세로가 남는다.
+ * 1024x768 에서 재보니 판이 553x493 이고 아래로 259px 이 놀고 있었다.
+ *
+ * 그래서 고정된 폭으로 가르지 않고 두 배치의 칸 크기를 직접 비교한다.
+ */
+function preferSide(cells: Cell[], winW: number, winH: number): boolean {
+  const u = boardUnits(cells);
+  const hexOf = (w: number, h: number) => Math.min(w / (Math.sqrt(3) * u.w), h / (2 * u.h));
+  return hexOf(winW - PANE_W - 16, winH - 16) > hexOf(winW, winH - CHROME_H);
+}
 
 const SPEEDS: Array<{ label: string; ms: number }> = [
   { label: '느리게', ms: 900 },
@@ -282,8 +323,8 @@ export default function GameScreen() {
    * 세로로만 쌓으면 판의 크기를 세로가 먼저 제한해서, 가로로 넓은 화면에서는
    * 옆이 텅 빈 채로 판이 작아진다. 휴대폰(세로)에서는 그대로 아래로 쌓는다.
    */
-  const { width: winW } = useWindowDimensions();
-  const wide = winW >= 900;
+  const { width: winW, height: winH } = useWindowDimensions();
+  const wide = useMemo(() => preferSide(state.cells, winW, winH), [state.cells, winW, winH]);
 
   /** 판을 그릴 수 있는 실제 크기. onLayout 으로 받는다. */
   const [boardBox, setBoardBox] = useState({ width: 0, height: 0 });
