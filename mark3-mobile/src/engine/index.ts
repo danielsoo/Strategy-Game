@@ -4,3 +4,4 @@ export * from './ai';
 export * from './vassals';
 export * from './vision';
 export * from './orders';
+export * from './path';

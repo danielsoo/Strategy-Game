@@ -11,6 +11,8 @@ interface Props {
   watching: boolean;
   selected: string | null;
   movable: Set<string>;
+  /** 물어본 길 — 출발 칸부터 목적지까지, 밟는 턴과 함께 */
+  path?: Array<{ id: string; turn: number }>;
   onCellPress: (c: Cell) => void;
 }
 const NO_RAYCAST = () => {};
@@ -120,6 +122,61 @@ function WarMist({ cells, memory }: { cells: Mist[]; memory: boolean }) {
   </instancedMesh>;
 }
 
+/**
+ * 길 위의 화살표 한 마디.
+ *
+ * 칸 사이에 가늘고 긴 상자를 눕히고 끝에 원뿔을 세운다. 2D 처럼 선을 그을 수
+ * 없으니 실제 물체로 만든다. 판 위에 살짝 띄워 지형에 파묻히지 않게 한다.
+ */
+function PathArrow({ from, to }: { from: V3; to: V3 }) {
+  const { mid, angle, length } = useMemo(() => {
+    const dx = to[0] - from[0];
+    const dz = to[2] - from[2];
+    const len = Math.hypot(dx, dz);
+    return {
+      mid: [from[0] + dx / 2, Math.max(from[1], to[1]) + 0.42, from[2] + dz / 2] as V3,
+      angle: Math.atan2(dx, dz),
+      length: len,
+    };
+  }, [from, to]);
+  if (length <= 0.001) return null;
+  const shaft = Math.max(0.05, length - 0.42);
+  return (
+    <group position={mid} rotation={[0, angle, 0]} raycast={NO_RAYCAST}>
+      <mesh position={[0, 0, -0.21]} raycast={NO_RAYCAST} renderOrder={5}>
+        <boxGeometry args={[0.11, 0.04, shaft]} />
+        <meshBasicMaterial color="#38bdf8" toneMapped={false} depthTest={false} />
+      </mesh>
+      <mesh position={[0, 0, length / 2 - 0.19]} rotation={[Math.PI / 2, 0, 0]} raycast={NO_RAYCAST} renderOrder={5}>
+        <coneGeometry args={[0.16, 0.34, 8]} />
+        <meshBasicMaterial color="#38bdf8" toneMapped={false} depthTest={false} />
+      </mesh>
+    </group>
+  );
+}
+
+/** 그 턴에 발이 멈추는 칸에 붙는 '3턴' 표 */
+function TurnBadge({ tile, turn }: { tile: Ground; turn: number }) {
+  const label = turn === 0 ? '지금' : `${turn}턴`;
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#082030'; ctx.fillRect(16, 9, 96, 46);
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 3; ctx.strokeRect(16, 9, 96, 46);
+    ctx.fillStyle = '#bae6fd'; ctx.font = 'bold 30px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(label, 64, 33);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    return map;
+  }, [label]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return <sprite position={[tile.position[0], tile.height + 0.75, tile.position[2]]}
+    scale={[0.66, 0.33, 1]} raycast={NO_RAYCAST} renderOrder={6}>
+    <spriteMaterial map={texture} transparent depthTest={false} toneMapped={false} />
+  </sprite>;
+}
+
 function TroopCount({ tile }: { tile: Ground }) {
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -174,8 +231,31 @@ class SceneBoundary extends React.Component<{ children: React.ReactNode }, { fai
   }
 }
 
-export default function Board3D({ state, player, watching, selected, movable, onCellPress }: Props) {
+export default function Board3D({ state, player, watching, selected, movable, path, onCellPress }: Props) {
   const scene = useMemo(() => buildMedievalScene(state, player, watching), [state, player, watching]);
+
+  /**
+   * 길 위의 칸들을 실제 타일로 바꾼다. 화면에 없는 칸(안개 밖, 깎인 바깥)은
+   * 빠지므로, 화살표는 이어진 부분만 그려진다.
+   */
+  const pathTiles = useMemo(() => {
+    if (!path || path.length < 2) return [] as Array<{ tile: Ground; turn: number }>;
+    const byId = new Map(scene.ground.map((t) => [t.cell.id, t]));
+    const out: Array<{ tile: Ground; turn: number }> = [];
+    for (const p of path) {
+      const tile = byId.get(p.id);
+      if (tile) out.push({ tile, turn: p.turn });
+    }
+    return out;
+  }, [path, scene.ground]);
+
+  /** 턴마다 발이 멈추는 마지막 칸. 칸마다 숫자를 붙이면 길이 숫자에 묻힌다. */
+  const turnStops = useMemo(() => {
+    const last = new Map<number, Ground>();
+    for (const p of pathTiles) if (p.turn >= 0) last.set(p.turn, p.tile);
+    return [...last.entries()].map(([turn, tile]) => ({ turn, tile }));
+  }, [pathTiles]);
+
   const unknownMist = useMemo(() => scene.mist.filter(c => !c.memory), [scene]);
   const memoryMist = useMemo(() => scene.mist.filter(c => c.memory), [scene]);
   const [yaw, setYaw] = useState(0.12);
@@ -243,6 +323,9 @@ export default function Board3D({ state, player, watching, selected, movable, on
         <WarMist cells={unknownMist} memory={false} />
         <WarMist cells={memoryMist} memory />
         {scene.ground.filter(t => t.seen && t.cell.units > 0).map(t => <TroopCount key={t.cell.id} tile={t} />)}
+        {pathTiles.map((t, i) => i === 0 ? null :
+          <PathArrow key={'a' + t.tile.cell.id} from={pathTiles[i - 1].tile.position} to={t.tile.position} />)}
+        {turnStops.map(({ tile, turn }) => <TurnBadge key={'b' + tile.cell.id} tile={tile} turn={turn} />)}
       </Canvas>
     </SceneBoundary>
     <View pointerEvents="none" style={styles.heading}>

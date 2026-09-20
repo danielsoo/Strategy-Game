@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import Board3D from './Board3D';
 import { DIFFICULTIES, difficultyPolicy } from '../engine/difficulty';
-import Svg, { Polygon } from 'react-native-svg';
+import Svg, { Polygon, Polyline } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
 import {
   Cell,
@@ -57,6 +57,8 @@ import {
   isVisible,
   isExplored,
   knownCell,
+  findPath,
+  nextStep,
   stepOrders,
   stepRebellion,
   issueOrder,
@@ -437,6 +439,9 @@ export default function GameScreen() {
   );
   const [orderNote, setOrderNote] = useState<string | null>(null);
 
+  /** 길을 물어본 칸. 같은 칸을 한 번 더 누르면 그리로 보낸다. */
+  const [pathTo, setPathTo] = useState<string | null>(null);
+
   const pendingRef = useRef<{ gen: ReturnType<typeof takeAITurnGen>; idx: number } | null>(null);
   /**
    * 이번 턴에 이미 움직인 내 부대들 (부대가 도착한 칸의 id).
@@ -510,6 +515,38 @@ export default function GameScreen() {
     [myVassals]
   );
 
+  /**
+   * 물어본 길. 실제 이동과 같은 함수로 재므로 여기 뜬 턴 수는 거짓말하지 않는다.
+   */
+  const preview = useMemo(() => {
+    if (!selectedCell || !pathTo || !myTurn) return null;
+    const to = state.cells.find((c) => c.id === pathTo);
+    if (!to || to.offMap) return null;
+    return findPath(
+      state,
+      selectedCell,
+      to,
+      DEFAULT_ECONOMY,
+      !actedRef.current.has(selectedCell.id)
+    );
+  }, [state, selectedCell, pathTo, myTurn]);
+
+  /** 3D 판에 넘길 길 — 출발 칸을 앞에 붙인다. 화살표는 칸과 칸 사이를 잇는다. */
+  const path3D = useMemo(() => {
+    if (!preview || !selectedCell || preview.steps.length === 0) return undefined;
+    return [
+      { id: selectedCell.id, turn: -1 },
+      ...preview.steps.map((s) => ({ id: s.cell.id, turn: s.turn })),
+    ];
+  }, [preview, selectedCell]);
+
+  /** 길 위의 칸 → 그 칸을 밟는 턴 */
+  const pathTurns = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of preview?.steps ?? []) m.set(s.cell.id, s.turn);
+    return m;
+  }, [preview]);
+
   const movable = useMemo(() => {
     if (!selectedCell || !myTurn) return new Set<string>();
     const out = new Set<string>();
@@ -552,9 +589,34 @@ export default function GameScreen() {
 
     if (cell.id === selected) {
       setSelected(null);
+      setPathTo(null);
       return;
     }
     if (!movable.has(cell.id) || !selectedCell) {
+      /*
+        이번 턴엔 못 닿는 곳을 찍었다. 예전에는 그냥 선택이 풀렸는데,
+        그러면 "저기까지 몇 턴이지?"에 답할 방법이 없었다. 한 번 찍으면 길과
+        걸리는 턴을 보여주고, 같은 곳을 다시 찍으면 그리로 보낸다.
+      */
+      if (selectedCell && !cell.offMap && cell.id !== selectedCell.id) {
+        if (pathTo === cell.id) {
+          const plan = findPath(state, selectedCell, cell, DEFAULT_ECONOMY, !actedRef.current.has(selectedCell.id));
+          if (plan) {
+            setState((prev) => {
+              const from = prev.cells.find((c) => c.id === selectedCell.id);
+              if (from) from.order = { destId: cell.id, age: 0 };
+              advanceGotos(prev, actedRef.current);
+              return bump(prev);
+            });
+          }
+          setPathTo(null);
+          setSelected(null);
+          return;
+        }
+        setPathTo(cell.id);
+        return;
+      }
+      setPathTo(null);
       setSelected(null);
       return;
     }
@@ -592,6 +654,42 @@ export default function GameScreen() {
       return bump(prev);
     });
     setSelected(null);
+  };
+
+  /**
+   * 목적지를 받은 내 부대를 한 칸씩 옮긴다.
+   *
+   * 문명의 이동 명령과 같다 — 먼 곳을 찍어두면 매 턴 알아서 한 칸씩 간다.
+   * 다만 적을 만나면 멈추고 목적지를 지운다. 싸울지 말지는 사람이 정할 일이지
+   * 자동으로 밀어 넣을 일이 아니다.
+   */
+  const advanceGotos = (s: GameState, acted: Set<string>) => {
+    const queued = s.cells
+      .filter((c) => c.owner === PLAYER && c.units > 0 && !c.neutral && c.order)
+      .map((c) => c.id);
+
+    for (const id of queued) {
+      const c = s.cells.find((x) => x.id === id);
+      if (!c || !c.order || c.owner !== PLAYER || c.units <= 0) continue;
+      // 이번 턴에 이미 움직인 부대는 건너뛴다
+      if (acted.has(c.id)) continue;
+
+      const dest = s.cells.find((x) => x.id === c.order!.destId);
+      if (!dest || dest.id === c.id) {
+        c.order = undefined;
+        continue;
+      }
+      const next = nextStep(s, c, dest);
+      if (!next) continue; // 행군력이 모자라다. 이번 턴은 쉰다.
+      if (isHostile(c, next, s) || !canMoveTo(c, next)) {
+        c.order = undefined;
+        continue;
+      }
+      moveStack(c, next);
+      acted.add(next.id);
+      if (next.id === dest.id) next.order = undefined;
+    }
+    recomputeVision(s, PLAYER);
   };
 
   /**
@@ -684,8 +782,12 @@ export default function GameScreen() {
   const finishRound = (s: GameState) => {
     s.turn++;
     s.current = PLAYER;
-    if (s.nations[PLAYER].alive && s.winner === null) beginTurn(s, PLAYER, rng);
     actedRef.current = new Set();
+    if (s.nations[PLAYER].alive && s.winner === null) {
+      beginTurn(s, PLAYER, rng);
+      // 찍어둔 목적지로 한 칸씩. 행군력이 찬 뒤라야 제대로 간다.
+      advanceGotos(s, actedRef.current);
+    }
   };
 
   /**
@@ -792,6 +894,69 @@ export default function GameScreen() {
   };
 
   // ── 렌더 ────────────────────────────────────────────────
+
+  /**
+   * 길을 판 위에 겹쳐 그린다.
+   *
+   * 칸마다 따로 Svg 를 두는 구조라 칸과 칸 사이에는 아무것도 그릴 수 없다.
+   * 그래서 판 전체를 덮는 Svg 를 하나 더 얹는다. 눌리지는 않아야 하므로
+   * pointerEvents 는 none 이다.
+   */
+  const renderPath = (lay: Layout) => {
+    if (!preview || !selectedCell || preview.steps.length === 0) return null;
+    const cx = (c: Cell) => lay.x(c) + lay.w / 2;
+    const cy = (c: Cell) => lay.y(c) + lay.h / 2;
+
+    const pts = [selectedCell, ...preview.steps.map((s) => s.cell)];
+    const line = pts.map((c) => `${cx(c)},${cy(c)}`).join(' ');
+
+    // 각 턴의 마지막 칸에만 숫자를 붙인다. 칸마다 붙이면 길이 숫자에 묻힌다.
+    const lastOfTurn = new Map<number, Cell>();
+    for (const s of preview.steps) lastOfTurn.set(s.turn, s.cell);
+
+    return (
+      <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+        <Svg width={lay.width} height={lay.height}>
+          <Polyline
+            points={line}
+            fill="none"
+            stroke="#38bdf8"
+            strokeWidth={Math.max(2, lay.hex * 0.14)}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            opacity={0.85}
+          />
+          {pts.slice(1).map((c, i) => {
+            // 화살촉 — 앞 칸에서 이 칸으로 향하는 방향
+            const prev = pts[i];
+            const ang = Math.atan2(cy(c) - cy(prev), cx(c) - cx(prev));
+            const r = Math.max(4, lay.hex * 0.3);
+            const tipX = cx(c) - Math.cos(ang) * r * 0.2;
+            const tipY = cy(c) - Math.sin(ang) * r * 0.2;
+            const head = [0, 2.6, -2.6]
+              .map((off) => {
+                const a = ang + Math.PI + off;
+                const d = off === 0 ? 0 : r;
+                return `${tipX + Math.cos(a) * d},${tipY + Math.sin(a) * d}`;
+              })
+              .join(' ');
+            return <Polygon key={`h${c.id}`} points={head} fill="#38bdf8" opacity={0.95} />;
+          })}
+        </Svg>
+        {[...lastOfTurn.entries()].map(([turn, c]) => (
+          <View
+            key={`t${turn}`}
+            style={[
+              styles.turnBadge,
+              { left: cx(c) - 13, top: cy(c) - 10, borderColor: '#38bdf8' },
+            ]}
+          >
+            <Text style={styles.turnBadgeText}>{turn === 0 ? '지금' : `${turn}턴`}</Text>
+          </View>
+        ))}
+      </View>
+    );
+  };
 
   const renderCell = (cell: Cell, lay: Layout) => {
     if (cell.offMap) return null; // 깎여나간 바깥은 그리지 않는다
@@ -1063,6 +1228,7 @@ export default function GameScreen() {
               watching={watching}
               selected={selected}
               movable={movable}
+              path={path3D}
               onCellPress={onCellPress}
             />
           </View>
@@ -1070,6 +1236,7 @@ export default function GameScreen() {
           lay && (
             <View style={{ width: lay.width, height: lay.height }}>
               {state.cells.map((c) => renderCell(c, lay))}
+              {renderPath(lay)}
             </View>
           )
         )}
@@ -1107,6 +1274,21 @@ export default function GameScreen() {
             {selectedCell.units >= stackCap() ? ` · 정원 ${stackCap()}명 (합류 불가)` : ''}
             {movable.size === 0 && myTurn ? ' · 이번 턴엔 움직일 수 없다' : ''}
           </Text>
+          {/*
+            먼 곳을 찍으면 몇 턴 걸리는지 여기에 뜬다. 한 번 더 누르면 보낸다 —
+            찍자마자 보내면 길을 물어볼 수가 없다.
+          */}
+          {preview ? (
+            <Text style={styles.pathNote}>
+              {preview.steps.length}칸 ·{' '}
+              {preview.turns === 0 ? '이번 턴에 도착' : `${preview.turns}턴 후 도착`} — 한 번 더
+              누르면 보낸다
+            </Text>
+          ) : selectedCell.order ? (
+            <Text style={styles.pathNote}>
+              가는 중 — 목적지 {selectedCell.order.destId}
+            </Text>
+          ) : null}
           {fortCheck?.ok ? (
             <TouchableOpacity style={[styles.btn, styles.fortBtn]} onPress={buildFortHandler()}>
               <Text style={styles.btnText}>요새 건설 ({DEFAULT_ECONOMY.fortCost}G)</Text>
@@ -1607,6 +1789,16 @@ const styles = StyleSheet.create({
   panelTitle: { color: '#e5e7eb', fontSize: 12, marginBottom: 6 },
   panelNote: { color: '#9ca3af', fontSize: 11, marginBottom: 6 },
   hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic' },
+  turnBadge: {
+    position: 'absolute',
+    backgroundColor: 'rgba(8,20,30,0.92)',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  turnBadgeText: { color: '#bae6fd', fontSize: 10, fontWeight: 'bold' },
+  pathNote: { color: '#7dd3fc', fontSize: 11, marginBottom: 6 },
 
   footer: { backgroundColor: '#1f1f1f', padding: 10, gap: 6 },
   row: { flexDirection: 'row', gap: 6 },

@@ -178,7 +178,9 @@ function endOrder(
     issuedTurn: o.issuedTurn,
     endedTurn: state.turn,
     accepted,
-    unverified: !accepted && o.observedTurn < 0,
+    // 대놓고 거부한 명령은 그 자리에서 드러난 것이다. observedTurn 만 보면
+    // 종주국이 두 귀로 들은 거부가 '확인하지 못했다'로 기록된다.
+    unverified: !accepted && !o.revealed && o.observedTurn < 0,
     witnessed: o.witnessed,
     truth: o.progress,
     response: o.response,
