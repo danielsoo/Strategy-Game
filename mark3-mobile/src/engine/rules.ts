@@ -401,11 +401,27 @@ export function desertionGrace(n: Nation, eco: EconomyConfig = DEFAULT_ECONOMY):
 // 전투력 / 전투
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * 지키는 쪽의 전력 배수.
+ *
+ * 본진 1.2 · 요새 1.3 은 너무 물렀다. 평지 본진이면 6명이 7.2명 값이라
+ * 10명만 데려오면 그냥 뚫렸고, AI 가 본진을 우선 노리게 하자 게임이 58턴으로
+ * 짧아졌다. 성이란 적은 수로 많은 수를 막으라고 짓는 것이다.
+ *
+ * 짓는 중인 요새에도 조금 준다 — 공사장이라도 없는 것보다는 낫다.
+ */
 export function defenseMultiplier(c: Cell): number {
-  let def = terrainDefense(c.terrain);
-  if (c.fortStage === 4) def *= 1.3;
-  if (c.castle) def *= 1.2;
-  return def;
+  let works = c.fortStage === 4 ? 1.5 : c.fortStage > 0 ? 1.1 : 1;
+  if (c.castle) works *= 1.6;
+
+  // 포위되면 보급이 끊긴다. 성벽은 그대로지만 지키는 힘은 대부분 사라진다.
+  //
+  // 성을 단단하게만 만들면 웅크리는 쪽이 이긴다 — 실제로 수비형이 40% 로
+  // 독주했다. 요새를 무너뜨리는 정석은 정면 돌격이 아니라 에워싸는 것이고,
+  // 그 길을 열어줘야 공성이 성립한다.
+  if (c.encircled) works = 1 + (works - 1) * 0.35;
+
+  return terrainDefense(c.terrain) * works;
 }
 
 export function cellPower(c: Cell, isDefender: boolean): number {

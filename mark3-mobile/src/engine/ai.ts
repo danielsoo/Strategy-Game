@@ -275,7 +275,9 @@ function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress'>): Cell 
     // 부유한 나라가 우선 표적이다. 국고를 쌓아둔 선두가 저절로 매를 번다.
     const gold = h.owner !== null ? ctx.state.nations[h.owner].gold : 0;
     const prize = ctx.w.castleAssault + wealthValue(gold, ctx.w);
-    const score = prize / (1 + defense * 0.5) - dist * 0.6;
+    // 헐거운 본진일수록 크게 끌린다. 본진을 잃은 나라는 징병도 수입도 끊겨
+    // 들판의 군대가 저절로 스러지므로, 지금 비어 있다면 그게 곧 기회다.
+    const score = prize / (1 + defense * 0.7) - dist * 0.6;
     if (score > bestScore) {
       bestScore = score;
       best = h;
@@ -473,11 +475,16 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       // AI 가 평화롭게 빈 땅만 먹고 전쟁을 아예 하지 않는다.
       // 약탈 기대액이 먼저다. 땅과 병력은 그다음.
       const loot = plunderValue(ctx.state, n, ctx.eco);
+      // 본진은 헐거울 때 바로 무너뜨려야 한다. 전력이 앞설수록 값이 커진다 —
+      // 나중에 고쳐 앉은 본진을 치는 것보다 지금 비어 있을 때 치는 것이 싸다.
+      const edge = n.castle
+        ? Math.min(1, Math.max(0, (myPower + myFlank) / Math.max(0.5, cellPower(n, true) + theirFlank) - 1))
+        : 0;
       const prize =
         wealthValue(loot, w) +
         w.territory +
         w.units * n.units * 1.4 +
-        (n.castle ? w.castleAssault : 0) +
+        (n.castle ? w.castleAssault * (1 + edge) : 0) +
         (n.fortStage === 4 ? w.fort : 0) +
         positionValue(ctx, n);
       // 비용은 '내 군대 전체'가 아니라 '예상 사상자'다.

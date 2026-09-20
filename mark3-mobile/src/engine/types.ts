@@ -126,6 +126,8 @@ export interface GameState {
   /** 나라별 시야. 인덱스는 nation.id 와 같다. */
   vision: NationVision[];
   winner: number | null;
+  /** 왜 이겼는가. "승리"만 띄우면 무엇 때문인지 알 수가 없다. */
+  winReason?: string;
 }
 
 export interface EconomyConfig {

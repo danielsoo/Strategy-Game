@@ -212,6 +212,7 @@ export function checkBlocVictory(
   if (leaders.size === 1) {
     const [leader] = [...leaders];
     state.winner = leader;
+    state.winReason = '살아남은 나라가 모두 한 진영이 되었습니다 (패권)';
     pushLog(state, `${state.nations[leader].name}이(가) 패권을 잡았습니다`);
     return;
   }
@@ -221,7 +222,9 @@ export function checkBlocVictory(
   // 부대가 뭉치고 서로 도우면서 잘 죽지 않게 되자 게임의 절반이 턴 제한에
   // 걸렸다. 끝까지 다 잡아먹어야만 이기는 구조면 후반이 늘어진다.
   // 지도의 절반 가까이를 쥐고 2위를 두 배 이상 앞서면 승부는 난 것이다.
-  const total = state.rows * state.cols;
+  // 판은 사각 격자 안에 깎아낸 육각형이다. 격자 넓이로 세면 실제보다 4분의 1쯤
+  // 크게 잡혀, 압도적 우위 승리가 의도보다 어려워진다.
+  const total = state.cells.reduce((n, c) => (c.offMap ? n : n + 1), 0);
   const scores = [...leaders]
     .map((id) => ({ id, inf: influenceOf(state, id, eco) }))
     .sort((a, b) => b.inf - a.inf);
@@ -229,6 +232,7 @@ export function checkBlocVictory(
   const second = scores[1];
   if (top && top.inf >= total * 0.55 && (!second || top.inf >= second.inf * 2.5)) {
     state.winner = top.id;
+    state.winReason = `영향력 ${top.inf.toFixed(0)} — 판의 절반을 넘기고 2위를 두 배 이상 앞섰습니다`;
     pushLog(
       state,
       `${state.nations[top.id].name}이(가) 압도적 우위로 승리했습니다 (영향력 ${top.inf.toFixed(0)})`

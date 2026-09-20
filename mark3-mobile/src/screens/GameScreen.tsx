@@ -658,20 +658,35 @@ export default function GameScreen() {
             stroke={
               isSel
                 ? '#fff'
+                : shownCastle
+                ? '#fbbf24'
+                : shownFort === 4
+                ? '#a78bfa'
                 : isActive
                 ? '#fde68a'
                 : seen && cell.hasRoad
                 ? '#a16207'
                 : 'rgba(255,255,255,0.14)'
             }
-            strokeWidth={isSel ? 3 : isActive ? 2 : seen && cell.hasRoad ? 2 : 1}
+            strokeWidth={
+              isSel ? 3 : shownCastle ? 3 : shownFort === 4 ? 2.5 : isActive ? 2 : seen && cell.hasRoad ? 2 : 1
+            }
           />
         </Svg>
         <View
           style={[styles.hexInner, { width: lay.w, height: lay.h }]}
           pointerEvents="none"
         >
-          {icon !== '' && <Text style={[styles.icon, !seen && styles.faded]}>{icon}</Text>}
+          {icon !== '' && (
+            <Text
+              style={[
+                shownCastle || shownFort === 4 ? styles.hubIcon : styles.icon,
+                !seen && styles.faded,
+              ]}
+            >
+              {icon}
+            </Text>
+          )}
           {merchant && <Text style={styles.merchant}>🚚</Text>}
           {seen && cell.units > 0 && (
             <Text style={[styles.units, isSpent && styles.spent]}>{cell.units}</Text>
@@ -949,7 +964,9 @@ export default function GameScreen() {
       {state.winner !== null && (
         <View style={styles.banner} pointerEvents="none">
           <Text style={styles.bannerText}>{state.nations[state.winner].name} 승리</Text>
-          <Text style={styles.bannerSub}>{state.turn}턴</Text>
+          <Text style={styles.bannerSub}>
+            {state.turn}턴 · {state.winReason ?? '승리 조건 달성'}
+          </Text>
         </View>
       )}
 
@@ -1223,6 +1240,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   icon: { position: 'absolute', top: 3, right: 3, fontSize: 11 },
+  // 본진·요새는 한눈에 들어와야 한다. 구석의 11px 그림으로는 안 보인다.
+  hubIcon: { position: 'absolute', top: -1, fontSize: 17 },
   merchant: { position: 'absolute', bottom: 3, left: 3, fontSize: 11 },
   units: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
   /** 이번 턴에 이미 움직인 부대 */
