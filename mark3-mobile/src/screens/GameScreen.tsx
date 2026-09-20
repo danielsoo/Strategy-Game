@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Modal,
+  useWindowDimensions,
+} from 'react-native';
 import Svg, { Polygon } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
 import {
@@ -57,13 +65,21 @@ import {
 const PLAYER = 0;
 
 /**
- * 판 짜기.
+ * 판 짜기. size 는 격자 한 변이고, 실제 판은 그 안에 깎아낸 육각형이다.
  *
- * 1대1 은 9x9 를 쓴다. 11x11 에서 둘이 두면 서로 만나기도 전에 턴이 끝난다 —
- * 60판 재보니 9x9 는 무승부 0%, 평균 55.8턴이었다.
+ *   9x9  →  61칸     11x11 →  91칸     13x13 → 127칸
+ *
+ * 사각 판을 육각형으로 깎으면 칸이 4분의 1쯤 준다. 처음에 1대1 을 9x9 로
+ * 뒀더니 61칸밖에 안 되어 평균 28턴, 공격 10회로 끝났다 — 접전 한 번에
+ * 승부가 나는 수준이다. 120판 재본 값:
+ *
+ *   1대1   61칸  턴 28 · 공격 10          91칸  턴 59 · 공격 13   ← 채택
+ *         127칸  턴 93 · 턴제한 39% (늘어짐)
+ *   5인    91칸  턴 75 · 공격 103 · 턴제한 12%   ← 채택
+ *         127칸  턴 111 · 턴제한 29%
  */
 const MODES = [
-  { label: '1대1', nations: 2, size: 9 },
+  { label: '1대1', nations: 2, size: 11 },
   { label: '5인 난전', nations: 5, size: 11 },
 ] as const;
 
@@ -130,6 +146,9 @@ function layout(cells: Cell[], maxW: number, maxH: number) {
 }
 
 type Layout = NonNullable<ReturnType<typeof layout>>;
+
+/** 넓은 화면에서 왼쪽 정보 칸의 너비 */
+const PANE_W = 430;
 
 const SPEEDS: Array<{ label: string; ms: number }> = [
   { label: '느리게', ms: 900 },
@@ -216,6 +235,15 @@ export default function GameScreen() {
    * bump() 로 다시 그리므로 별도 리렌더 신호가 필요 없기 때문이다.
    */
   const actedRef = useRef<Set<string>>(new Set());
+
+  /**
+   * 넓은 화면에서는 판을 오른쪽에 따로 띄운다.
+   *
+   * 세로로만 쌓으면 판의 크기를 세로가 먼저 제한해서, 가로로 넓은 화면에서는
+   * 옆이 텅 빈 채로 판이 작아진다. 휴대폰(세로)에서는 그대로 아래로 쌓는다.
+   */
+  const { width: winW } = useWindowDimensions();
+  const wide = winW >= 900;
 
   /** 판을 그릴 수 있는 실제 크기. onLayout 으로 받는다. */
   const [boardBox, setBoardBox] = useState({ width: 0, height: 0 });
@@ -492,7 +520,7 @@ export default function GameScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, wide && styles.pane]}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>턴 {state.turn}</Text>
           <View style={[styles.turnChip, { backgroundColor: current.color }]}>
@@ -557,7 +585,7 @@ export default function GameScreen() {
 
       {/* 수치 표 */}
       {showStats && (
-        <View style={styles.table}>
+        <View style={[styles.table, wide && styles.pane]}>
           <View style={styles.trHead}>
             <Text style={[styles.th, styles.colName]}>나라</Text>
             <Text style={styles.th}>영향력</Text>
@@ -619,7 +647,10 @@ export default function GameScreen() {
         판은 남은 공간을 꽉 채운다. onLayout 으로 실제로 받은 크기를 재서
         칸 크기를 거기 맞춘다 — 고정 픽셀로 두면 화면마다 잘리거나 남는다.
       */}
-      <View style={styles.gridWrap} onLayout={(e) => setBoardBox(e.nativeEvent.layout)}>
+      <View
+        style={[styles.gridWrap, wide && styles.gridWide]}
+        onLayout={(e) => setBoardBox(e.nativeEvent.layout)}
+      >
         {lay && (
           <View style={{ width: lay.width, height: lay.height }}>
             {state.cells.map((c) => renderCell(c, lay))}
@@ -628,7 +659,7 @@ export default function GameScreen() {
       </View>
 
       {/* 최근 사건 */}
-      <View style={styles.feed}>
+      <View style={[styles.feed, wide && styles.pane]}>
         {state.log.slice(-3).map((l, i) => (
           <Text key={i} style={styles.feedLine} numberOfLines={1}>
             · {l}
@@ -638,7 +669,7 @@ export default function GameScreen() {
       </View>
 
       {selectedCell && (
-        <View style={styles.panel}>
+        <View style={[styles.panel, wide && styles.pane]}>
           <Text style={styles.panelTitle}>
             병력 {selectedCell.units} · 사기 {Math.round(selectedCell.morale)} · 피로{' '}
             {Math.round(selectedCell.exhaustion)}
@@ -669,7 +700,7 @@ export default function GameScreen() {
         </View>
       )}
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, wide && styles.pane]}>
         <View style={styles.row}>
           <TouchableOpacity
             style={[
@@ -951,6 +982,9 @@ const styles = StyleSheet.create({
 
   // minHeight 0 이 없으면 flex 항목이 자기 내용보다 작아지지 않는다. 판이
   // 남은 공간을 먹고 아래 버튼을 화면 밖으로 밀어낸다.
+  // 넓은 화면: 왼쪽 정보 칸을 비워두고 나머지를 판이 차지한다
+  pane: { width: PANE_W },
+  gridWide: { position: 'absolute', left: PANE_W + 8, top: 8, right: 8, bottom: 8, marginTop: 0 },
   gridWrap: {
     flex: 1,
     minHeight: 0,
