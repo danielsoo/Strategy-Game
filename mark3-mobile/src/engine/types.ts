@@ -137,6 +137,13 @@ export interface Nation {
    * 만든다. 그 위는 이렇게 자원으로 올린다.
    */
   incomeMul?: number;
+  /**
+   * 종주국에게 받은 명령. 속국만 갖는다.
+   *
+   * response 는 속국의 속내다 — 종주국은 revealed 가 되기 전까지 모른다.
+   * '듣는 척'이 성립하려면 이 둘이 갈라져 있어야 한다.
+   */
+  order?: import('./orders').VassalOrder;
 }
 
 export interface GameState {

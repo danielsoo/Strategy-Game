@@ -271,7 +271,7 @@ export function extractFeatures(ctx: Ctx, c: Cell, a: Action): Float32Array {
 
   let winProb = 0;
   let loot = 0;
-  if (a.kind === 'attack' && isHostile(c, n)) {
+  if (a.kind === 'attack' && isHostile(c, n, state)) {
     const mine = myPower + flankingSupport(state, n, c, eco);
     const theirs = cellPower(n, true) + flankingSupport(state, n, n, eco);
     winProb = estimateWinProb(mine, theirs);

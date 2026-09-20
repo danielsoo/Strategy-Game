@@ -75,11 +75,50 @@ export function isEmptyLand(c: Cell): boolean {
 }
 
 /** 두 진영이 적대적인지. 중립 세력(owner=null, units>0)은 모두에게 적이다. */
-export function isHostile(a: Cell, b: Cell): boolean {
+/**
+ * 두 진영이 적대적인지. 중립 세력(owner=null, units>0)은 모두에게 적이다.
+ *
+ * 같은 진영(종주국과 그 속국들)끼리는 적이 아니다. 이걸 안 보던 때에는
+ * 나라 상대 공격의 48.9% 가 자기 진영을 치는 것이었다 — 조공을 걷으면서
+ * 동시에 전쟁을 하고 있었다.
+ *
+ * 진영 판단은 상태가 필요해서 밖에서 주입한다. state 없이 부르면 예전처럼
+ * 주인만 비교한다.
+ */
+export function isHostile(a: Cell, b: Cell, state?: GameState): boolean {
   if (b.units <= 0) return false;
   if (b.neutral) return true;
   if (a.neutral) return true;
-  return b.owner !== a.owner;
+  if (b.owner === a.owner) return false;
+  if (state && a.owner !== null && b.owner !== null) {
+    return blocOf(state, a.owner) !== blocOf(state, b.owner);
+  }
+  return true;
+}
+
+/**
+ * 이 칸이 나에게 적인가. 진영을 본다.
+ *
+ * 곳곳에서 `owner !== me` 로 적을 가리고 있었는데, 그러면 내 속국이 전부
+ * 적으로 잡힌다. 시야·태세·포위·협공이 모두 그 판단을 쓰므로 한 군데로 모은다.
+ */
+export function isFoeCell(state: GameState, me: number, c: Cell): boolean {
+  if (c.units <= 0) return false;
+  if (c.neutral) return true;
+  if (c.owner === null) return false;
+  return blocOf(state, c.owner) !== blocOf(state, me);
+}
+
+/** 이 나라가 속한 진영의 우두머리 */
+export function blocOf(state: GameState, nationId: number): number {
+  let cur = nationId;
+  const seen = new Set<number>();
+  while (true) {
+    const n = state.nations[cur];
+    if (!n || n.suzerain === null || seen.has(cur)) return cur;
+    seen.add(cur);
+    cur = n.suzerain;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -525,7 +564,7 @@ export function recomputeEncirclement(state: GameState): void {
       const n = cellAt(state, c.row + o.dr, c.col + o.dc);
       // 맵 밖은 적으로 치지 않는다 — 구석에 있다고 포위된 건 아니다
       if (!n) continue;
-      if (isHostile(c, n)) hostile++;
+      if (isHostile(c, n, state)) hostile++;
     }
     c.encircled = hostile >= 4;
   }

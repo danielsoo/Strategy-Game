@@ -26,6 +26,8 @@ import {
   checkBlocVictory,
   influenceOf,
   vassalsOf,
+  stepOrders,
+  stepRebellion,
 } from '../src/engine';
 import { takeAITurn, AIWeights, PERSONALITIES, Policy } from '../src/engine/ai';
 import { Recorder, MatchLog, snapshot as turnSnapshot, TurnSnapshot } from './recorder';
@@ -164,6 +166,8 @@ export function playGame(
       stepNeutrals(state, rng);
       collectTribute(state, eco);
       updateLoyalty(state, eco);
+      stepOrders(state, rng, eco);
+      stepRebellion(state, rng, eco);
       stepVoluntarySubmission(state, rng, eco);
       updateAliveFlags(state);
       checkBlocVictory(state);

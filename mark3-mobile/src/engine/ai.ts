@@ -29,6 +29,9 @@ import {
   recruit,
   commandLimit,
   defenseOptions,
+  isFoeCell,
+  blocOf,
+  nationStats,
   canMoveTo,
   canAttackFrom,
   merchantDestinations,
@@ -39,7 +42,8 @@ import {
   resolveCastleLoss,
   flankingSupport,
 } from './rules';
-import { vassalize } from './vassals';
+import { vassalize, vassalsOf } from './vassals';
+import { issueOrder, punishVassal } from './orders';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 import { DefenseChoice } from './defense';
 
@@ -280,7 +284,7 @@ function findDistress(
     if (c.owner !== me || c.units <= 0 || c.neutral) continue;
     let hostile = 0;
     for (const n of neighbors(state, c)) {
-      if (n.units > 0 && (n.neutral || n.owner !== me)) hostile += cellPower(n, false);
+      if (isFoeCell(state, me, n)) hostile += cellPower(n, false);
     }
     if (hostile <= 0) continue;
     const mine = cellPower(c, true);
@@ -399,7 +403,7 @@ function positionValue(ctx: Ctx, c: Cell): number {
 function riskAt(ctx: Ctx, c: Cell, myUnits: number, myPower: number): number {
   let hostile = 0;
   for (const n of neighbors(ctx.state, c)) {
-    if (n.units > 0 && (n.neutral || n.owner !== ctx.me)) hostile += cellPower(n, false);
+    if (isFoeCell(ctx.state, ctx.me, n)) hostile += cellPower(n, false);
   }
   if (hostile <= 0) return 0;
   const ratio = hostile / Math.max(0.001, myPower);
@@ -440,7 +444,7 @@ function assessPosture(ctx: Ctx, c: Cell, myPower: number): Assessment {
     if (x.units <= 0 || x.id === c.id) continue;
     const d = hexDistance(c.row, c.col, x.row, x.col);
     if (d > 2) continue;
-    const hostile = x.neutral || x.owner !== ctx.me;
+    const hostile = isFoeCell(ctx.state, ctx.me, x);
     if (hostile) {
       // 당장 맞붙을 적만 센다. 반경을 넓히고 완만하게 감쇠시키면 주변 적이
       // 전부 합산되어 거의 언제나 열세로 판정되고, 모두가 눈치만 보다 게임이 멎는다.
@@ -476,7 +480,7 @@ function assessPosture(ctx: Ctx, c: Cell, myPower: number): Assessment {
 function retreatValue(ctx: Ctx, n: Cell): number {
   let pressure = 0;
   for (const x of neighbors(ctx.state, n)) {
-    if (x.units > 0 && (x.neutral || x.owner !== ctx.me)) pressure += cellPower(x, false);
+    if (isFoeCell(ctx.state, ctx.me, x)) pressure += cellPower(x, false);
   }
   const terrain = terrainDefense(n.terrain) + (n.fortStage === 4 ? 0.4 : 0) + (n.castle ? 0.3 : 0);
   const homeward = 6 / (1 + minDist(n, ctx.hubs.length > 0 ? ctx.hubs : ctx.homes));
@@ -498,7 +502,7 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
   // 적이 붙어 있는 본진·요새를 두고 원정을 나가면 그 사이에 잃는다.
   let enemyAdjacent = 0;
   for (const n of neighbors(ctx.state, c)) {
-    if (n.units > 0 && (n.neutral || n.owner !== ctx.me)) enemyAdjacent += cellPower(n, false);
+    if (isFoeCell(ctx.state, ctx.me, n)) enemyAdjacent += cellPower(n, false);
   }
   const holdingCritical = (c.castle || c.fortStage === 4) && enemyAdjacent > 0;
   const holdBonus = holdingCritical ? w.homeDefense * 12 + enemyAdjacent * 0.8 : 0;
@@ -532,14 +536,14 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
     // 방금 떠나온 칸으로 되돌아가는 수에는 벌점. 기억이 없으면 두 칸 점수가
     // 비슷할 때 끝없이 오간다 — 후반 이동의 3분의 2가 그런 왕복이었다.
     // 공격은 예외다. 물러났다가 다시 치는 것은 왕복이 아니라 전술이다.
-    const backtrack = n.id === c.lastFrom && !isHostile(c, n) ? w.advance * 3 + 4 : 0;
+    const backtrack = n.id === c.lastFrom && !isHostile(c, n, ctx.state) ? w.advance * 3 + 4 : 0;
     // 명령받은 곳으로 가까워지면 힘을 싣고, 멀어지면 뺀다
     const toward =
       orderDest && a.posture !== 'withdraw'
         ? (orderDist - hexDistance(n.row, n.col, orderDest.row, orderDest.col)) * ORDER.pull
         : 0;
 
-    if (isHostile(c, n)) {
+    if (isHostile(c, n, ctx.state)) {
       // 행군력이 모자라면 칠 수 없다. 후보에조차 올리지 않는다.
       if (!canAttackFrom(c, n, ctx.eco)) continue;
       // 협공을 셈에 넣는다. 규칙만 바뀌고 AI 가 모르면 행동은 그대로다.
@@ -655,6 +659,62 @@ export interface Policy {
   onChoose?: (ctx: Ctx, c: Cell, chosen: Action, all: Action[]) => void;
 }
 
+/**
+ * 속국을 다룬다.
+ *
+ * 불이행이 드러난 속국은 손본다. 다만 응징은 공짜가 아니다 — 다른 속국들이
+ * 보고 마음이 식으므로, 공포로 누르는 나라일수록 세게 나간다.
+ *
+ * 명령은 한 번에 하나만. 지금 무엇이 아쉬운지에 따라 고른다.
+ */
+function governVassals(
+  state: GameState,
+  nationId: number,
+  w: AIWeights,
+  rng: RNG,
+  eco: EconomyConfig
+): void {
+  const mine = vassalsOf(state, nationId);
+  if (mine.length === 0) return;
+  const lord = state.nations[nationId];
+
+  for (const v of mine) {
+    if (v.order?.revealed && v.order.response !== 'obey') {
+      // 공포를 쓰는 나라는 세게, 정의를 쓰는 나라는 국고만 건드린다
+      const harsh = lord.fear > 60 && v.loyalty < 25;
+      punishVassal(state, nationId, v.id, harsh ? 'strip' : 'seize', eco);
+    }
+  }
+
+  // 한 턴에 하나만 새로 내린다
+  const idle = mine.filter((v) => !v.order);
+  if (idle.length === 0) return;
+  const v = idle[Math.floor(rng() * idle.length)];
+
+  // 돈이 급하면 조공, 적이 뚜렷하면 진격, 아니면 파병
+  const ledger = computeLedger(state, nationId, eco);
+  if (ledger.net < 0) {
+    issueOrder(state, nationId, v.id, 'tax', rng, { amount: 0.15 });
+    return;
+  }
+
+  let foe: number | null = null;
+  let worst = 0;
+  for (const n of state.nations) {
+    if (!n.alive || blocOf(state, n.id) === nationId) continue;
+    const power = nationStats(state, n.id).cells;
+    if (power > worst) {
+      worst = power;
+      foe = n.id;
+    }
+  }
+  if (foe !== null && rng() < 0.6) {
+    issueOrder(state, nationId, v.id, 'attack', rng, { target: foe });
+  } else {
+    issueOrder(state, nationId, v.id, 'reinforce', rng, { amount: 3 });
+  }
+}
+
 export interface AITurnLog {
   attacks: AttackOutcome[];
   recruited: number;
@@ -711,7 +771,11 @@ export function* takeAITurnGen(
   const homes = state.cells.filter((c) => c.castle && c.owner === nationId);
   // 안개 속에서는 '내가 아는' 적 본진만 셈에 넣는다
   const enemyHomes = state.cells.filter(
-    (c) => c.castle && c.owner !== nationId && isExplored(state, nationId, c)
+    (c) =>
+      c.castle &&
+      c.owner !== null &&
+      blocOf(state, c.owner) !== blocOf(state, nationId) &&
+      isExplored(state, nationId, c)
   );
   const hubs = adminHubs(state, nationId);
   const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco };
@@ -721,6 +785,9 @@ export function* takeAITurnGen(
     homeThreat: computeHomeThreat(state, nationId, homes),
     distress: findDistress(state, nationId),
   };
+
+  // 0. 속국 다루기 — 명령을 내리고, 안 듣는 놈은 손본다
+  governVassals(state, nationId, w, rng, eco);
 
   // 1. 징병 — 목표 병력은 영토에 비례해야 한다. 절대 상한으로 두면
   //    넓은 나라가 적은 병력에서 징병을 멈추고 골드만 쌓인 채 정지한다.
