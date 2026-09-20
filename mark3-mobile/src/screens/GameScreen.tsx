@@ -377,7 +377,7 @@ export default function GameScreen() {
   // 처음 켜면 한 번 띄운다. 규칙을 모르고 만나면 "왜 안 움직이지?" 가 된다.
   const [showHelp, setShowHelp] = useState(true);
   // 3D 는 웹에서만. 네이티브는 expo-gl 위에서 따로 붙여야 한다.
-  const [use3D, setUse3D] = useState(false);
+  const [use3D, setUse3D] = useState(Platform.OS === 'web');
   const can3D = Platform.OS === 'web';
   /** 마지막 본진을 빼앗았을 때의 처분 선택 */
   const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
@@ -978,7 +978,7 @@ export default function GameScreen() {
           </TouchableOpacity>
           {can3D && (
             <TouchableOpacity style={{ flex: 1 }} onPress={() => setUse3D((v) => !v)}>
-              <Text style={styles.toggle}>{use3D ? '2D 로' : '3D 로'}</Text>
+              <Text style={styles.toggle}>{use3D ? '2D 지도' : '중세 3D'}</Text>
             </TouchableOpacity>
           )}
         </View>

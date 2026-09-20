@@ -1,40 +1,9 @@
-// 3D 판
-//
-// 엔진(src/engine)에는 React 도 three 도 들어 있지 않다. 규칙·전투·경제·시야가
-// 전부 순수 TypeScript 라서, 3D 는 같은 상태 위에 껍데기를 하나 더 얹는 일이다.
-// 2D 화면은 그대로 두고 토글로 오간다.
-//
-// 지금은 웹에서만 켠다. 네이티브에서 돌리려면 expo-gl 위에서
-// '@react-three/fiber/native' 를 써야 하는데, 그건 따로 손봐야 한다.
-
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { Cell, GameState, NEUTRAL_COLOR } from '../engine';
-import { isVisible, isExplored, knownCell } from '../engine';
-
-/** 칸 반지름 1 기준. 뾰족한 꼭짓점이 위아래로 가는 배치(odd-r)다. */
-const R = 1;
-const HEX_W = Math.sqrt(3) * R;
-
-/** 지형마다 두께가 다르다. 산이 높으면 지도를 안 읽어도 지형이 보인다. */
-const TERRAIN_H: Record<string, number> = {
-  plain: 0.22,
-  desert: 0.3,
-  forest: 0.55,
-  mountain: 1.05,
-};
-
-const TERRAIN_COLOR: Record<string, string> = {
-  plain: '#3f4a3a',
-  desert: '#5c5334',
-  forest: '#2f4030',
-  mountain: '#4a4a55',
-};
-
-function worldOf(c: { row: number; col: number }): [number, number] {
-  return [(c.col + (c.row % 2 === 0 ? 0 : 0.5)) * HEX_W, c.row * 1.5 * R];
-}
+import { Cell, GameState } from '../engine';
+import { buildMedievalScene, Ground, Mist, Piece, Shape, V3 } from './medievalScene';
 
 interface Props {
   state: GameState;
@@ -44,207 +13,270 @@ interface Props {
   movable: Set<string>;
   onCellPress: (c: Cell) => void;
 }
+const NO_RAYCAST = () => {};
+const SHAPES: Shape[] = ['box', 'stone', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield'];
 
-/** 한 칸 */
-function Tile({
-  cell,
-  state,
-  player,
-  watching,
-  selected,
-  movable,
-  onPress,
-  origin,
-}: {
-  cell: Cell;
-  state: GameState;
-  player: number;
-  watching: boolean;
-  selected: boolean;
-  movable: boolean;
-  onPress: (c: Cell) => void;
-  origin: [number, number];
-}) {
-  const seen = watching || isVisible(state, player, cell);
-  const known = watching || isExplored(state, player, cell);
-  const mem = known && !seen ? knownCell(state, player, cell) : null;
-
-  const terrain = seen ? cell.terrain : mem?.terrain ?? 'plain';
-  const owner = seen ? cell.owner : mem?.owner ?? null;
-  const castle = seen ? cell.castle : mem?.castle ?? false;
-  const fort = seen ? cell.fortStage : mem?.fortStage ?? 0;
-
-  const h = known ? TERRAIN_H[terrain] ?? 0.22 : 0.12;
-
-  let color = known ? TERRAIN_COLOR[terrain] ?? '#3f4a3a' : '#17171a';
-  if (known && owner !== null) color = state.nations[owner].color;
-  if (seen && cell.neutral) color = NEUTRAL_COLOR[cell.neutral];
-  if (movable) color = '#fbbf24';
-
-  const [x, z] = worldOf(cell);
-  const px = x - origin[0];
-  const pz = z - origin[1];
-
-  const units = seen ? cell.units : 0;
-
-  return (
-    <group position={[px, 0, pz]}>
-      <mesh
-        position={[0, h / 2, 0]}
-        onClick={(e: ThreeEvent<MouseEvent>) => {
-          e.stopPropagation();
-          onPress(cell);
-        }}
-      >
-        <cylinderGeometry args={[R * 0.97, R * 0.97, h, 6]} />
-        <meshStandardMaterial
-          color={color}
-          roughness={0.85}
-          metalness={0.05}
-          emissive={selected ? '#ffffff' : movable ? '#7c5c10' : '#000000'}
-          emissiveIntensity={selected ? 0.35 : movable ? 0.3 : 0}
-          opacity={known ? 1 : 0.9}
-          transparent={!known}
-        />
-      </mesh>
-
-      {/* 본진은 탑, 완공 요새는 낮은 성벽. 멀리서도 형태로 구분된다. */}
-      {castle && (
-        <mesh position={[0, h + 0.55, 0]}>
-          <boxGeometry args={[0.55, 1.1, 0.55]} />
-          <meshStandardMaterial color="#fbbf24" roughness={0.5} />
-        </mesh>
-      )}
-      {!castle && fort === 4 && (
-        <mesh position={[0, h + 0.28, 0]}>
-          <cylinderGeometry args={[0.62, 0.7, 0.55, 6]} />
-          <meshStandardMaterial color="#a78bfa" roughness={0.6} />
-        </mesh>
-      )}
-      {!castle && fort > 0 && fort < 4 && (
-        <mesh position={[0, h + 0.15, 0]}>
-          <boxGeometry args={[0.5, 0.3, 0.5]} />
-          <meshStandardMaterial color="#6b7280" roughness={0.9} />
-        </mesh>
-      )}
-
-      {/* 병력은 작은 기둥을 세워 센다. 한 칸에 최대 10 명이라 세어서 읽힌다. */}
-      {units > 0 &&
-        Array.from({ length: Math.min(10, units) }, (_, i) => {
-          const ring = i < 6 ? i : i - 6;
-          const rad = i < 6 ? 0.42 : 0.2;
-          const a = (ring / (i < 6 ? 6 : 4)) * Math.PI * 2;
-          return (
-            <mesh
-              key={i}
-              position={[Math.cos(a) * rad, h + 0.2, Math.sin(a) * rad]}
-            >
-              <cylinderGeometry args={[0.1, 0.12, 0.4, 5]} />
-              <meshStandardMaterial
-                color={cell.owner !== null && !cell.neutral ? '#f8fafc' : '#cbd5e1'}
-                roughness={0.7}
-              />
-            </mesh>
-          );
-        })}
-    </group>
-  );
+function Geometry({ shape }: { shape: Shape | 'hex' }) {
+  if (shape === 'hex') return <cylinderGeometry args={[1, 1, 1, 6]} />;
+  if (shape === 'cone') return <coneGeometry args={[1, 1, 5]} />;
+  if (shape === 'trunk') return <cylinderGeometry args={[1, 1, 1, 5]} />;
+  if (shape === 'rock' || shape === 'shield') return <icosahedronGeometry args={[1, 0]} />;
+  if (shape === 'flag') return <planeGeometry args={[1, 1, 8, 1]} />;
+  return <boxGeometry args={[1, 1, 1]} />;
 }
 
-/**
- * 카메라. 드래그로 돌리고 휠로 당긴다.
- *
- * 거리는 눈대중으로 두면 안 된다 — 화각과 화면 비율에 맞춰 판이 딱 들어오는
- * 거리를 계산한다. span * 0.95 로 뒀더니 판이 화면 밖으로 잘렸다.
- */
-function Rig({ yaw, span, zoom }: { yaw: number; span: number; zoom: number }) {
-  useFrame(({ camera, size }) => {
-    const cam = camera as THREE.PerspectiveCamera;
-    const vFov = (cam.fov * Math.PI) / 180;
-    const aspect = size.width / Math.max(1, size.height);
-    // 세로로 담을 수 있는 거리와 가로로 담을 수 있는 거리 중 먼 쪽
-    const needV = span / 2 / Math.tan(vFov / 2);
-    const needH = span / 2 / (Math.tan(vFov / 2) * aspect);
-    const dist = Math.max(needV, needH) * 1.15 * zoom;
+/** Thousands of miniature parts share a handful of draw calls. */
+function Instances({ shape, pieces, onClick }: {
+  shape: Shape | 'hex'; pieces: Piece[]; onClick?: (event: ThreeEvent<MouseEvent>) => void;
+}) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const time = useMemo(() => ({ value: 0 }), []);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    const obj = new THREE.Object3D(), color = new THREE.Color();
+    pieces.forEach((piece, i) => {
+      obj.position.set(...piece.position);
+      obj.scale.set(...piece.scale);
+      obj.rotation.set(...(piece.rotation ?? [0, 0, 0]));
+      obj.updateMatrix();
+      ref.current!.setMatrixAt(i, obj.matrix);
+      ref.current!.setColorAt(i, color.set(piece.color));
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+    if (ref.current.instanceColor) ref.current.instanceColor.needsUpdate = true;
+    ref.current.computeBoundingSphere();
+  }, [pieces]);
+  useFrame(({ clock }) => { time.value = clock.elapsedTime; });
+  if (!pieces.length) return null;
+  return <instancedMesh key={pieces.length} ref={ref} args={[undefined, undefined, pieces.length]}
+    castShadow={shape !== 'hex' && shape !== 'flag'} receiveShadow
+    onClick={onClick} raycast={onClick ? undefined : NO_RAYCAST}>
+    <Geometry shape={shape} />
+    <meshStandardMaterial roughness={shape === 'metal' ? 0.45 : 0.95} metalness={shape === 'metal' ? 0.55 : 0}
+      side={shape === 'flag' ? THREE.DoubleSide : THREE.FrontSide}
+      onBeforeCompile={shader => {
+        if (shape !== 'flag') return;
+        shader.uniforms.uTime = time;
+        shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader;
+        shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+          #include <begin_vertex>
+          transformed.z += sin(position.x * 8.0 + uTime * 2.5 + instanceMatrix[3].x) * 0.12 * (position.x + 0.5);
+        `);
+      }} />
+  </instancedMesh>;
+}
 
-    const pitch = 0.92;
-    camera.position.set(
-      Math.sin(yaw) * Math.cos(pitch) * dist,
-      Math.sin(pitch) * dist,
-      Math.cos(yaw) * Math.cos(pitch) * dist
-    );
-    camera.lookAt(0, 0, 0);
+const mistVertex = `
+  varying vec2 vUv;
+  varying float vSeed;
+  void main() {
+    vUv = uv;
+    vSeed = instanceMatrix[3].x * 0.7 + instanceMatrix[3].z * 0.9;
+    gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+  }
+`;
+const mistFragment = `
+  uniform float uTime;
+  uniform float uOpacity;
+  varying vec2 vUv;
+  varying float vSeed;
+  void main() {
+    vec2 p = vUv * 2.0 - 1.0;
+    float edge = 1.0 - smoothstep(0.25, 1.0, length(p));
+    float drift = sin(p.x * 5.0 + uTime * 0.24 + vSeed) * cos(p.y * 6.0 - uTime * 0.18);
+    float curls = sin(p.x * 11.0 - p.y * 8.0 + drift * 2.0 + uTime * 0.15);
+    float density = 0.55 + drift * 0.2 + curls * 0.09;
+    vec3 color = mix(vec3(0.12, 0.20, 0.24), vec3(0.34, 0.43, 0.45), density);
+    gl_FragColor = vec4(color, edge * density * uOpacity);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
+function WarMist({ cells, memory }: { cells: Mist[]; memory: boolean }) {
+  const ref = useRef<THREE.InstancedMesh>(null);
+  const uniforms = useMemo(() => ({ uTime: { value: 0 }, uOpacity: { value: memory ? 0.36 : 0.83 } }), [memory]);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    const obj = new THREE.Object3D();
+    cells.forEach((cell, i) => {
+      for (let layer = 0; layer < 3; layer++) {
+        obj.position.set(cell.position[0], cell.position[1] + layer * 0.22, cell.position[2]);
+        obj.rotation.set(-Math.PI / 2, 0, layer * 1.3);
+        obj.scale.set(2.8, 2.8, 1);
+        obj.updateMatrix();
+        ref.current!.setMatrixAt(i * 3 + layer, obj.matrix);
+      }
+    });
+    ref.current.instanceMatrix.needsUpdate = true;
+    ref.current.computeBoundingSphere();
+  }, [cells]);
+  useFrame(({ clock }) => { uniforms.uTime.value = clock.elapsedTime; });
+  if (!cells.length) return null;
+  return <instancedMesh key={cells.length} ref={ref} args={[undefined, undefined, cells.length * 3]} raycast={NO_RAYCAST} renderOrder={3}>
+    <planeGeometry />
+    <shaderMaterial vertexShader={mistVertex} fragmentShader={mistFragment} uniforms={uniforms}
+      transparent depthWrite={false} side={THREE.DoubleSide} />
+  </instancedMesh>;
+}
+
+function TroopCount({ tile }: { tile: Ground }) {
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#172327'; ctx.fillRect(23, 9, 82, 46);
+    ctx.strokeStyle = '#bca674'; ctx.lineWidth = 2; ctx.strokeRect(23, 9, 82, 46);
+    ctx.fillStyle = '#f2e6c8'; ctx.font = 'bold 34px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(String(tile.cell.units), 64, 33);
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    return map;
+  }, [tile.cell.units]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return <sprite position={[tile.position[0], tile.height + 0.3, tile.position[2] + 0.84]}
+    scale={[0.58, 0.29, 1]} raycast={NO_RAYCAST} renderOrder={4}>
+    <spriteMaterial map={texture} transparent depthTest={false} toneMapped={false} />
+  </sprite>;
+}
+
+function TileRing({ tile, selected }: { tile: Ground; selected: boolean }) {
+  return <mesh position={[tile.position[0], tile.height + 0.045, tile.position[2]]}
+    rotation={[-Math.PI / 2, 0, Math.PI / 6]} raycast={NO_RAYCAST}>
+    <ringGeometry args={[selected ? 0.86 : 0.91, 0.99, 6]} />
+    <meshBasicMaterial color={selected ? '#fff1bc' : '#e5b960'} side={THREE.DoubleSide} toneMapped={false} />
+  </mesh>;
+}
+
+function Rig({ yaw, pitch, span, zoom, target }: { yaw: number; pitch: number; span: number; zoom: number; target: V3 }) {
+  const aim = useRef(new THREE.Vector3());
+  const desired = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ camera, size }, delta) => {
+    const cam = camera as THREE.PerspectiveCamera;
+    const halfFov = cam.fov * Math.PI / 360;
+    const aspect = size.width / Math.max(1, size.height);
+    const distance = Math.max(span / 2 / Math.tan(halfFov), span / 2 / (Math.tan(halfFov) * aspect)) * 1.12 * zoom;
+    const smoothing = 1 - Math.exp(-delta * 12);
+    aim.current.lerp(desired.set(...target), smoothing);
+    desired.set(aim.current.x + Math.sin(yaw) * Math.cos(pitch) * distance,
+      Math.sin(pitch) * distance, aim.current.z + Math.cos(yaw) * Math.cos(pitch) * distance);
+    camera.position.lerp(desired, smoothing);
+    camera.lookAt(aim.current);
   });
   return null;
 }
 
-export default function Board3D({
-  state,
-  player,
-  watching,
-  selected,
-  movable,
-  onCellPress,
-}: Props) {
-  const cells = useMemo(() => state.cells.filter((c) => !c.offMap), [state.cells]);
-
-  // 판의 한가운데를 원점으로 옮겨 카메라가 늘 가운데를 본다
-  const { origin, span } = useMemo(() => {
-    const pts = cells.map(worldOf);
-    const xs = pts.map((p) => p[0]);
-    const zs = pts.map((p) => p[1]);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minZ = Math.min(...zs);
-    const maxZ = Math.max(...zs);
-    return {
-      origin: [(minX + maxX) / 2, (minZ + maxZ) / 2] as [number, number],
-      span: Math.max(maxX - minX, maxZ - minZ) + 2,
-    };
-  }, [cells]);
-
-  const [yaw, setYaw] = useState(0);
-  const [zoom, setZoom] = useState(1);
-  const drag = useRef<{ x: number; yaw: number } | null>(null);
-
-  return (
-    <Canvas
-      style={{ width: '100%', height: '100%' }}
-      camera={{ fov: 40, near: 0.1, far: 500 }}
-      onPointerDown={(e) => {
-        drag.current = { x: e.clientX, yaw };
-      }}
-      onPointerMove={(e) => {
-        if (!drag.current) return;
-        setYaw(drag.current.yaw + (e.clientX - drag.current.x) * 0.006);
-      }}
-      onPointerUp={() => {
-        drag.current = null;
-      }}
-      onPointerLeave={() => {
-        drag.current = null;
-      }}
-      onWheel={(e) => setZoom((z) => Math.max(0.55, Math.min(2.2, z + e.deltaY * 0.0012)))}
-    >
-      <color attach="background" args={['#0e0e11']} />
-      <hemisphereLight args={['#cfd8ff', '#20202a', 1.1]} />
-      <directionalLight position={[span * 0.6, span, span * 0.4]} intensity={1.5} />
-
-      <Rig yaw={yaw} span={span} zoom={zoom} />
-
-      {cells.map((c) => (
-        <Tile
-          key={c.id}
-          cell={c}
-          state={state}
-          player={player}
-          watching={watching}
-          selected={c.id === selected}
-          movable={movable.has(c.id)}
-          onPress={onCellPress}
-          origin={origin}
-        />
-      ))}
-    </Canvas>
-  );
+class SceneBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    return this.state.failed ? <View style={styles.fallback}><Text style={styles.subtitle}>3D 화면을 불러오지 못했습니다. 아래 ‘2D 지도’로 전환해 주세요.</Text></View> : this.props.children;
+  }
 }
+
+export default function Board3D({ state, player, watching, selected, movable, onCellPress }: Props) {
+  const scene = useMemo(() => buildMedievalScene(state, player, watching), [state, player, watching]);
+  const unknownMist = useMemo(() => scene.mist.filter(c => !c.memory), [scene]);
+  const memoryMist = useMemo(() => scene.mist.filter(c => c.memory), [scene]);
+  const [yaw, setYaw] = useState(0.12);
+  const [pitch, setPitch] = useState(0.88);
+  const [zoom, setZoom] = useState(1);
+  const [target, setTarget] = useState<V3>([0, 0, 0]);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const moved = useRef(false);
+  const dragDistance = useRef(0);
+  const selectedTile = scene.ground.find(t => t.cell.id === selected);
+  const zoomBy = (amount: number) => setZoom(z => Math.max(0.22, Math.min(1.7, z * amount)));
+  const reset = () => { setYaw(0.12); setPitch(0.88); setZoom(1); setTarget([0, 0, 0]); };
+  useEffect(() => { reset(); }, [state.rows, state.cols]);
+  const clearPointer = (e: React.PointerEvent<HTMLDivElement>) => { pointers.current.delete(e.pointerId); };
+  return <View style={styles.container}>
+    <SceneBoundary>
+      <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, scene.span * 1.8, scene.span * 1.5], fov: 40, near: 0.1, far: 600 }}
+        gl={{ antialias: true, powerPreference: 'high-performance' }} style={{ touchAction: 'none' }}
+        fallback={<View style={styles.fallback}><Text style={styles.subtitle}>WebGL을 지원하는 브라우저에서 3D 지도를 볼 수 있습니다.</Text></View>}
+        onPointerDown={e => {
+          if (pointers.current.size === 0) { moved.current = false; dragDistance.current = 0; }
+          pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }}
+        onPointerMove={e => {
+          const prev = pointers.current.get(e.pointerId);
+          if (!prev) return;
+          const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
+          dragDistance.current += Math.hypot(dx, dy);
+          if (dragDistance.current > 5) moved.current = true;
+          if (pointers.current.size === 2) {
+            const other = Array.from(pointers.current.entries()).find(([id]) => id !== e.pointerId)![1];
+            const before = Math.hypot(prev.x - other.x, prev.y - other.y);
+            const after = Math.hypot(e.clientX - other.x, e.clientY - other.y);
+            if (after > 4 && before > 4) zoomBy(before / after);
+            moved.current = true;
+          } else {
+            setYaw(v => v + dx * 0.006);
+            setPitch(v => Math.max(0.5, Math.min(1.35, v + dy * 0.004)));
+          }
+          pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }}
+        onPointerUp={clearPointer} onPointerCancel={clearPointer} onPointerLeave={clearPointer}
+        onWheel={e => zoomBy(Math.exp(e.deltaY * 0.001))}>
+        <color attach="background" args={['#111e24']} />
+        <hemisphereLight args={['#dae9e5', '#414333', 1.55]} />
+        <directionalLight position={[-scene.span * 0.4, scene.span, scene.span * 0.35]} color="#ffe0a6" intensity={2.8}
+          castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.04}
+          shadow-camera-left={-scene.span * 0.7} shadow-camera-right={scene.span * 0.7}
+          shadow-camera-top={scene.span * 0.7} shadow-camera-bottom={-scene.span * 0.7}
+          shadow-camera-near={0.1} shadow-camera-far={scene.span * 3} />
+        <directionalLight position={[0, 8, -12]} color="#a6c9e5" intensity={0.65} />
+        <Rig yaw={yaw} pitch={pitch} span={scene.span} zoom={zoom} target={target} />
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.09, 0]} receiveShadow raycast={NO_RAYCAST}>
+          <planeGeometry args={[scene.span * 8, scene.span * 8]} />
+          <meshStandardMaterial color="#18272c" roughness={1} />
+        </mesh>
+        <Instances shape="hex" pieces={scene.ground} onClick={e => {
+          e.stopPropagation();
+          if (moved.current || e.delta > 5 || e.instanceId === undefined) return;
+          onCellPress(scene.ground[e.instanceId].cell);
+        }} />
+        {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}
+        {scene.ground.filter(t => movable.has(t.cell.id) || selected === t.cell.id).map(t =>
+          <TileRing key={t.cell.id} tile={t} selected={selected === t.cell.id} />)}
+        <WarMist cells={unknownMist} memory={false} />
+        <WarMist cells={memoryMist} memory />
+        {scene.ground.filter(t => t.seen && t.cell.units > 0).map(t => <TroopCount key={t.cell.id} tile={t} />)}
+      </Canvas>
+    </SceneBoundary>
+    <View pointerEvents="none" style={styles.heading}>
+      <Text style={styles.eyebrow}>T H E   W A R   T A B L E</Text>
+      <Text style={styles.title}>왕국의 전장</Text>
+      <Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>
+    </View>
+    <View style={styles.bottom} pointerEvents="box-none">
+      <View pointerEvents="none"><Text style={styles.hint}>드래그 회전 · 휠 / 두 손가락 확대 · 타일 선택</Text></View>
+      <View style={styles.controls}>
+        <TouchableOpacity accessibilityLabel="지도 축소" style={styles.control} onPress={() => zoomBy(1.2)}><Text style={styles.controlText}>−</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="지도 확대" style={styles.control} onPress={() => zoomBy(1 / 1.2)}><Text style={styles.controlText}>＋</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="카메라 초기화" style={styles.control} onPress={reset}><Text style={styles.smallControl}>전체 보기</Text></TouchableOpacity>
+        {selectedTile && <TouchableOpacity style={styles.control} onPress={() => {
+          setTarget([selectedTile.position[0], 0, selectedTile.position[2]]); setZoom(0.28);
+        }}><Text style={styles.smallControl}>선택 확대</Text></TouchableOpacity>}
+      </View>
+      <View pointerEvents="none"><Text style={styles.legend}>깃발·테두리 = 소유국   /   금빛 테두리 = 이동 가능</Text></View>
+    </View>
+  </View>;
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#111e24', overflow: 'hidden', borderRadius: 12, borderWidth: 1, borderColor: '#3c4846' },
+  heading: { position: 'absolute', top: 20, left: 22, right: 16 },
+  eyebrow: { color: '#bda778', fontSize: 9, fontWeight: '600', marginBottom: 5 },
+  title: { color: '#eee3c9', fontSize: 23, fontWeight: '700', letterSpacing: 2 },
+  subtitle: { color: '#9cadad', fontSize: 11, marginTop: 6 },
+  bottom: { position: 'absolute', bottom: 14, left: 8, right: 8, alignItems: 'center', gap: 8 },
+  hint: { color: '#b2c0bc', fontSize: 10, textAlign: 'center' },
+  controls: { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#6c6955', backgroundColor: 'rgba(18,30,34,0.94)', overflow: 'hidden' },
+  control: { minWidth: 42, minHeight: 40, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  controlText: { color: '#eee0bf', fontSize: 22 },
+  smallControl: { color: '#eee0bf', fontSize: 11 },
+  legend: { color: '#849895', fontSize: 9, textAlign: 'center' },
+  fallback: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+});

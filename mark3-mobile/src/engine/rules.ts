@@ -711,6 +711,7 @@ export function moveStack(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECO
     to.driftPP = (to.driftPP * to.units + from.driftPP * from.units) / total;
     // 합친 부대는 느린 쪽을 따른다. 대열이 길어지면 앞이 아니라 뒤가 속도를 정한다.
     to.march = Math.min(to.march, from.march - spent);
+    to.lastFrom = from.id;
     to.units = total;
   } else {
     to.units = from.units;
@@ -719,9 +720,11 @@ export function moveStack(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECO
     to.driftPP = from.driftPP;
     to.neutral = from.neutral;
     to.march = Math.max(0, from.march - spent);
+    to.lastFrom = from.id;
     if (!from.neutral) to.owner = from.owner;
   }
   const keepOwner = from.owner;
+  from.lastFrom = undefined;
   clearStack(from);
   from.owner = keepOwner;
 }

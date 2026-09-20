@@ -156,6 +156,11 @@ export const PERSONALITIES: Record<string, AIWeights> = {
  *   castleAssault 15.0 → 18.4  본진의 값이 올랐다
  *   wealth   (신규) 0.42  기본값 1.0 보다 낮게 골랐다 — 돈을 쫓는 것은
  *                          생각만큼 이득이 아니라는 뜻이다
+ *
+ * advance 를 1.5 로 올려봤다가 되돌렸다. 한 나라만 올리면 왕복이 24.9% →
+ * 17.7% 로 줄어 좋아 보였는데, 다섯 나라가 모두 그 값이면 서로 상대 본진만
+ * 보고 행군하느라 지나쳐 버린다 — 같은 AI 5명으로 재니 90턴·공격 85회가
+ * 174턴·공격 17회가 됐다. 한 가지 조건에서 재고 일반화하면 이렇게 된다.
  */
 export const LEARNED_WEIGHTS: AIWeights = {
   territory: 2.59,
@@ -183,11 +188,11 @@ PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
  * 보이는 적이 늘어, 옛 문턱에서는 모두가 열세로 판정되어 눈치만 보다 판이
  * 멎었다(턴 제한 도달 69.7%).
  */
-export const POSTURE = { pressAt: 0.55, withdrawAt: 0.29 };
 //   1.15 / 0.60   턴제한 41% · 고르기 -8.55   (버그 있던 거리에 맞춰둔 값)
 //   0.63 / 0.33   턴제한 22% · 고르기 -6.77
 //   0.55 / 0.29                                ← 현재
 //   0.46 / 0.24   턴제한 14% · 고르기 -7.59
+export const POSTURE = { pressAt: 0.55, withdrawAt: 0.29 };
 
 export interface Ctx {
   state: GameState;
@@ -464,6 +469,11 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
   });
 
   for (const n of neighbors(ctx.state, c)) {
+    // 방금 떠나온 칸으로 되돌아가는 수에는 벌점. 기억이 없으면 두 칸 점수가
+    // 비슷할 때 끝없이 오간다 — 후반 이동의 3분의 2가 그런 왕복이었다.
+    // 공격은 예외다. 물러났다가 다시 치는 것은 왕복이 아니라 전술이다.
+    const backtrack = n.id === c.lastFrom && !isHostile(c, n) ? w.advance * 3 + 4 : 0;
+
     if (isHostile(c, n)) {
       // 행군력이 모자라면 칠 수 없다. 후보에조차 올리지 않는다.
       if (!canAttackFrom(c, n, ctx.eco)) continue;
@@ -523,7 +533,8 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
           // 합쳐서 의미 있는 덩어리가 되는지도 본다
           w.massing * Math.min(6, merged) * 0.8 +
           positionValue(ctx, n) -
-          w.territory,
+          w.territory -
+          backtrack,
         target: n,
       });
       continue;
@@ -531,6 +542,7 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
 
     if (n.units === 0) {
       if (!canMoveTo(c, n, ctx.eco)) continue;
+
       // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
       const eff = cellEfficiency(n, ctx.hubs, ctx.eco);
@@ -544,13 +556,14 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
         // 적 압박이 적고, 지형이 받쳐주고, 본거지에 가까운 칸을 고른다.
         actions.push({
           kind: 'move',
-          score: retreatValue(ctx, n) * w.homeDefense * 1.6 + gain * 0.25 + scout * 0.2,
+          score:
+            retreatValue(ctx, n) * w.homeDefense * 1.6 + gain * 0.25 + scout * 0.2 - backtrack,
           target: n,
         });
       } else {
         actions.push({
           kind: 'move',
-          score: gain + scout - riskAt(ctx, n, c.units, myPower),
+          score: gain + scout - riskAt(ctx, n, c.units, myPower) - backtrack,
           target: n,
         });
       }
