@@ -147,6 +147,44 @@ function layout(cells: Cell[], maxW: number, maxH: number) {
 
 type Layout = NonNullable<ReturnType<typeof layout>>;
 
+/**
+ * 처음 만나는 사람이 막히는 자리만 고른다.
+ *
+ * 이 게임은 문명과 두 군데가 다르다 — 전투가 확률이고(열세도 이긴다), 진
+ * 나라를 속국으로 둘 수 있다. 거기에 부대 편성 규칙이 겹쳐서, 설명 없이
+ * 만나면 "왜 옆 칸으로 못 가지?" 에서 막힌다.
+ */
+const HELP: Array<{ title: string; body: string }> = [
+  {
+    title: '이기는 법',
+    body: '영향력(내 땅 + 속국의 땅)이 압도적으로 커지면 이긴다. 적의 마지막 성을 빼앗으면 그 나라를 병합할지 속국으로 둘지 고른다. 속국은 조공을 바치고, 행정비는 그쪽이 낸다 — 넓어질수록 직접 먹는 것보다 부리는 쪽이 이득이다.',
+  },
+  {
+    title: '부대는 한 턴에 한 번',
+    body: '부대를 누르고 노란 칸을 누르면 이동하거나 공격한다. 한 번 움직인 부대는 그 턴에 다시 못 움직인다.',
+  },
+  {
+    title: '많을수록 느리다',
+    body: '한 칸 옮기는 데 드는 행군력은 병력 수에 비례한다. 3명은 매 턴 움직이지만 10명은 평지에서도 두 턴에 한 칸, 산이면 세 턴이다. 싸우는 것은 절반만 든다 — 대군도 매 턴 싸울 수는 있다. 무역상이 닦은 길 위에서는 40% 싸진다.',
+  },
+  {
+    title: '한 칸에 10명까지',
+    body: '넘치게 합칠 수 없다. 대신 옆에 붙어 있는 아군이 전력을 보태준다(협공). 포개는 것이 아니라 나란히 늘어서는 것이 이 게임의 병력 집중이다.',
+  },
+  {
+    title: '열세도 이긴다',
+    body: '전투는 병력이 아니라 사기가 꺾여서 끝난다. 지형·포위·기세가 붙고, 밀리는 쪽에는 결사항전 보정이 붙는다. 5 대 10 도 13% 쯤 이기고, 포위되면 50% 까지 오른다.',
+  },
+  {
+    title: '보이는 만큼만 안다',
+    body: '한 번도 못 가본 곳은 지형조차 모른다. 가봤어도 지금 보는 부대가 없으면 마지막으로 본 기억만 남는다 — 그 사이에 적이 왔는지는 모른다.',
+  },
+  {
+    title: '돈',
+    body: '성 하나당 한 턴에 한 명 징병한다(성이 꽉 차 있으면 못 뽑는다). 병력 유지비와 행정비가 나가고, 행정비는 땅이 넓어질수록 가팔라진다. 돈이 마르면 바로는 아니고 몇 턴 뒤에 병력이 흩어진다 — 정의가 높으면 더 버틴다.',
+  },
+];
+
 /** 넓은 화면에서 왼쪽 정보 칸의 너비 */
 const PANE_W = 430;
 
@@ -226,6 +264,8 @@ export default function GameScreen() {
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
   const [showStats, setShowStats] = useState(true);
+  // 처음 켜면 한 번 띄운다. 규칙을 모르고 만나면 "왜 안 움직이지?" 가 된다.
+  const [showHelp, setShowHelp] = useState(true);
   /** 마지막 본진을 빼앗았을 때의 처분 선택 */
   const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
   /**
@@ -747,9 +787,14 @@ export default function GameScreen() {
             </TouchableOpacity>
           ))}
         </View>
-        <TouchableOpacity onPress={() => setShowStats((v) => !v)}>
-          <Text style={styles.toggle}>{showStats ? '수치 숨기기' : '수치 보기'}</Text>
-        </TouchableOpacity>
+        <View style={styles.row}>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowStats((v) => !v)}>
+            <Text style={styles.toggle}>{showStats ? '수치 숨기기' : '수치 보기'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowHelp(true)}>
+            <Text style={styles.toggle}>도움말</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {state.winner !== null && (
@@ -762,6 +807,28 @@ export default function GameScreen() {
       <CombatModal result={combat} onClose={() => setCombat(null)} />
 
       {/* 본진 함락 — 병합할까 속국으로 둘까 */}
+      <Modal visible={showHelp} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>어떻게 하는 게임인가</Text>
+            <ScrollView style={{ maxHeight: 380 }}>
+              {HELP.map((h) => (
+                <View key={h.title} style={styles.helpItem}>
+                  <Text style={styles.helpTitle}>{h.title}</Text>
+                  <Text style={styles.helpBody}>{h.body}</Text>
+                </View>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
+              onPress={() => setShowHelp(false)}
+            >
+              <Text style={styles.btnText}>시작</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={!!conquest} transparent animationType="fade">
         <View style={styles.overlay}>
           <View style={styles.modal}>
@@ -1050,6 +1117,9 @@ const styles = StyleSheet.create({
   },
   modal: { backgroundColor: '#1f1f1f', borderRadius: 12, padding: 18, width: '88%' },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
+  helpItem: { marginBottom: 12 },
+  helpTitle: { color: '#fbbf24', fontSize: 13, fontWeight: 'bold', marginBottom: 3 },
+  helpBody: { color: '#d1d5db', fontSize: 12, lineHeight: 18 },
   resolve: { color: '#fbbf24', fontSize: 12, marginBottom: 8 },
   roundRow: { flexDirection: 'row', marginBottom: 6 },
   roundNo: { color: '#fbbf24', fontSize: 12, width: 34, fontWeight: 'bold' },
