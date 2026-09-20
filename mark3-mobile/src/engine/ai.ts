@@ -27,6 +27,7 @@ import {
   isHostile,
   startFort,
   recruit,
+  commandLimit,
   merchantDestinations,
   expectedTradeProfit,
   sendMerchant,
@@ -633,7 +634,30 @@ export function takeAITurn(
     [stackIds[i], stackIds[j]] = [stackIds[j], stackIds[i]];
   }
 
+  // 명령 수에 한도가 있으면 아무 순서로나 쓸 수 없다. 값어치가 큰 수부터
+  // 쓰는 것이 한도 아래에서 두는 법이다. 한도가 없으면 예전 그대로 둔다 —
+  // 순서를 바꾸면 지금까지 재둔 기준선이 전부 무의미해진다.
+  let budget = commandLimit(state, nationId, eco);
+  if (budget !== Infinity) {
+    const ranked: Array<{ id: string; score: number }> = [];
+    for (const id of stackIds) {
+      const c = state.cells.find((x) => x.id === id);
+      if (!c) continue;
+      const actions = scoreActions(ctx, c);
+      if (policy?.score) for (const a of actions) a.score = policy.score(ctx, c, a);
+      actions.sort((a, b) => b.score - a.score);
+      const top = actions[0];
+      const stay = actions.find((a) => a.kind === 'stay');
+      // 제자리와의 차이가 곧 '이 명령을 쓸 값어치'다
+      if (top && top.kind !== 'stay') ranked.push({ id, score: top.score - (stay?.score ?? 0) });
+    }
+    ranked.sort((a, b) => b.score - a.score);
+    stackIds.length = 0;
+    for (const r of ranked) stackIds.push(r.id);
+  }
+
   for (const id of stackIds) {
+    if (budget <= 0) break;
     const c = state.cells.find((x) => x.id === id);
     if (!c || c.owner !== nationId || c.units <= 0) continue;
 
@@ -669,6 +693,7 @@ export function takeAITurn(
       moveStack(c, best.target);
     }
     moved.add(id);
+    budget--;
   }
 
   return log;

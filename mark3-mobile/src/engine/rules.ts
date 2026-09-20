@@ -198,6 +198,23 @@ export function adminHubs(state: GameState, nationId: number): Cell[] {
 }
 
 /**
+ * 한 턴에 내릴 수 있는 명령 수. 0 이면 제한 없음.
+ *
+ * 부대 수가 아니라 거점 수에 묶는다. 그래야 병력을 쪼갤수록 노는 부대가
+ * 생기고, 비로소 모으는 쪽이 효율적인 선택이 된다. 지금 규칙에서는 반대다 —
+ * 행동 횟수가 부대 수에 비례해서 쪼개는 쪽이 언제나 이긴다.
+ */
+export function commandLimit(
+  state: GameState,
+  nationId: number,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): number {
+  if (eco.commandBase <= 0) return Infinity;
+  const hubs = adminHubs(state, nationId).length;
+  return Math.max(1, Math.round(eco.commandBase + hubs * eco.commandPerHub));
+}
+
+/**
  * 칸의 수입 효율 (0~1). 관리 거점에서 멀수록 떨어진다.
  * 요새를 지어 거점을 늘리는 것이 곧 영토를 쓸모 있게 만드는 길이다.
  */

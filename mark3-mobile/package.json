@@ -15,7 +15,8 @@
     "sim:eval": "tsx sim/evaluate.ts",
     "sim:league": "tsx sim/league.ts",
     "sim:rl": "tsx sim/rl.ts",
-    "sim:probe": "tsx sim/probe.ts"
+    "sim:probe": "tsx sim/probe.ts",
+    "sim:command": "tsx sim/command.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",

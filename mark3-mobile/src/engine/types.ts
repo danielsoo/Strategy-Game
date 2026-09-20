@@ -196,6 +196,20 @@ export interface EconomyConfig {
    * 공포가 높을수록 더 걷는다 — 약탈로 연명하는 군대다.
    */
   forageIncomePerUnit: number;
+  /**
+   * 한 턴에 내릴 수 있는 명령 수의 기본값. 0 이면 제한 없음 (옛 규칙).
+   *
+   * 왜 필요한가 — 지금 규칙에서는 병력을 쪼개는 쪽이 언제나 옳다. 행동 횟수가
+   * 부대 수에 비례하기 때문이다. 10명 넷은 턴당 네 번 치고 40명 하나는 한 번
+   * 친다. 그래서 자가대전 학습은 매번 '뭉치기 0'으로 수렴했고, 협공을 넣어도
+   * 측면 지원을 넣어도 살아나지 않았다. 가중치 문제가 아니라 규칙 문제였다.
+   *
+   * 문명의 '죽음의 스택'을 뒤집은 '죽음의 양탄자'다. 역사에서 장군이 통제할
+   * 수 있는 부대 수에 한계가 있었던 것이 집중의 이유였고, 그 한계를 되살린다.
+   */
+  commandBase: number;
+  /** 거점(성·요새) 하나당 늘어나는 명령 수. 지휘 체계가 있어야 더 부린다. */
+  commandPerHub: number;
 }
 
 // 균형의 핵심은 세 가지다.
@@ -234,6 +248,10 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   graceTurnsBase: 2,
   graceTurnsJustice: 4,
   forageIncomePerUnit: 0.8,
+  // 기본은 옛 규칙 그대로다. 켜고 끄며 재보려고 넣은 것이라 기본값으로 게임을
+  // 바꾸지는 않는다.
+  commandBase: 0,
+  commandPerHub: 0,
 };
 
 export const NATION_PRESETS: Array<{ name: string; color: string; taxRate: number }> = [

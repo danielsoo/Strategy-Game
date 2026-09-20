@@ -231,7 +231,7 @@ function collectSelf(
  * 앞선 나라가 둔 평범한 수도 전부 '좋은 수'로, 밀리던 나라가 둔 최선의 수도
  * 전부 '나쁜 수'로 배운다. 형편을 빼고 나야 수 자체의 값어치가 남는다.
  *
- * 행동과 무관한 앞 21개만 본다. 같은 결정 안의 후보들은 그 구간이 모두 같으니
+ * 행동과 무관한 앞 26개만 본다. 같은 결정 안의 후보들은 그 구간이 모두 같으니
  * 후보를 고르는 데는 아무 영향이 없고, 오직 이득의 기준선 노릇만 한다.
  */
 function fitCritic(
@@ -382,6 +382,23 @@ function evaluate(net: Net, games: number, size: number, seed: number): number {
   return wins / games;
 }
 
+/** 0분 00초 꼴로 */
+function clock(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${String(s % 60).padStart(2, '0')}초`;
+}
+
+function secs(since: number): string {
+  return clock(Date.now() - since);
+}
+
+/** 지금까지 걸린 시간으로 남은 시간을 어림한다 */
+function eta(since: number, done: number, total: number): string {
+  const spent = Date.now() - since;
+  const left = (spent / Math.max(1, done)) * (total - done);
+  return done >= total ? `총 ${clock(spent)}` : `${clock(spent)} 걸림 · 남은 ${clock(left)}`;
+}
+
 function report(label: string, p: number, n: number): void {
   const [lo, hi] = wilson(p, n);
   console.log(
@@ -424,31 +441,46 @@ function main() {
   const h1 = parseArg('h1', 24);
   const h2 = parseArg('h2', 16);
   const net = createNet([FEATURE_COUNT, h1, h2, 1], rng, true);
-  fs.mkdirSync('sim/nets', { recursive: true });
 
-  console.log(`정책 학습 — 특징 ${FEATURE_COUNT}개 · 망 ${net.sizes.join('-')} · 온도 ${temp}\n`);
+  // 판마다 제 폴더를 쓴다. 한 폴더를 같이 쓰면 다른 판이 best.json 을 덮어쓰고,
+  // 그러면 되돌리기와 최종 평가가 남의 망을 집는다. 실제로 그렇게 한 판을 버렸다.
+  const out = parseStr('out') ?? `sim/nets/${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
+  fs.mkdirSync(out, { recursive: true });
+
+  const tRun = Date.now();
+  console.log(
+    `정책 학습 — 특징 ${FEATURE_COUNT}개 · 망 ${net.sizes.join('-')} · 온도 ${temp}\n` +
+      `시작 ${new Date().toLocaleTimeString('ko-KR')}\n`
+  );
 
   // 1단계: 손평가식 모방
   console.log(`1단계 모방 — 기보 ${cloneGames}판`);
+  const tClone = Date.now();
   const demos = collectHand(cloneGames, size, rate, rng, !process.argv.includes('--mixed'));
+  console.log(`  기보 수집 ${demos.length}개 · ${secs(tClone)} 걸림`);
+
+  const tEpochs = Date.now();
   const ones = demos.map(() => 1);
   for (let e = 1; e <= cloneEpochs; e++) {
-      const { entropy, agree } = policyStep(net, demos, ones, cloneLr, temp, beta, 24, rng);
+    const { entropy, agree } = policyStep(net, demos, ones, cloneLr, temp, beta, 24, rng);
     console.log(
-      `  ${e}주기 | 결정 ${demos.length} · 일치 ${(agree * 100).toFixed(1)}% · 엔트로피 ${entropy.toFixed(2)}`
+      `  ${String(e).padStart(2)}/${cloneEpochs}주기 | 일치 ${(agree * 100).toFixed(
+        1
+      )}% · 엔트로피 ${entropy.toFixed(2)} | ${eta(tEpochs, e, cloneEpochs)}`
     );
   }
   const cloned = evaluate(net, 150, size, 4242);
   report('  모방 결과', cloned, 150);
-  saveNet(net, 'sim/nets/clone.json');
+  saveNet(net, out + '/clone.json');
 
   // 2단계: 자가대전으로 그 위를 올린다
   const critic = createNet([STATE_FEATURE_COUNT, 16, 1], rng);
   console.log(`\n2단계 자가대전 — ${iters}회 · 회당 ${games}판 · 기준선망 ${critic.sizes.join('-')}`);
   let bestRate = cloned;
   let stale = 0;
-  saveNet(net, 'sim/nets/best.json');
+  saveNet(net, out + '/best.json');
 
+  const tLoop = Date.now();
   for (let it = 1; it <= iters; it++) {
     const t0 = Date.now();
     const { decisions, returns, winShare } = collectSelf(
@@ -480,21 +512,23 @@ function main() {
     const score = evaluate(net, iterGames, size, 777000 + it);
 
     console.log(
-      `  ${String(it).padStart(2)}회 | 결정 ${String(decisions.length).padStart(6)} · 승 ${(
-        winShare * 100
-      ).toFixed(0)}% · 기준선손실 ${vLoss.toFixed(3)} · 엔트로피 ${entropy.toFixed(
-        2
-      )} · KL ${kl.toFixed(3)} · ${epochs}주기 · ${gen}초 | 평가 ${(score * 100).toFixed(1)}%`
+      `  ${String(it).padStart(2)}/${iters}회 | 결정 ${String(decisions.length).padStart(
+        6
+      )} · 승 ${(winShare * 100).toFixed(0)}% · 기준선손실 ${vLoss.toFixed(
+        3
+      )} · 엔트로피 ${entropy.toFixed(2)} · KL ${kl.toFixed(
+        3
+      )} · 대국 ${gen}초 | 평가 ${(score * 100).toFixed(1)}% | ${eta(tLoop, it, iters)}`
     );
 
-    saveNet(net, `sim/nets/iter${it}.json`);
+    saveNet(net, `${out}/iter${it}.json`);
     if (score > bestRate) {
       bestRate = score;
-      saveNet(net, 'sim/nets/best.json');
+      saveNet(net, out + '/best.json');
       stale = 0;
     } else if (score < bestRate - revertGap) {
       // 무너졌으면 되돌린다. 무너진 망으로 자료를 더 모으면 같이 썩는다.
-      const back = loadNet('sim/nets/best.json');
+      const back = loadNet(out + '/best.json');
       net.W = back.W;
       net.b = back.b;
       // 아담의 관성까지 같이 되돌린다. 안 그러면 무너지던 방향으로 계속 민다.
@@ -515,7 +549,8 @@ function main() {
   }
 
   console.log(`\n모방 직후 ${(cloned * 100).toFixed(1)}% → 가장 좋았던 망 ${(bestRate * 100).toFixed(1)}%`);
-  report('본 평가', evaluate(loadNet('sim/nets/best.json'), evalGames, size, 20260919), evalGames);
+  report('본 평가', evaluate(loadNet(out + '/best.json'), evalGames, size, 20260919), evalGames);
+  console.log(`전체 ${secs(tRun)} 걸림 · 끝 ${new Date().toLocaleTimeString('ko-KR')}`);
 }
 
 main();
