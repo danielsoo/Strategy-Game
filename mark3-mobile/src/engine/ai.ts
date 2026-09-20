@@ -348,6 +348,43 @@ function localStrength(state: GameState, center: Cell, owner: number | null): nu
  * 안개 때문에 아직 못 본 본진은 후보가 아니다. 어디 있는지도 모르는 곳을
  * 향해 진군할 수는 없다. 그래서 초반에는 정찰이 곧 전략이 된다.
  */
+/**
+ * 아무 적의 본진도 못 봤을 때 어디로 갈 것인가.
+ *
+ * pickTarget 이 null 을 주면 refreshOrder 가 부대의 목적지를 지운다. 그러면
+ * 부대는 매 턴 눈앞의 점수만 보고 한 칸씩 움직이고, 그게 '맴도는' 것이다.
+ * 11x11 에서는 이게 안 보였다 — 판이 작아 6턴이면 적 본진이 시야에 들어오니까.
+ * 21x21 에서는 절반이 넘는 턴을 목표 없이 보내고, 다섯 나라 중 하나는 끝까지
+ * 적을 한 번도 못 찾는다. 부대가 본진에서 평균 3.7칸을 못 벗어난다.
+ *
+ * 그래서 목표가 없으면 '모르는 곳'을 목표로 삼는다. 가장 가까운 변두리 중
+ * 그 너머에 모르는 칸이 많은 쪽. 거기 닿으면 시야가 밀려나고 다음 변두리가
+ * 생기므로, 적을 찾을 때까지 꾸준히 바깥으로 나간다.
+ */
+function scoutTarget(
+  ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress' | 'rally' | 'token'>
+): Cell | null {
+  let best: Cell | null = null;
+  let bestScore = -Infinity;
+  for (const c of ctx.state.cells) {
+    if (c.offMap) continue;
+    if (!isExplored(ctx.state, ctx.me, c)) continue;
+    // 모르는 곳과 맞닿은 칸만 후보다. 이미 다 아는 한복판은 갈 이유가 없다.
+    let unknown = 0;
+    for (const n of neighbors(ctx.state, c)) {
+      if (!isExplored(ctx.state, ctx.me, n)) unknown++;
+    }
+    if (unknown === 0) continue;
+    // 멀수록 손해지만, 모르는 게 많이 걸린 쪽이면 멀어도 간다
+    const score = unknown * 2 - minDist(c, ctx.homes) * 0.5;
+    if (score > bestScore) {
+      bestScore = score;
+      best = c;
+    }
+  }
+  return best;
+}
+
 function pickTarget(
   ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress' | 'rally' | 'token'>
 ): Cell | null {
@@ -371,7 +408,8 @@ function pickTarget(
       best = h;
     }
   }
-  return best;
+  // 아직 아무도 못 찾았으면 찾으러 간다
+  return best ?? scoutTarget(ctx);
 }
 
 function computeHomeThreat(state: GameState, me: number, homes: Cell[]): number {
