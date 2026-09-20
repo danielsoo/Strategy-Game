@@ -50,6 +50,18 @@ function idxOf(state: GameState, c: Cell): number {
  * 시야를 다시 계산한다.
  * 부대는 주변을, 본진과 요새는 더 넓게 본다.
  */
+/**
+ * 판이 커지면 시야도 같이 넓어져야 한다.
+ *
+ * 반경 2·3 은 11x11(91칸)에서 고른 값이다. 판을 217칸으로 키우니 같은 시야가
+ * 16% 밖에 못 밝혀서, 화면이 거의 검정이 됐다 — 게임이 고장난 것처럼 보인다.
+ * 판 반지름에 비례해 늘린다. 11x11 에서는 1배라 지금 균형이 그대로다.
+ */
+function visionScale(state: GameState): number {
+  const r = Math.floor(Math.min(state.rows, state.cols) / 2);
+  return Math.max(1, r / 5);
+}
+
 export function recomputeVision(
   state: GameState,
   nationId: number,
@@ -61,13 +73,14 @@ export function recomputeVision(
   v.visible.fill(false);
 
   // 눈이 되는 것들 — 내 부대, 내 본진, 내 완공 요새
+  const scale = visionScale(state);
   const eyes: Array<{ cell: Cell; radius: number }> = [];
   for (const c of state.cells) {
     if (c.owner !== nationId) continue;
     if (c.castle || c.fortStage === 4) {
-      eyes.push({ cell: c, radius: eco.visionRadiusHub });
+      eyes.push({ cell: c, radius: Math.round(eco.visionRadiusHub * scale) });
     } else if (c.units > 0 && !c.neutral) {
-      eyes.push({ cell: c, radius: eco.visionRadiusUnit });
+      eyes.push({ cell: c, radius: Math.round(eco.visionRadiusUnit * scale) });
     }
   }
   // 이동 중인 무역상도 눈 노릇을 한다
