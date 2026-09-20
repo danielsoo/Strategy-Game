@@ -67,6 +67,8 @@ function softmax(v: number[]): number[] {
 interface Decision {
   cands: number[][];
   chosen: number;
+  /** 고를 당시 이 수를 고를 확률. 정책이 그때로부터 얼마나 멀어졌는지 재는 데 쓴다. */
+  pOld: number;
 }
 
 const ROSTER: AIWeights[] = [
@@ -84,6 +86,7 @@ function record(
   chosen: Action,
   all: Action[],
   cache: WeakMap<Action, number[]> | null,
+  temp: number,
   sink: (d: Decision) => void
 ): void {
   if (all.length < 2) return;
@@ -95,7 +98,9 @@ function record(
     cands.push(x);
   }
   if (idx < 0) return;
-  sink({ cands, chosen: idx });
+  // 망이 둔 자리라면 점수가 이미 선호도다. 손평가식 기보에는 확률 개념이 없다.
+  const pOld = cache ? softmax(all.map((a) => a.score / temp))[idx] : 0;
+  sink({ cands, chosen: idx, pOld });
 }
 
 /** 손으로 쓴 평가식으로 두면서, 고른 수를 기록한다 (모방용 기보) */
@@ -103,7 +108,7 @@ function handPolicy(rate: number, rng: RNG, sink: (d: Decision) => void): Policy
   return {
     onChoose: (ctx, c, chosen, all) => {
       if (rng() >= rate) return;
-      record(ctx, c, chosen, all, null, sink);
+      record(ctx, c, chosen, all, null, 1, sink);
     },
   };
 }
@@ -145,7 +150,7 @@ function netPolicy(net: Net, opts: NetOptions): Policy {
     onChoose: opts.sink
       ? (ctx, c, chosen, all) => {
           if (opts.rng() >= opts.rate) return;
-          record(ctx, c, chosen, all, feat, opts.sink!);
+          record(ctx, c, chosen, all, feat, opts.temp, opts.sink!);
         }
       : undefined,
   };
@@ -213,8 +218,14 @@ function collectSelf(
  *   d손실/d선호도_j = 이득 * (p_j - 원핫_j) + beta * p_j * (log p_j + H)
  *
  * 이득을 전부 1 로 주면 그대로 모방 학습이 된다.
- * 엔트로피 항이 없으면 한 번의 갱신으로 정책이 결정적으로 굳어버린다 —
- * 실제로 그렇게 무너지는 걸 봤다.
+ *
+ * 문제는 한 회에 스텝이 수천 번 나간다는 것이다. 아담은 기울기 크기를
+ * 정규화하니 매 스텝이 lr 만큼 움직이고, 그게 쌓이면 정책이 너무 멀리 간다.
+ * 실제로 엔트로피가 0.30 → 0.01 로 무너지고 다시는 안 돌아왔다.
+ *
+ * 그래서 신뢰 영역을 씌운다(PPO). 자료를 모을 때의 정책에서 확률이 (1±clip)
+ * 배를 벗어나면 그쪽으로는 더 밀지 않는다. 그리고 KL 이 한도를 넘으면
+ * 그 회는 거기서 멈춘다. 한 번에 갈 수 있는 거리를 정해두는 것이다.
  */
 function policyStep(
   net: Net,
@@ -224,8 +235,11 @@ function policyStep(
   temp: number,
   beta: number,
   batch: number,
-  rng: RNG
-): { entropy: number; agree: number } {
+  rng: RNG,
+  /** 0 이면 신뢰 영역 없이 그냥 민다 (모방 단계) */
+  clip = 0,
+  klLimit = Infinity
+): { entropy: number; agree: number; kl: number; stopped: boolean } {
   const order = decisions.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
@@ -234,6 +248,9 @@ function policyStep(
 
   let entSum = 0;
   let agree = 0;
+  let klSum = 0;
+  let seen = 0;
+  let stopped = false;
 
   let xs: number[][] = [];
   let ds: number[] = [];
@@ -250,6 +267,7 @@ function policyStep(
   for (const k of order) {
     const d = decisions[k];
     const p = softmax(d.cands.map((x) => predict(net, x) / temp));
+    seen++;
 
     let best = 0;
     for (let i = 1; i < p.length; i++) if (p[i] > p[best]) best = i;
@@ -259,19 +277,33 @@ function policyStep(
     for (const q of p) H += -q * Math.log(q + 1e-9);
     entSum += H;
 
+    // 자료를 모을 때와 지금이 얼마나 벌어졌나
+    const ratio = clip > 0 && d.pOld > 0 ? p[d.chosen] / d.pOld : 1;
+    if (clip > 0 && d.pOld > 0) klSum += Math.log(d.pOld / Math.max(1e-9, p[d.chosen]));
+
+    // 이미 너무 멀리 간 방향으로는 더 밀지 않는다
     const adv = advantages[k];
+    const frozen =
+      clip > 0 &&
+      ((adv > 0 && ratio > 1 + clip) || (adv < 0 && ratio < 1 - clip));
+
     for (let i = 0; i < p.length; i++) {
       xs.push(d.cands[i]);
-      const pg = adv * (p[i] - (i === d.chosen ? 1 : 0));
+      const pg = frozen ? 0 : adv * ratio * (p[i] - (i === d.chosen ? 1 : 0));
       const ent = beta * p[i] * (Math.log(p[i] + 1e-9) + H);
       ds.push((pg + ent) / temp);
     }
     if (++inBatch >= batch) flush();
+
+    if (seen % 512 === 0 && klSum / seen > klLimit) {
+      stopped = true;
+      break;
+    }
   }
   flush();
 
-  const n = Math.max(1, decisions.length);
-  return { entropy: entSum / n, agree: agree / n };
+  const n = Math.max(1, seen);
+  return { entropy: entSum / n, agree: agree / n, kl: klSum / n, stopped };
 }
 
 function evaluate(net: Net, games: number, size: number, seed: number): number {
@@ -318,7 +350,13 @@ function main() {
   const lr = parseArg('lr', 0.0015);
   const cloneLr = parseArg('clonelr', 0.004);
   const temp = parseArg('temp', 1);
-  const beta = parseArg('beta', 0.02);
+  const beta = parseArg('beta', 0.05);
+  const clip = parseArg('clip', 0.2);
+  const klLimit = parseArg('kl', 0.02);
+  const ppoEpochs = parseArg('ppoepochs', 3);
+  const revertGap = parseArg('revert', 0.1);
+  const iterGames = parseArg('itergames', 200);
+  const staleLimit = parseArg('patience', 8);
   const rate = parseArg('sample', 0.25);
   const netShare = parseArg('share', 0.6);
   const rng = makeRng(parseArg('seed', 20260919));
@@ -333,7 +371,7 @@ function main() {
   const demos = collectHand(cloneGames, size, rate, rng);
   const ones = demos.map(() => 1);
   for (let e = 1; e <= cloneEpochs; e++) {
-    const { entropy, agree } = policyStep(net, demos, ones, cloneLr, temp, beta, 24, rng);
+      const { entropy, agree } = policyStep(net, demos, ones, cloneLr, temp, beta, 24, rng);
     console.log(
       `  ${e}주기 | 결정 ${demos.length} · 일치 ${(agree * 100).toFixed(1)}% · 엔트로피 ${entropy.toFixed(2)}`
     );
@@ -345,6 +383,7 @@ function main() {
   // 2단계: 자가대전으로 그 위를 올린다
   console.log(`\n2단계 자가대전 — ${iters}회 · 회당 ${games}판`);
   let bestRate = cloned;
+  let stale = 0;
   saveNet(net, 'sim/nets/best.json');
 
   for (let it = 1; it <= iters; it++) {
@@ -359,19 +398,53 @@ function main() {
       rng
     );
     const gen = ((Date.now() - t0) / 1000).toFixed(0);
-    const { entropy } = policyStep(net, decisions, advantages, lr, temp, beta, 24, rng);
-    const score = evaluate(net, 150, size, 777000 + it);
+
+    // 같은 자료를 여러 번 보되, 처음 정책에서 너무 멀어지면 멈춘다
+    let entropy = 0;
+    let kl = 0;
+    let epochs = 0;
+    for (let e = 0; e < ppoEpochs; e++) {
+      const r = policyStep(net, decisions, advantages, lr, temp, beta, 24, rng, clip, klLimit);
+      entropy = r.entropy;
+      kl = r.kl;
+      epochs++;
+      if (r.stopped) break;
+    }
+
+    const score = evaluate(net, iterGames, size, 777000 + it);
 
     console.log(
       `  ${String(it).padStart(2)}회 | 결정 ${String(decisions.length).padStart(6)} · 승 ${(
         winShare * 100
-      ).toFixed(0)}% · 엔트로피 ${entropy.toFixed(2)} · ${gen}초 | 평가 ${(score * 100).toFixed(1)}%`
+      ).toFixed(0)}% · 엔트로피 ${entropy.toFixed(2)} · KL ${kl.toFixed(3)} · ${epochs}주기 · ${gen}초 | 평가 ${(
+        score * 100
+      ).toFixed(1)}%`
     );
 
     saveNet(net, `sim/nets/iter${it}.json`);
     if (score > bestRate) {
       bestRate = score;
       saveNet(net, 'sim/nets/best.json');
+      stale = 0;
+    } else if (score < bestRate - revertGap) {
+      // 무너졌으면 되돌린다. 무너진 망으로 자료를 더 모으면 같이 썩는다.
+      const back = loadNet('sim/nets/best.json');
+      net.W = back.W;
+      net.b = back.b;
+      // 아담의 관성까지 같이 되돌린다. 안 그러면 무너지던 방향으로 계속 민다.
+      net.mW = back.mW;
+      net.vW = back.vW;
+      net.mb = back.mb;
+      net.vb = back.vb;
+      net.steps = 0;
+      console.log(`     ↳ ${(bestRate * 100).toFixed(1)}% 로 되돌림`);
+      stale++;
+    } else {
+      stale++;
+    }
+    if (stale >= staleLimit) {
+      console.log(`     ↳ ${staleLimit}회째 나아지지 않아 멈춤`);
+      break;
     }
   }
 
