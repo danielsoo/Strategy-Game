@@ -90,13 +90,20 @@ export const BASE_WEIGHTS: AIWeights = {
   castleAssault: 12,
   fort: 2,
   aggression: 1,
-  massing: 0.6,
+  // 0.6 과 1 은 내가 "균형이라면 이쯤"이라고 찍은 값이었다. 재보니 둘 다
+  // 해롭다 — 균형이 3.2% → 8.0% → 17.2% 로 올랐다(뭉치기 0, 그다음 지원 0).
+  //
+  // 뭉치기: 턴을 써서 합치는 것은 한 칸 10명 상한이 생긴 뒤에도 손해다.
+  //   집중은 포개는 게 아니라 옆에 늘어서는 것으로 표현된다(협공).
+  // 지원: 압박받는 아군 쪽으로 끌려가면 전선이 한 점으로 빨려들어, 정작
+  //   따야 할 땅과 쳐야 할 성을 놓친다. 구하러 가는 값은 이미 태세 판단에 있다.
+  massing: 0,
   homeDefense: 1,
   advance: 1,
   expansion: 1,
   terrain: 0.5,
   wealth: 1,
-  support: 1,
+  support: 0,
   explore: 1,
   targetArmy: 18,
 };

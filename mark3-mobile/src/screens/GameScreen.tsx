@@ -13,6 +13,10 @@ import {
   isHostile,
   performAttack,
   moveStack,
+  canMoveTo,
+  canAttackFrom,
+  marchCost,
+  stackCap,
   beginTurn,
   restUnmoved,
   updateAliveFlags,
@@ -186,9 +190,18 @@ export default function GameScreen() {
   }, [watching, speedIdx, state, rng]);
 
   const selectedCell = selected ? state.cells.find((c) => c.id === selected) ?? null : null;
+  // 갈 수 있는 칸. 행군력이 모자라거나 합쳐서 상한을 넘으면 후보가 아니다.
+  // AI 와 같은 판정을 쓴다 — 규칙이 두 군데에 있으면 반드시 갈라진다.
   const movable = useMemo(() => {
     if (!selectedCell || !myTurn) return new Set<string>();
-    return new Set(neighbors(state, selectedCell).map((n) => n.id));
+    const out = new Set<string>();
+    for (const n of neighbors(state, selectedCell)) {
+      const ok = isHostile(selectedCell, n)
+        ? canAttackFrom(selectedCell, n)
+        : canMoveTo(selectedCell, n);
+      if (ok) out.add(n.id);
+    }
+    return out;
   }, [selectedCell, state, myTurn]);
 
   // ── 플레이어 조작 ────────────────────────────────────────
@@ -572,6 +585,18 @@ export default function GameScreen() {
               : ''}
             {selectedCell.encircled ? ' · 포위됨' : ''}
           </Text>
+          {/*
+            행군력은 '얼마나 멀리 갈 수 있나'가 아니라 '지금 갈 수 있나'다.
+            병력이 많을수록 한 칸이 비싸지니, 숫자만 보여주면 왜 못 가는지 모른다.
+            그래서 실제 비용과 나란히 놓는다.
+          */}
+          <Text style={styles.panelNote}>
+            행군력 {Math.round(selectedCell.march)} · 한 칸{' '}
+            {Math.round(marchCost(selectedCell.units, selectedCell))}~
+            {Math.round(marchCost(selectedCell.units, selectedCell) * 2)}
+            {selectedCell.units >= stackCap() ? ` · 정원 ${stackCap()}명 (합류 불가)` : ''}
+            {movable.size === 0 && myTurn ? ' · 이번 턴엔 움직일 수 없다' : ''}
+          </Text>
           {fortCheck?.ok ? (
             <TouchableOpacity style={[styles.btn, styles.fortBtn]} onPress={buildFortHandler()}>
               <Text style={styles.btnText}>요새 건설 ({DEFAULT_ECONOMY.fortCost}G)</Text>
@@ -873,6 +898,7 @@ const styles = StyleSheet.create({
 
   panel: { backgroundColor: '#1f1f1f', marginHorizontal: 12, borderRadius: 8, padding: 10 },
   panelTitle: { color: '#e5e7eb', fontSize: 12, marginBottom: 6 },
+  panelNote: { color: '#9ca3af', fontSize: 11, marginBottom: 6 },
   hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic' },
 
   footer: { backgroundColor: '#1f1f1f', padding: 10, gap: 6 },
