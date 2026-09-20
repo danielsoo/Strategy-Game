@@ -55,6 +55,8 @@ export interface GameResult {
   /** 종료 시점에 거느린 속국 수 / 스스로 속국이 되었는지 */
   vassalsHeld: number[];
   becameVassal: boolean[];
+  /** 수비자가 무엇을 골랐는지 — 맞섬/후퇴/항복 */
+  choices: { fight: number; retreat: number; surrender: number };
 }
 
 export function playGame(
@@ -80,6 +82,7 @@ export function playGame(
   const underdogAttacks = new Array(n).fill(0);
   const underdogWins = new Array(n).fill(0);
   const defended = new Array(n).fill(0);
+  const choices = { fight: 0, retreat: 0, surrender: 0 };
   const defendedHeld = new Array(n).fill(0);
 
   const snapshots: TurnSnapshot[] = [];
@@ -129,6 +132,7 @@ export function playGame(
     survived: state.nations.map((x) => x.alive),
     vassalsHeld: state.nations.map((x) => vassalsOf(state, x.id).length),
     becameVassal: state.nations.map((x) => x.suzerain !== null),
+    choices,
   });
 
   for (let turn = 1; turn <= maxTurns; turn++) {
@@ -143,6 +147,7 @@ export function playGame(
       restUnmoved(state, id, log.moved);
 
       for (const a of log.attacks) {
+        choices[a.choice]++;
         attacksMade[id]++;
         if (a.result.outcome === 'attacker-win') attacksWon[id]++;
         if (a.powerRatio < 1) {

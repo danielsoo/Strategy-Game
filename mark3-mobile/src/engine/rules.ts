@@ -24,6 +24,7 @@ import {
   Terrain,
 } from './types';
 import { createVision, recomputeVision } from './vision';
+import { decideDefense, retreatSurvivors, surrenderOutcome, DefenseChoice } from './defense';
 
 // ─────────────────────────────────────────────────────────────
 // 격자 조회
@@ -545,6 +546,10 @@ export interface AttackOutcome {
   capturedCell: boolean;
   fromId: string;
   toId: string;
+  /** 수비자가 고른 것. 싸우지 않고 끝나면 result 는 빈 전투가 된다. */
+  choice: DefenseChoice;
+  /** 항복했을 때 공격자에 편입된 병력 */
+  recruited?: number;
 }
 
 /** 이 칸을 빼앗았을 때 상대 국고에서 가져오는 액수 */
@@ -564,6 +569,117 @@ export function plunderValue(
   return Math.max(0, Math.floor(victim.gold * share));
 }
 
+/** 물러날 자리 — 적에게서 가장 먼 빈 칸. 없으면 null. */
+function retreatSpot(state: GameState, defender: Cell, attacker: Cell): Cell | null {
+  let best: Cell | null = null;
+  let bestD = -1;
+  for (const n of neighbors(state, defender)) {
+    if (n.units > 0 || n.castle) continue;
+    if (n.owner !== null && n.owner !== defender.owner) continue; // 남의 땅으로는 못 물러난다
+    const d = hexDistance(n.row, n.col, attacker.row, attacker.col);
+    if (d > bestD) {
+      bestD = d;
+      best = n;
+    }
+  }
+  return best;
+}
+
+/**
+ * 싸우지 않고 끝나는 경우.
+ *
+ * 후퇴  — 대열이 무너지며 일부를 잃고 옆 칸으로 빠진다. 연달아 물러나면 더 잃는다.
+ * 항복  — 공격자의 공포·정의가 포로의 운명을 정한다. 편입된 병력은 공격자 것이 된다.
+ */
+function resolveWithoutBattle(
+  state: GameState,
+  from: Cell,
+  to: Cell,
+  choice: DefenseChoice,
+  escape: Cell | null,
+  powerRatio: number,
+  eco: EconomyConfig
+): AttackOutcome {
+  const attackerNationId = from.neutral ? null : from.owner;
+  const defenderNationId = to.neutral ? null : to.owner;
+  const before = to.units;
+  let recruited = 0;
+
+  if (choice === 'retreat' && escape) {
+    const survivors = retreatSurvivors(before, to.retreatStreak ?? 0);
+    escape.owner = to.owner;
+    escape.units = survivors;
+    escape.morale = Math.max(20, to.morale - 15);
+    escape.exhaustion = Math.min(100, to.exhaustion + 20);
+    escape.driftPP = to.driftPP;
+    escape.march = Math.max(0, to.march - marchCost(survivors, escape, eco));
+    escape.retreatStreak = (to.retreatStreak ?? 0) + 1;
+    escape.lastFrom = to.id;
+    escape.order = to.order;
+    pushLog(state, `${nameOf(state, defenderNationId)}: 물러났다 (${before} → ${survivors})`);
+  } else {
+    const att = from.owner !== null ? state.nations[from.owner] : null;
+    const out = surrenderOutcome(before, att?.fear ?? 50, att?.justice ?? 50);
+    recruited = out.recruited;
+    pushLog(
+      state,
+      `${nameOf(state, defenderNationId)}: 항복 — 처형 ${out.deaths} · 편입 ${out.recruited} · 흩어짐 ${out.escaped}`
+    );
+  }
+
+  // 어느 쪽이든 칸은 넘어간다
+  const keepOwner = from.owner;
+  const moved = from.units + recruited;
+  clearStack(to);
+  to.owner = from.owner;
+  to.units = Math.min(stackCap(eco), moved);
+  to.morale = from.morale;
+  to.exhaustion = Math.min(100, from.exhaustion + 10);
+  to.driftPP = from.driftPP;
+  to.march = Math.max(0, from.march);
+  to.order = from.order;
+  to.lastFrom = from.id;
+  from.lastFrom = undefined;
+  from.order = undefined;
+  clearStack(from);
+  from.owner = keepOwner;
+
+  return {
+    result: emptyCombat(before, to.units),
+    attackerNation: attackerNationId,
+    defenderNation: defenderNationId,
+    powerRatio,
+    capturedCell: true,
+    fromId: from.id,
+    toId: to.id,
+    choice,
+    recruited,
+  };
+}
+
+function nameOf(state: GameState, id: number | null): string {
+  return id !== null ? state.nations[id]?.name ?? '중립' : '중립';
+}
+
+/** 싸움이 없었을 때 넣을 빈 전투 기록 */
+function emptyCombat(defBefore: number, attSurvivors: number): DetailedCombatResult {
+  return {
+    outcome: 'attacker-win',
+    reason: 'rout',
+    rounds: [],
+    attackerSurvivors: attSurvivors,
+    defenderSurvivors: 0,
+    attackerMorale: 100,
+    defenderMorale: 0,
+    attackerDriftDelta: 0,
+    defenderDriftDelta: 0,
+    attackerResolvePP: 0,
+    defenderResolvePP: 0,
+    attackerSupport: 0,
+    defenderSupport: 0,
+  };
+}
+
 export function performAttack(
   state: GameState,
   from: Cell,
@@ -581,6 +697,24 @@ export function performAttack(
   // 공격측은 목표 칸 주위의 아군이, 수비측은 자기 칸 주위의 아군이 거든다.
   const attSupport = flankingSupport(state, to, from, eco);
   const defSupport = flankingSupport(state, to, to, eco);
+
+  // 맞는 쪽이 먼저 정한다 — 맞설까, 물러날까, 항복할까.
+  const escape = retreatSpot(state, to, from);
+  const choice = decideDefense(
+    state,
+    from,
+    to,
+    cellPower(to, true) + defSupport,
+    cellPower(from, false) + attSupport,
+    escape,
+    rng,
+    eco
+  );
+
+  if (choice !== 'fight') {
+    return resolveWithoutBattle(state, from, to, choice, escape, powerRatio, eco);
+  }
+  to.retreatStreak = 0;
 
   const res = resolveCombat(
     sideOf(state, from, false, attSupport),
@@ -660,6 +794,7 @@ export function performAttack(
     capturedCell: captured,
     fromId: from.id,
     toId: to.id,
+    choice: 'fight',
   };
 }
 

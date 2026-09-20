@@ -65,6 +65,11 @@ export interface Cell {
    */
   order?: { destId: string; age: number };
   /**
+   * 연달아 물러난 횟수. 물러날수록 대열이 무너져 더 많이 잃는다.
+   * 후퇴가 공짜면 아무도 싸우지 않고 도망만 다닌다.
+   */
+  retreatStreak?: number;
+  /**
    * 판 밖. 격자는 사각형으로 들고 있지만 실제 판은 그 안에 깎아낸 육각형이다.
    *
    * 칸을 지우지 않고 표시만 하는 이유는 `row * cols + col` 로 인덱싱하는 자리가
