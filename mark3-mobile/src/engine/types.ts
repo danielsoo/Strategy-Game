@@ -199,6 +199,12 @@ export interface EconomyConfig {
    * 이게 낮으면 빈 땅이 공짜라서, 걸어 들어가 칠하는 것이 싸우는 것보다
    * 언제나 이득이 된다. 자가대전 학습이 "전진 0, 집결 0"으로 수렴한 이유가
    * 이것이었다. 땅을 얻으려면 싸워야 전투력이 값어치를 갖는다.
+   *
+   * 한 칸 10명 상한이 들어온 뒤 다시 훑었다. 중립이 많을수록 초반 땅따먹기가
+   * 느려져 판이 길어지고 시작 위치 운이 줄어든다.
+   *   0.06  자리편차 10.0% · 74턴
+   *   0.08  자리편차  6.7% · 84턴
+   *   0.10  자리편차  4.0% · 99턴   ← 현재
    */
   neutralDensity: number;
   /** 급여가 밀려도 버티는 기본 턴 수 */
@@ -261,14 +267,14 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   cellIncome: 2,
   castleIncome: 25,
   fortIncome: 8,
-  unitUpkeep: 0.7,
+  unitUpkeep: 0.8,
   recruitCost: 18,
   maxRecruitPerTurn: 1,
   fortCost: 120,
   startingGold: 150,
   adminRange: 2.5,
   adminCostPerCell: 0.4,
-  adminExponent: 1.38,
+  adminExponent: 1.31,
   merchantCastleMultiplier: 2.0,
   merchantFortMultiplier: 1.5,
   merchantStake: 60,
@@ -281,10 +287,10 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   voluntarySubmitChance: 0.12,
-  flankSupport: 0.3,
+  flankSupport: 0.42,
   visionRadiusUnit: 2,
   visionRadiusHub: 3,
-  neutralDensity: 0.08,
+  neutralDensity: 0.1,
   graceTurnsBase: 2,
   graceTurnsJustice: 4,
   forageIncomePerUnit: 0.8,
