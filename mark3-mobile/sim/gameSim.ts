@@ -27,7 +27,7 @@ import {
   influenceOf,
   vassalsOf,
 } from '../src/engine';
-import { takeAITurn, AIWeights, PERSONALITIES } from '../src/engine/ai';
+import { takeAITurn, AIWeights, PERSONALITIES, Policy } from '../src/engine/ai';
 import { Recorder, MatchLog, snapshot as turnSnapshot, TurnSnapshot } from './recorder';
 
 /** 판을 통째로 남기고 싶을 때 넘긴다 */
@@ -64,7 +64,9 @@ export function playGame(
   rng: RNG,
   maxTurns = 250,
   eco: EconomyConfig = DEFAULT_ECONOMY,
-  record?: RecordOptions
+  record?: RecordOptions,
+  /** 나라별로 수를 고르는 방식. 비워두면 손으로 쓴 평가식을 쓴다. */
+  policies?: (Policy | undefined)[]
 ): GameResult {
   const n = weightsPerNation.length;
   const state = createGameState(n, rows, cols, rng, eco);
@@ -134,7 +136,7 @@ export function playGame(
       state.current = id;
 
       beginTurn(state, id, rng, eco);
-      const log = takeAITurn(state, id, weightsPerNation[id], rng, eco);
+      const log = takeAITurn(state, id, weightsPerNation[id], rng, eco, policies?.[id]);
       restUnmoved(state, id, log.moved);
 
       for (const a of log.attacks) {

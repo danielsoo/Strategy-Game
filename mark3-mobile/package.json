@@ -13,7 +13,8 @@
     "sim:learn": "tsx sim/tuneAI.ts",
     "sim:validate": "tsx sim/validate.ts",
     "sim:eval": "tsx sim/evaluate.ts",
-    "sim:league": "tsx sim/league.ts"
+    "sim:league": "tsx sim/league.ts",
+    "sim:rl": "tsx sim/rl.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",

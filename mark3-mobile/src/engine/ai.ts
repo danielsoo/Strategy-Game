@@ -151,7 +151,7 @@ export const LEARNED_WEIGHTS: AIWeights = {
 
 PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
 
-interface Ctx {
+export interface Ctx {
   state: GameState;
   me: number;
   w: AIWeights;
@@ -306,7 +306,7 @@ function riskAt(ctx: Ctx, c: Cell, myUnits: number, myPower: number): number {
   return ctx.w.units * myUnits * 0.12 * exposure;
 }
 
-type Action =
+export type Action =
   | { kind: 'stay'; score: number }
   | { kind: 'move'; score: number; target: Cell }
   | { kind: 'attack'; score: number; target: Cell };
@@ -510,6 +510,22 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
   return actions;
 }
 
+/**
+ * 수를 고르는 방식을 바깥에서 갈아끼우는 자리.
+ *
+ * 후보 행동은 규칙이 정한다(제자리 + 이웃 한 칸씩). 바뀌는 건 그 후보를
+ * 어떻게 매기고 어떻게 고르느냐다. 손으로 쓴 평가식도, 학습한 가치함수도
+ * 같은 자리에 꽂힌다 — 그래야 둘을 같은 기준으로 붙여볼 수 있다.
+ */
+export interface Policy {
+  /** 후보를 다시 매긴다. 없으면 손으로 쓴 점수를 그대로 쓴다. */
+  score?: (ctx: Ctx, c: Cell, a: Action) => number;
+  /** 고르는 방식. 없으면 최고점. 학습 중에는 여기로 탐색을 섞는다. */
+  select?: (actions: Action[], rng: RNG, ctx: Ctx, c: Cell) => Action;
+  /** 고른 수를 알린다. 학습 자료는 여기서 모은다. */
+  onChoose?: (ctx: Ctx, c: Cell, chosen: Action, all: Action[]) => void;
+}
+
 export interface AITurnLog {
   attacks: AttackOutcome[];
   recruited: number;
@@ -550,7 +566,8 @@ export function takeAITurn(
   nationId: number,
   w: AIWeights,
   rng: RNG,
-  eco: EconomyConfig = DEFAULT_ECONOMY
+  eco: EconomyConfig = DEFAULT_ECONOMY,
+  policy?: Policy
 ): AITurnLog {
   const moved = new Set<string>();
   const log: AITurnLog = { attacks: [], recruited: 0, fortsStarted: 0, moved };
@@ -621,9 +638,13 @@ export function takeAITurn(
     if (!c || c.owner !== nationId || c.units <= 0) continue;
 
     const actions = scoreActions(ctx, c);
+    if (policy?.score) for (const a of actions) a.score = policy.score(ctx, c, a);
     actions.sort((a, b) => b.score - a.score);
-    const best = actions[0];
-    if (!best || best.kind === 'stay') continue;
+    const best = policy?.select ? policy.select(actions, rng, ctx, c) : actions[0];
+    if (!best) continue;
+    // 제자리도 하나의 수다. 학습 자료에서 빼면 '가만히 있기'를 영영 못 배운다.
+    policy?.onChoose?.(ctx, c, best, actions);
+    if (best.kind === 'stay') continue;
 
     if (best.kind === 'attack') {
       const wasCastle = best.target.castle;
