@@ -15,13 +15,11 @@
 import { makeRng, RNG } from '../src/services/combatSystem';
 import { playGame } from './gameSim';
 import { AIWeights, LEARNED_WEIGHTS, PERSONALITIES, Policy, Ctx, Action } from '../src/engine/ai';
-import { extractFeatures } from '../src/engine/features';
+import { extractFeatures, FEATURE_INDEX } from '../src/engine/features';
 import { Cell } from '../src/engine/types';
 import { loadNet, predict, Net } from './net';
 
-/** features.ts 의 자리 — 접경국 수, 합치기 여부 */
-const F_FRONTS = 4;
-const F_MERGE = 24;
+const { fronts: F_FRONTS, merge: F_MERGE } = FEATURE_INDEX;
 
 function parseArg(name: string, fallback: number): number {
   const i = process.argv.indexOf('--' + name);

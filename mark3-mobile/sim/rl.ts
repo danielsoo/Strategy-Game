@@ -26,9 +26,9 @@ import * as fs from 'fs';
 import { makeRng, RNG } from '../src/services/combatSystem';
 import { playGame } from './gameSim';
 import { AIWeights, LEARNED_WEIGHTS, PERSONALITIES, Policy, Ctx, Action } from '../src/engine/ai';
-import { extractFeatures, FEATURE_COUNT } from '../src/engine/features';
+import { extractFeatures, FEATURE_COUNT, STATE_FEATURE_COUNT } from '../src/engine/features';
 import { Cell } from '../src/engine/types';
-import { createNet, loadNet, saveNet, predict, trainWithDeltas, Net } from './net';
+import { createNet, loadNet, saveNet, predict, trainBatch, trainWithDeltas, Net } from './net';
 
 function parseArg(name: string, fallback: number): number {
   const i = process.argv.indexOf('--' + name);
@@ -179,9 +179,8 @@ function collectSelf(
   temp: number,
   rate: number,
   rng: RNG
-): { decisions: Decision[]; advantages: number[]; winShare: number } {
+): { decisions: Decision[]; returns: number[]; winShare: number } {
   const decisions: Decision[] = [];
-  const advantages: number[] = [];
   const returns: number[] = [];
 
   for (let g = 0; g < games; g++) {
@@ -206,9 +205,54 @@ function collectSelf(
     }
   }
 
-  const baseline = returns.reduce((a, b) => a + b, 0) / Math.max(1, returns.length);
-  for (const R of returns) advantages.push(R - baseline);
-  return { decisions, advantages, winShare: baseline };
+  const winShare = returns.reduce((a, b) => a + b, 0) / Math.max(1, returns.length);
+  return { decisions, returns, winShare };
+}
+
+/**
+ * 기준선 — "이 형편이면 원래 얼마나 이기던 자리인가".
+ *
+ * 이게 없으면 한 판의 결정 수만 개가 모두 같은 라벨을 받는다. 이미 크게
+ * 앞선 나라가 둔 평범한 수도 전부 '좋은 수'로, 밀리던 나라가 둔 최선의 수도
+ * 전부 '나쁜 수'로 배운다. 형편을 빼고 나야 수 자체의 값어치가 남는다.
+ *
+ * 행동과 무관한 앞 21개만 본다. 같은 결정 안의 후보들은 그 구간이 모두 같으니
+ * 후보를 고르는 데는 아무 영향이 없고, 오직 이득의 기준선 노릇만 한다.
+ */
+function fitCritic(
+  critic: Net,
+  decisions: Decision[],
+  returns: number[],
+  lr: number,
+  epochs: number,
+  rng: RNG
+): { loss: number; advantages: number[] } {
+  const xs = decisions.map((d) => d.cands[d.chosen].slice(0, STATE_FEATURE_COUNT));
+  const order = xs.map((_, i) => i);
+  let loss = 0;
+
+  for (let e = 0; e < epochs; e++) {
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    let sum = 0;
+    let n = 0;
+    for (let s0 = 0; s0 < order.length; s0 += 64) {
+      const part = order.slice(s0, s0 + 64);
+      sum += trainBatch(
+        critic,
+        part.map((k) => xs[k]),
+        part.map((k) => returns[k]),
+        lr
+      );
+      n++;
+    }
+    loss = sum / Math.max(1, n);
+  }
+
+  const advantages = xs.map((x, i) => returns[i] - predict(critic, x));
+  return { loss, advantages };
 }
 
 /**
@@ -356,12 +400,15 @@ function main() {
   const ppoEpochs = parseArg('ppoepochs', 3);
   const revertGap = parseArg('revert', 0.1);
   const iterGames = parseArg('itergames', 200);
+  const criticLr = parseArg('criticlr', 0.004);
   const staleLimit = parseArg('patience', 8);
   const rate = parseArg('sample', 0.25);
   const netShare = parseArg('share', 0.6);
   const rng = makeRng(parseArg('seed', 20260919));
 
-  const net = createNet([FEATURE_COUNT, 24, 16, 1], rng, true);
+  const h1 = parseArg('h1', 24);
+  const h2 = parseArg('h2', 16);
+  const net = createNet([FEATURE_COUNT, h1, h2, 1], rng, true);
   fs.mkdirSync('sim/nets', { recursive: true });
 
   console.log(`정책 학습 — 특징 ${FEATURE_COUNT}개 · 망 ${net.sizes.join('-')} · 온도 ${temp}\n`);
@@ -381,14 +428,15 @@ function main() {
   saveNet(net, 'sim/nets/clone.json');
 
   // 2단계: 자가대전으로 그 위를 올린다
-  console.log(`\n2단계 자가대전 — ${iters}회 · 회당 ${games}판`);
+  const critic = createNet([STATE_FEATURE_COUNT, 16, 1], rng);
+  console.log(`\n2단계 자가대전 — ${iters}회 · 회당 ${games}판 · 기준선망 ${critic.sizes.join('-')}`);
   let bestRate = cloned;
   let stale = 0;
   saveNet(net, 'sim/nets/best.json');
 
   for (let it = 1; it <= iters; it++) {
     const t0 = Date.now();
-    const { decisions, advantages, winShare } = collectSelf(
+    const { decisions, returns, winShare } = collectSelf(
       net,
       games,
       size,
@@ -398,6 +446,9 @@ function main() {
       rng
     );
     const gen = ((Date.now() - t0) / 1000).toFixed(0);
+
+    // 형편을 먼저 빼낸다. 남는 것이 수 자체의 값어치다.
+    const { loss: vLoss, advantages } = fitCritic(critic, decisions, returns, criticLr, 2, rng);
 
     // 같은 자료를 여러 번 보되, 처음 정책에서 너무 멀어지면 멈춘다
     let entropy = 0;
@@ -416,9 +467,9 @@ function main() {
     console.log(
       `  ${String(it).padStart(2)}회 | 결정 ${String(decisions.length).padStart(6)} · 승 ${(
         winShare * 100
-      ).toFixed(0)}% · 엔트로피 ${entropy.toFixed(2)} · KL ${kl.toFixed(3)} · ${epochs}주기 · ${gen}초 | 평가 ${(
-        score * 100
-      ).toFixed(1)}%`
+      ).toFixed(0)}% · 기준선손실 ${vLoss.toFixed(3)} · 엔트로피 ${entropy.toFixed(
+        2
+      )} · KL ${kl.toFixed(3)} · ${epochs}주기 · ${gen}초 | 평가 ${(score * 100).toFixed(1)}%`
     );
 
     saveNet(net, `sim/nets/iter${it}.json`);
