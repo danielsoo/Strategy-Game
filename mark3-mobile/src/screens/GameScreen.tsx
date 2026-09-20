@@ -7,6 +7,7 @@ import {
   ScrollView,
   Modal,
   useWindowDimensions,
+  Dimensions,
 } from 'react-native';
 import Svg, { Polygon } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
@@ -79,9 +80,39 @@ const PLAYER = 0;
  *         127칸  턴 111 · 턴제한 29%
  */
 const MODES = [
-  { label: '1대1', nations: 2, size: 11 },
-  { label: '5인 난전', nations: 5, size: 11 },
+  { label: '1대1', nations: 2 },
+  { label: '5인 난전', nations: 5 },
 ] as const;
+
+/** 칸 하나의 목표 가로 크기(px). 이만큼씩 들어가도록 판을 키운다. */
+const TARGET_HEX_W = 64;
+
+/**
+ * 화면에 맞는 판 크기를 고른다.
+ *
+ * 칸 수를 고정해두면 큰 화면에서 칸만 거대해진다 — 1920x1080 에서 91칸을
+ * 그리니 칸 하나가 108px 이었다. 칸 크기를 정해두고 들어가는 만큼 판을
+ * 키우는 쪽이 맞다.
+ *
+ * 반지름 R 인 육각 판은 가로로 2R+1.5 칸, 세로로 1.5R+1 칸을 차지한다.
+ * 격자 한 변은 2R+1 이고 실제 칸 수는 3R(R+1)+1 이다.
+ */
+function mapSizeFor(winW: number, winH: number): number {
+  const hex = TARGET_HEX_W / Math.sqrt(3);
+  const fit = (w: number, h: number) =>
+    Math.min((w / (Math.sqrt(3) * hex) - 1.5) / 2, (h / (2 * hex) - 1) / 1.5);
+
+  const side = fit(winW - paneWidth(winW) - 16, winH - 16);
+  const stacked = fit(winW, winH - CHROME_H);
+  const r = Math.max(4, Math.min(12, Math.floor(Math.max(side, stacked))));
+  return 2 * r + 1;
+}
+
+/** 판 한 변에서 실제 칸 수 */
+function tileCount(size: number): number {
+  const r = (size - 1) / 2;
+  return 3 * r * (r + 1) + 1;
+}
 
 /** 나라별 AI 성격. 0번 자리는 사람이 둘 때는 쓰이지 않고, 관전 모드에서만 쓰인다. */
 const AI_WEIGHTS: AIWeights[] = [
@@ -303,7 +334,9 @@ export default function GameScreen() {
   const mode = MODES[modeIdx];
 
   const [state, setState] = useState<GameState>(() => {
-    const s = createGameState(MODES[0].nations, MODES[0].size, MODES[0].size, rng);
+    const d = Dimensions.get('window');
+    const size = mapSizeFor(d.width, d.height);
+    const s = createGameState(MODES[0].nations, size, size, rng);
     beginTurn(s, PLAYER, rng);
     return s;
   });
@@ -509,7 +542,8 @@ export default function GameScreen() {
     setWatching(false);
     setModeIdx(idx);
     setState(() => {
-      const s = createGameState(MODES[idx].nations, MODES[idx].size, MODES[idx].size, rng);
+      const size = mapSizeFor(winW, winH);
+      const s = createGameState(MODES[idx].nations, size, size, rng);
       beginTurn(s, PLAYER, rng);
       return s;
     });
@@ -853,7 +887,7 @@ export default function GameScreen() {
               onPress={() => reset(i)}
             >
               <Text style={styles.btnText}>
-                {m.label} ({m.size}x{m.size})
+                {m.label} ({tileCount(mapSizeFor(winW, winH))}칸)
               </Text>
             </TouchableOpacity>
           ))}
