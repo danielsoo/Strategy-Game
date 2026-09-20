@@ -593,7 +593,12 @@ export default function GameScreen() {
       return (
         <View key={cell.id} style={[styles.hex, { left: lay.x(cell), top: lay.y(cell) }]}>
           <Svg width={lay.w} height={lay.h}>
-            <Polygon points={lay.points} fill="#0c0c0c" stroke="#161616" strokeWidth={0.5} />
+            {/*
+              안 가본 칸도 '칸'으로 보여야 한다. 배경(#141414)보다 어둡게 칠하면
+              여러 칸이 하나의 검은 덩어리로 뭉쳐서, 판을 키워도 칸이 늘어난 것처럼
+              보이지 않는다 — 실제로 그렇게 보였다.
+            */}
+            <Polygon points={lay.points} fill="#1d1d1f" stroke="#33333a" strokeWidth={1} />
           </Svg>
         </View>
       );
@@ -610,7 +615,7 @@ export default function GameScreen() {
     const shownFort = seen ? cell.fortStage : mem?.fortStage ?? 0;
     const shownTerrain = seen ? cell.terrain : mem?.terrain ?? 'plain';
 
-    let fill = '#242424';
+    let fill = '#2b2b2e';
     if (seen) {
       if (cell.owner !== null) fill = state.nations[cell.owner].color + (cell.units > 0 ? '' : '55');
       if (cell.neutral) fill = NEUTRAL_COLOR[cell.neutral];
@@ -657,9 +662,9 @@ export default function GameScreen() {
                 ? '#fde68a'
                 : seen && cell.hasRoad
                 ? '#a16207'
-                : 'rgba(0,0,0,0.35)'
+                : 'rgba(255,255,255,0.14)'
             }
-            strokeWidth={isSel ? 3 : isActive ? 2 : seen && cell.hasRoad ? 2 : 0.5}
+            strokeWidth={isSel ? 3 : isActive ? 2 : seen && cell.hasRoad ? 2 : 1}
           />
         </Svg>
         <View
