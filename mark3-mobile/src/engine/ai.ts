@@ -124,8 +124,23 @@ export const PERSONALITIES: Record<string, AIWeights> = {
     territory: 1.4,
     targetArmy: 24,
   },
-  확장형: { ...BASE_WEIGHTS, expansion: 2.6, territory: 2.2, aggression: 0.8, advance: 0.7 },
-  집중형: { ...BASE_WEIGHTS, massing: 2.5, aggression: 1.2, advance: 1.4, targetArmy: 26 },
+  // 기본값에서 해로운 항(뭉치기·지원)을 걷어내자 그 이득을 확장형이 가장 크게
+  // 가져가 51% 로 독주했다. 행정비 지수로 누르면 판 전체가 늘어지니(141턴,
+  // 턴제한 20.7%) 확장형만 직접 낮춘다.
+  확장형: { ...BASE_WEIGHTS, expansion: 2.0, territory: 1.8, aggression: 0.8, advance: 0.7 },
+  // 한 칸 10명 상한이 생긴 뒤로 "집중"의 뜻이 달라졌다. 포개는 것이 아니라
+  // 정원을 채운 부대로 밀집해서 미는 것이다. 옛 정의(massing 2.5)는 그냥
+  // 턴 낭비라 4.3% 였다. 이 정의로 9.5%.
+  집중형: {
+    ...BASE_WEIGHTS,
+    massing: 0.4,
+    units: 1.8,
+    aggression: 1.3,
+    advance: 1.8,
+    expansion: 1.4,
+    territory: 1.4,
+    targetArmy: 28,
+  },
   경제형: { ...BASE_WEIGHTS, aggression: 0.4, expansion: 1.6, targetArmy: 30, homeDefense: 1.6 },
 };
 
