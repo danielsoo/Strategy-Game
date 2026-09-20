@@ -157,11 +157,26 @@ function netPolicy(net: Net, opts: NetOptions): Policy {
 }
 
 /** 손평가식의 기보를 모은다 */
-function collectHand(games: number, size: number, rate: number, rng: RNG): Decision[] {
+function collectHand(
+  games: number,
+  size: number,
+  rate: number,
+  rng: RNG,
+  /**
+   * 스승을 하나로 둘 것인가.
+   *
+   * 처음에는 다섯 자리를 각각 다른 성격으로 두게 하고 그 수를 전부 한 덩어리로
+   * 외우게 했다. 같은 상황에서 확장형과 수비형은 다른 수를 두는데, 망에는
+   * '지금 내가 누구인가'를 알려주는 값이 없다. 다섯 스승의 평균을 외우라는
+   * 셈이라 일치율이 80% 에서 막혔다 — 망을 키워도 안 올랐다.
+   */
+  single: boolean
+): Decision[] {
   const out: Decision[] = [];
+  const roster = single ? ROSTER.map(() => LEARNED_WEIGHTS) : ROSTER;
   for (let g = 0; g < games; g++) {
-    const policies = ROSTER.map(() => handPolicy(rate, rng, (d) => out.push(d)));
-    playGame(ROSTER, size, size, rng, 180, undefined, undefined, policies);
+    const policies = roster.map(() => handPolicy(rate, rng, (d) => out.push(d)));
+    playGame(roster, size, size, rng, 180, undefined, undefined, policies);
   }
   return out;
 }
@@ -415,7 +430,7 @@ function main() {
 
   // 1단계: 손평가식 모방
   console.log(`1단계 모방 — 기보 ${cloneGames}판`);
-  const demos = collectHand(cloneGames, size, rate, rng);
+  const demos = collectHand(cloneGames, size, rate, rng, !process.argv.includes('--mixed'));
   const ones = demos.map(() => 1);
   for (let e = 1; e <= cloneEpochs; e++) {
       const { entropy, agree } = policyStep(net, demos, ones, cloneLr, temp, beta, 24, rng);
