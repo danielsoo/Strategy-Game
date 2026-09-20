@@ -176,6 +176,19 @@ export const LEARNED_WEIGHTS: AIWeights = {
 
 PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
 
+/**
+ * 태세를 가르는 전력비 문턱. 시뮬레이터에서 훑어보려고 밖에 둔다.
+ *
+ * 이 값은 거리 계산에 민감하다. hexGrid 의 좌표계 버그를 고치자 반경 2 안에
+ * 보이는 적이 늘어, 옛 문턱에서는 모두가 열세로 판정되어 눈치만 보다 판이
+ * 멎었다(턴 제한 도달 69.7%).
+ */
+export const POSTURE = { pressAt: 0.55, withdrawAt: 0.29 };
+//   1.15 / 0.60   턴제한 41% · 고르기 -8.55   (버그 있던 거리에 맞춰둔 값)
+//   0.63 / 0.33   턴제한 22% · 고르기 -6.77
+//   0.55 / 0.29                                ← 현재
+//   0.46 / 0.24   턴제한 14% · 고르기 -7.59
+
 export interface Ctx {
   state: GameState;
   me: number;
@@ -385,8 +398,8 @@ function assessPosture(ctx: Ctx, c: Cell, myPower: number): Assessment {
   // 덮어써서 공격형조차 눈치를 보게 된다. 대담한 나라는 더 낮은 전력비에서도
   // 밀어붙이고, 신중한 나라는 더 확실할 때만 움직인다.
   const boldness = Math.max(0.4, ctx.w.aggression);
-  const pressAt = 1.15 / boldness;
-  const withdrawAt = 0.6 / boldness;
+  const pressAt = POSTURE.pressAt / boldness;
+  const withdrawAt = POSTURE.withdrawAt / boldness;
 
   let posture: Posture;
   if (ratio >= pressAt) posture = 'press';
