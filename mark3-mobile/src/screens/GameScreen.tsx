@@ -114,6 +114,25 @@ function tileCount(size: number): number {
   return 3 * r * (r + 1) + 1;
 }
 
+/**
+ * 고를 수 있는 판 크기.
+ *
+ * size 는 격자 한 변이고, 실제 판은 그 안에 깎아낸 육각형이라 칸 수가 다르다.
+ * 버튼에는 격자와 실제 칸 수를 같이 적는다 — 11x11 이라 써놓고 91칸이 나오면
+ * 무슨 일이 벌어진 건지 알 수가 없다.
+ */
+const SIZES = [9, 11, 13, 15, 17, 19, 21];
+
+/** 화면에 맞는 크기를 SIZES 에서 고른다 */
+function defaultSizeIdx(winW: number, winH: number): number {
+  const want = mapSizeFor(winW, winH);
+  let best = 0;
+  for (let i = 0; i < SIZES.length; i++) {
+    if (Math.abs(SIZES[i] - want) < Math.abs(SIZES[best] - want)) best = i;
+  }
+  return best;
+}
+
 /** 나라별 AI 성격. 0번 자리는 사람이 둘 때는 쓰이지 않고, 관전 모드에서만 쓰인다. */
 const AI_WEIGHTS: AIWeights[] = [
   LEARNED_WEIGHTS,
@@ -333,9 +352,16 @@ export default function GameScreen() {
   const [modeIdx, setModeIdx] = useState(0);
   const mode = MODES[modeIdx];
 
+  const startSize = useRef(
+    (() => {
+      const d = Dimensions.get('window');
+      return defaultSizeIdx(d.width, d.height);
+    })()
+  );
+  const [sizeIdx, setSizeIdx] = useState(startSize.current);
+
   const [state, setState] = useState<GameState>(() => {
-    const d = Dimensions.get('window');
-    const size = mapSizeFor(d.width, d.height);
+    const size = SIZES[startSize.current];
     const s = createGameState(MODES[0].nations, size, size, rng);
     beginTurn(s, PLAYER, rng);
     return s;
@@ -538,11 +564,12 @@ export default function GameScreen() {
     });
   };
 
-  const reset = (idx = modeIdx) => {
+  const reset = (idx = modeIdx, sIdx = sizeIdx) => {
     setWatching(false);
     setModeIdx(idx);
+    setSizeIdx(sIdx);
     setState(() => {
-      const size = mapSizeFor(winW, winH);
+      const size = SIZES[sIdx];
       const s = createGameState(MODES[idx].nations, size, size, rng);
       beginTurn(s, PLAYER, rng);
       return s;
@@ -886,9 +913,21 @@ export default function GameScreen() {
               style={[styles.btn, styles.modeBtn, i !== modeIdx && styles.btnDim]}
               onPress={() => reset(i)}
             >
-              <Text style={styles.btnText}>
-                {m.label} ({tileCount(mapSizeFor(winW, winH))}칸)
-              </Text>
+              <Text style={styles.btnText}>{m.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text style={styles.toggle}>
+          판 크기 — {SIZES[sizeIdx]}x{SIZES[sizeIdx]} 격자 · {tileCount(SIZES[sizeIdx])}칸
+        </Text>
+        <View style={styles.row}>
+          {SIZES.map((sz, i) => (
+            <TouchableOpacity
+              key={sz}
+              style={[styles.sizeBtn, i !== sizeIdx && styles.btnDim]}
+              onPress={() => reset(modeIdx, i)}
+            >
+              <Text style={styles.sizeText}>{sz}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -1155,6 +1194,14 @@ const styles = StyleSheet.create({
   // minHeight 0 이 없으면 flex 항목이 자기 내용보다 작아지지 않는다. 판이
   // 남은 공간을 먹고 아래 버튼을 화면 밖으로 밀어낸다.
   // 넓은 화면: 왼쪽 정보 칸을 비워두고 나머지를 판이 차지한다
+  sizeBtn: {
+    flex: 1,
+    paddingVertical: 7,
+    borderRadius: 6,
+    alignItems: 'center',
+    backgroundColor: '#475569',
+  },
+  sizeText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
   gridWide: { position: 'absolute', top: 8, right: 8, bottom: 8, marginTop: 0 },
   gridWrap: {
     flex: 1,
