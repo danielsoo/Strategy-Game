@@ -42,4 +42,4 @@ expo-env.d.ts
 .claude/settings.local.json
 
 # 시뮬레이션 기록
-sim/logs/
+**/sim/logs/
