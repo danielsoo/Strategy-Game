@@ -194,6 +194,44 @@ PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
 //   0.46 / 0.24   턴제한 14% · 고르기 -7.59
 export const POSTURE = { pressAt: 0.55, withdrawAt: 0.29 };
 
+/**
+ * 명령이 수를 끄는 힘과, 명령을 붙들고 있는 최대 턴 수.
+ *
+ * 부대에 목적지를 쥐여주고 도착할 때까지 유지한다. 매 턴 백지에서 다시
+ * 고르면 두 칸 점수가 비슷할 때 끝없이 오간다.
+ */
+//   끌힘  0   왕복 26.6% · 50턴후 34.1% · 60턴 · 공격 60
+//   끌힘  4   왕복 17.1% · 50턴후 15.3% · 40턴 · 공격 39  (판이 짧아진다)
+//   끌힘  7   왕복 18.8% · 50턴후 19.2% · 53턴 · 공격 63  ← 현재
+//   끌힘 12   왕복 20.5% · 50턴후 25.0% · 43턴 · 공격 45
+export const ORDER = { pull: 7, maxAge: 14 };
+
+/**
+ * 이 부대의 명령을 손본다 — 다 왔거나, 오래됐거나, 목적지가 뜻을 잃었으면 새로 받는다.
+ *
+ * 적이 코앞에 있으면 명령을 지운다. 눈앞의 싸움이 먼 목적지보다 급하다.
+ */
+function refreshOrder(ctx: Ctx, c: Cell, enemyAdjacent: number): Cell | null {
+  if (enemyAdjacent > 0) {
+    c.order = undefined;
+    return null;
+  }
+
+  let dest = c.order ? ctx.state.cells.find((x) => x.id === c.order!.destId) ?? null : null;
+  const arrived = dest ? hexDistance(c.row, c.col, dest.row, dest.col) <= 1 : false;
+  const stale = c.order ? c.order.age >= ORDER.maxAge : false;
+  // 이미 내 땅이 된 곳으로 계속 갈 이유는 없다
+  const taken = dest ? dest.owner === ctx.me && !dest.neutral : false;
+
+  if (!dest || arrived || stale || taken) {
+    dest = ctx.target;
+    c.order = dest ? { destId: dest.id, age: 0 } : undefined;
+  } else if (c.order) {
+    c.order.age++;
+  }
+  return dest;
+}
+
 export interface Ctx {
   state: GameState;
   me: number;
@@ -450,6 +488,10 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
   // 전력비에 따라 태세를 정한다
   const a = assessPosture(ctx, c, myPower);
 
+  // 받아둔 명령. 이쪽으로 가는 수에 힘을 실어준다.
+  const orderDest = refreshOrder(ctx, c, enemyAdjacent);
+  const orderDist = orderDest ? hexDistance(c.row, c.col, orderDest.row, orderDest.col) : 0;
+
   // 원군을 기다릴 때는 좋은 자리에서 버티는 것 자체가 값어치가 있다.
   // 물러날 때도 제자리에서 한 번 더 막아보는 선택지는 남겨둔다.
   // 대기 보너스는 '정말로 밀릴 때'만. 애매할 때까지 주면 전원이 눌러앉는다.
@@ -473,6 +515,11 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
     // 비슷할 때 끝없이 오간다 — 후반 이동의 3분의 2가 그런 왕복이었다.
     // 공격은 예외다. 물러났다가 다시 치는 것은 왕복이 아니라 전술이다.
     const backtrack = n.id === c.lastFrom && !isHostile(c, n) ? w.advance * 3 + 4 : 0;
+    // 명령받은 곳으로 가까워지면 힘을 싣고, 멀어지면 뺀다
+    const toward =
+      orderDest && a.posture !== 'withdraw'
+        ? (orderDist - hexDistance(n.row, n.col, orderDest.row, orderDest.col)) * ORDER.pull
+        : 0;
 
     if (isHostile(c, n)) {
       // 행군력이 모자라면 칠 수 없다. 후보에조차 올리지 않는다.
@@ -534,7 +581,8 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
           w.massing * Math.min(6, merged) * 0.8 +
           positionValue(ctx, n) -
           w.territory -
-          backtrack,
+          backtrack +
+          toward,
         target: n,
       });
       continue;
@@ -563,7 +611,7 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       } else {
         actions.push({
           kind: 'move',
-          score: gain + scout - riskAt(ctx, n, c.units, myPower) - backtrack,
+          score: gain + scout - riskAt(ctx, n, c.units, myPower) - backtrack + toward,
           target: n,
         });
       }

@@ -528,6 +528,7 @@ function clearStack(c: Cell): void {
   c.exhaustion = 0;
   c.driftPP = 0;
   c.march = 100;
+  c.order = undefined;
   c.neutral = undefined;
   c.encircled = false;
 }
@@ -712,6 +713,8 @@ export function moveStack(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECO
     // 합친 부대는 느린 쪽을 따른다. 대열이 길어지면 앞이 아니라 뒤가 속도를 정한다.
     to.march = Math.min(to.march, from.march - spent);
     to.lastFrom = from.id;
+    // 합칠 때는 더 오래된 명령을 따른다 — 갓 붙은 쪽이 대열을 흔들면 안 된다
+    if (!to.order || (from.order && from.order.age > to.order.age)) to.order = from.order;
     to.units = total;
   } else {
     to.units = from.units;
@@ -721,10 +724,12 @@ export function moveStack(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECO
     to.neutral = from.neutral;
     to.march = Math.max(0, from.march - spent);
     to.lastFrom = from.id;
+    to.order = from.order;
     if (!from.neutral) to.owner = from.owner;
   }
   const keepOwner = from.owner;
   from.lastFrom = undefined;
+  from.order = undefined;
   clearStack(from);
   from.owner = keepOwner;
 }
