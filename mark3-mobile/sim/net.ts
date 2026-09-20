@@ -21,9 +21,11 @@ export interface Net {
   mb: number[][];
   vb: number[][];
   steps: number;
+  /** 출력을 시그모이드로 누르지 않는다. 후보끼리 비교할 '선호도'를 낼 때 쓴다. */
+  linearOut?: boolean;
 }
 
-export function createNet(sizes: number[], rng: RNG): Net {
+export function createNet(sizes: number[], rng: RNG, linearOut = false): Net {
   const W: number[][][] = [];
   const b: number[][] = [];
   const mW: number[][][] = [];
@@ -52,7 +54,7 @@ export function createNet(sizes: number[], rng: RNG): Net {
     mb.push(new Array(nout).fill(0));
     vb.push(new Array(nout).fill(0));
   }
-  return { sizes, W, b, mW, vW, mb, vb, steps: 0 };
+  return { sizes, W, b, mW, vW, mb, vb, steps: 0, linearOut };
 }
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, x))));
@@ -70,7 +72,7 @@ export function forwardAll(net: Net, x: number[]): number[][] {
       const row = w[o];
       let s = bl[o];
       for (let i = 0; i < row.length; i++) s += row[i] * cur[i];
-      out[o] = l === L - 1 ? sigmoid(s) : Math.tanh(s);
+      out[o] = l === L - 1 ? (net.linearOut ? s : sigmoid(s)) : Math.tanh(s);
     }
     acts.push(out);
     cur = out;
@@ -84,22 +86,19 @@ export function predict(net: Net, x: number[]): number {
 }
 
 /**
- * 한 묶음 학습. 손실은 이진 교차엔트로피.
- * 출력이 시그모이드라 델타가 (예측 - 정답) 으로 깔끔하게 떨어진다.
+ * 출력단의 기울기를 바깥에서 받아 한 묶음 갱신한다.
+ *
+ * 무엇을 손실로 삼을지는 부르는 쪽이 정한다 — 승패 맞히기(교차엔트로피)든
+ * 정책 기울기든 여기서는 신경 쓰지 않는다. 역전파만 한다.
  */
-export function trainBatch(net: Net, xs: number[][], ys: number[], lr: number): number {
+export function trainWithDeltas(net: Net, xs: number[][], dOut: number[], lr: number): void {
   const L = net.W.length;
   const gW: number[][][] = net.W.map((w) => w.map((r) => new Array(r.length).fill(0)));
   const gb: number[][] = net.b.map((r) => new Array(r.length).fill(0));
-  let loss = 0;
 
   for (let s = 0; s < xs.length; s++) {
     const acts = forwardAll(net, xs[s]);
-    const yhat = acts[L][0];
-    const y = ys[s];
-    loss += -(y * Math.log(yhat + 1e-9) + (1 - y) * Math.log(1 - yhat + 1e-9));
-
-    let delta = [yhat - y];
+    let delta = [dOut[s]];
     for (let l = L - 1; l >= 0; l--) {
       const a = acts[l];
       for (let o = 0; o < net.W[l].length; o++) {
@@ -146,16 +145,34 @@ export function trainBatch(net: Net, xs: number[][], ys: number[], lr: number): 
     }
   }
 
-  return loss / n;
+}
+
+/** 승패 맞히기(이진 교차엔트로피). 출력이 시그모이드라 델타가 (예측 - 정답)이다. */
+export function trainBatch(net: Net, xs: number[][], ys: number[], lr: number): number {
+  const d: number[] = [];
+  let loss = 0;
+  for (let i = 0; i < xs.length; i++) {
+    const yhat = predict(net, xs[i]);
+    d.push(yhat - ys[i]);
+    loss += -(ys[i] * Math.log(yhat + 1e-9) + (1 - ys[i]) * Math.log(1 - yhat + 1e-9));
+  }
+  trainWithDeltas(net, xs, d, lr);
+  return loss / Math.max(1, xs.length);
 }
 
 export function saveNet(net: Net, file: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ sizes: net.sizes, W: net.W, b: net.b }));
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ sizes: net.sizes, W: net.W, b: net.b, linearOut: !!net.linearOut })
+  );
 }
 
 export function loadNet(file: string): Net {
-  const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Pick<Net, 'sizes' | 'W' | 'b'>;
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Pick<
+    Net,
+    'sizes' | 'W' | 'b' | 'linearOut'
+  >;
   const zerosLike = (x: number[][][]) => x.map((w) => w.map((r) => new Array(r.length).fill(0)));
   return {
     sizes: raw.sizes,
@@ -166,5 +183,6 @@ export function loadNet(file: string): Net {
     mb: raw.b.map((r) => new Array(r.length).fill(0)),
     vb: raw.b.map((r) => new Array(r.length).fill(0)),
     steps: 0,
+    linearOut: !!raw.linearOut,
   };
 }

@@ -1,16 +1,26 @@
-// 자가대전으로 가치함수를 배운다
+// 자가대전 정책 학습 — 모방으로 시작해서 정책 기울기로 올린다
 //
-//   npm run sim:rl                       기본
-//   npm run sim:rl -- --iters 6 --games 60 --epochs 10
-//   npm run sim:rl -- --eval sim/nets/best.json    학습된 망만 평가
+//   npm run sim:rl
+//   npm run sim:rl -- --clone 150 --iters 12 --games 150
+//   npm run sim:rl -- --eval sim/nets/best.json
 //
-// 지금까지의 '학습'은 내가 쓴 평가식 위에서 숫자 14개를 고르는 일이었다.
-// 그러면 내가 안 적어둔 전략은 후보에조차 없다. 여기서는 수를 특징 40개로
-// 바꿔 신경망에 넘기고, "이 수를 두면 이길 확률"을 승패로부터 직접 배운다.
-// 무엇이 중요한지는 학습기가 정한다.
+// 여기까지 두 번 틀렸고, 둘 다 재서 원인을 찾았다.
 //
-// 몬테카를로다 — 한 판에서 둔 모든 수에 그 판의 결과를 그대로 라벨로 붙인다.
-// 편향은 없고 분산이 크다. 그래서 표본을 많이 본다.
+// 1) "이 수를 두면 이길 확률"을 승패로 직접 배우게 했다 → 39.7%.
+//    망의 출력이 후보 사이에서 갈리는 폭(0.087)이 판 상황에 따라 갈리는
+//    폭(0.223)보다 훨씬 작았다. 학습 노력의 대부분이 수를 고르는 데가 아니라
+//    '내 나라 형편이 좋은가'를 맞히는 데 쓰였다. 형편은 이미 아는 값이다.
+//    → 한 결정 안의 후보끼리만 소프트맥스로 겨루게 바꿨다. 후보 전체에 공통으로
+//      얹힌 형편 항은 정규화되며 사라지고, "이 후보가 저 후보보다 나은가"만 남는다.
+//
+// 2) 그렇게 바꿔도 3.3% 였다. 엔트로피가 한 번의 갱신에 1.47 → 0.08 로 무너졌다.
+//    무작위 망으로 시작하니 두는 수가 거의 무작위고, 그러면 이기는 판이 안 나와
+//    배울 거리가 없다. 이득이 늘 음수라 자기가 둔 수를 밀어내기만 한다.
+//    → 손으로 쓴 평가식을 먼저 모방시켜 출발점을 만든다. 알파스타도 사람 기보로
+//      지도학습을 먼저 했다. 그 다음에야 자가대전으로 그 위를 올린다.
+//
+// 모방과 정책 기울기는 같은 식이다. 손실이 -이득 * log p(고른 수) 인데,
+// 모방은 이득을 1 로 두고 '손평가식이 고른 수'를 따라가는 것뿐이다.
 
 import * as fs from 'fs';
 import { makeRng, RNG } from '../src/services/combatSystem';
@@ -18,7 +28,7 @@ import { playGame } from './gameSim';
 import { AIWeights, LEARNED_WEIGHTS, PERSONALITIES, Policy, Ctx, Action } from '../src/engine/ai';
 import { extractFeatures, FEATURE_COUNT } from '../src/engine/features';
 import { Cell } from '../src/engine/types';
-import { createNet, loadNet, saveNet, predict, trainBatch, Net } from './net';
+import { createNet, loadNet, saveNet, predict, trainWithDeltas, Net } from './net';
 
 function parseArg(name: string, fallback: number): number {
   const i = process.argv.indexOf('--' + name);
@@ -26,6 +36,7 @@ function parseArg(name: string, fallback: number): number {
   const v = Number(process.argv[i + 1]);
   return Number.isFinite(v) ? v : fallback;
 }
+
 function parseStr(name: string): string | null {
   const i = process.argv.indexOf('--' + name);
   return i === -1 ? null : process.argv[i + 1] ?? null;
@@ -39,53 +50,23 @@ function wilson(p: number, n: number): [number, number] {
   return [(c - s) / d, (c + s) / d];
 }
 
-/** 한 판에서 모은 수 하나 */
-interface Sample {
-  x: number[];
-  nation: number;
+function softmax(v: number[]): number[] {
+  let m = -Infinity;
+  for (const x of v) if (x > m) m = x;
+  let sum = 0;
+  const out = v.map((x) => {
+    const e = Math.exp(Math.max(-40, x - m));
+    sum += e;
+    return e;
+  });
+  for (let i = 0; i < out.length; i++) out[i] /= sum;
+  return out;
 }
 
-/**
- * 망으로 수를 고르는 정책.
- *
- * epsilon 이 0 이면 순수하게 최고점만 둔다. 학습 중에는 조금 섞어야 한다 —
- * 늘 같은 수만 두면 안 둬본 수가 좋은지 나쁜지 영영 모른다.
- */
-function netPolicy(
-  net: Net,
-  epsilon: number,
-  collect: ((x: number[]) => void) | null,
-  sampleRate: number,
-  rng: RNG
-): Policy {
-  return {
-    score: (ctx: Ctx, c: Cell, a: Action) => predict(net, extractFeatures(ctx, c, a)),
-    select: (actions: Action[], r: RNG) =>
-      epsilon > 0 && r() < epsilon ? actions[Math.floor(r() * actions.length)] : actions[0],
-    onChoose: collect
-      ? (ctx: Ctx, c: Cell, chosen: Action) => {
-          if (rng() < sampleRate) collect(extractFeatures(ctx, c, chosen));
-        }
-      : undefined,
-  };
-}
-
-/** 손으로 쓴 평가식 + 약간의 탐색. 첫 자료를 모을 때 쓴다. */
-function handPolicy(
-  epsilon: number,
-  collect: ((x: number[]) => void) | null,
-  sampleRate: number,
-  rng: RNG
-): Policy {
-  return {
-    select: (actions: Action[], r: RNG) =>
-      epsilon > 0 && r() < epsilon ? actions[Math.floor(r() * actions.length)] : actions[0],
-    onChoose: collect
-      ? (ctx: Ctx, c: Cell, chosen: Action) => {
-          if (rng() < sampleRate) collect(extractFeatures(ctx, c, chosen));
-        }
-      : undefined,
-  };
+/** 한 번의 선택 — 그 자리에 있던 후보 전부와, 실제로 고른 것 */
+interface Decision {
+  cands: number[][];
+  chosen: number;
 }
 
 const ROSTER: AIWeights[] = [
@@ -96,45 +77,209 @@ const ROSTER: AIWeights[] = [
   PERSONALITIES['균형'],
 ];
 
+/** 후보 전부의 특징을 떠서 기록한다 */
+function record(
+  ctx: Ctx,
+  c: Cell,
+  chosen: Action,
+  all: Action[],
+  cache: WeakMap<Action, number[]> | null,
+  sink: (d: Decision) => void
+): void {
+  if (all.length < 2) return;
+  const cands: number[][] = [];
+  let idx = -1;
+  for (let i = 0; i < all.length; i++) {
+    const x = cache?.get(all[i]) ?? extractFeatures(ctx, c, all[i]);
+    if (all[i] === chosen) idx = i;
+    cands.push(x);
+  }
+  if (idx < 0) return;
+  sink({ cands, chosen: idx });
+}
+
+/** 손으로 쓴 평가식으로 두면서, 고른 수를 기록한다 (모방용 기보) */
+function handPolicy(rate: number, rng: RNG, sink: (d: Decision) => void): Policy {
+  return {
+    onChoose: (ctx, c, chosen, all) => {
+      if (rng() >= rate) return;
+      record(ctx, c, chosen, all, null, sink);
+    },
+  };
+}
+
+interface NetOptions {
+  greedy: boolean;
+  temp: number;
+  rng: RNG;
+  rate: number;
+  sink?: (d: Decision) => void;
+}
+
 /**
- * 자료 모으기 — 다섯 자리 모두 같은 정책으로 두게 한다.
- * 한 자리만 학습 정책으로 두면 나머지 넷의 수는 영영 못 배운다.
+ * 망으로 두는 정책.
+ *
+ * 학습 중에는 소프트맥스로 뽑는다. 최고점만 두면 안 둬본 수가 좋은지 영영
+ * 모르고, 정책 기울기 자체가 '내가 이 확률로 뽑았다'를 전제로 한다.
+ * 평가할 때는 최고점만 둔다.
  */
-function collectGames(
-  makePolicy: (collect: (x: number[]) => void) => Policy,
+function netPolicy(net: Net, opts: NetOptions): Policy {
+  const feat = new WeakMap<Action, number[]>();
+  return {
+    score: (ctx: Ctx, c: Cell, a: Action) => {
+      const x = extractFeatures(ctx, c, a);
+      feat.set(a, x);
+      return predict(net, x);
+    },
+    select: (actions: Action[], r: RNG) => {
+      if (opts.greedy || actions.length === 1) return actions[0];
+      const p = softmax(actions.map((a) => a.score / opts.temp));
+      let acc = 0;
+      const u = r();
+      for (let i = 0; i < p.length; i++) {
+        acc += p[i];
+        if (u <= acc) return actions[i];
+      }
+      return actions[actions.length - 1];
+    },
+    onChoose: opts.sink
+      ? (ctx, c, chosen, all) => {
+          if (opts.rng() >= opts.rate) return;
+          record(ctx, c, chosen, all, feat, opts.sink!);
+        }
+      : undefined,
+  };
+}
+
+/** 손평가식의 기보를 모은다 */
+function collectHand(games: number, size: number, rate: number, rng: RNG): Decision[] {
+  const out: Decision[] = [];
+  for (let g = 0; g < games; g++) {
+    const policies = ROSTER.map(() => handPolicy(rate, rng, (d) => out.push(d)));
+    playGame(ROSTER, size, size, rng, 180, undefined, undefined, policies);
+  }
+  return out;
+}
+
+/**
+ * 자가대전 자료. 자리마다 망과 손평가식을 섞는다.
+ * 다섯 자리를 모두 망에게 맡기면 망이 나빠질 때 나쁜 판만 쌓여 같이 무너진다.
+ * 기록은 망이 둔 자리에서만 — 정책 기울기는 자기가 뽑은 수에 대해서만 성립한다.
+ */
+function collectSelf(
+  net: Net,
   games: number,
   size: number,
+  netShare: number,
+  temp: number,
+  rate: number,
   rng: RNG
-): { xs: number[][]; ys: number[] } {
-  const xs: number[][] = [];
-  const ys: number[] = [];
+): { decisions: Decision[]; advantages: number[]; winShare: number } {
+  const decisions: Decision[] = [];
+  const advantages: number[] = [];
+  const returns: number[] = [];
 
   for (let g = 0; g < games; g++) {
-    const perNation: Sample[][] = [[], [], [], [], []];
-    const policies = ROSTER.map((_, id) =>
-      makePolicy((x) => {
-        perNation[id].push({ x, nation: id });
-      })
+    const bucket: Decision[][] = ROSTER.map(() => []);
+    const isNet = ROSTER.map(() => rng() < netShare);
+    if (!isNet.some(Boolean)) isNet[Math.floor(rng() * ROSTER.length)] = true;
+
+    const policies = ROSTER.map((_, seat) =>
+      isNet[seat]
+        ? netPolicy(net, { greedy: false, temp, rate, rng, sink: (d) => bucket[seat].push(d) })
+        : undefined
     );
+
     const r = playGame(ROSTER, size, size, rng, 180, undefined, undefined, policies);
-    for (let id = 0; id < 5; id++) {
-      const y = r.winner === id ? 1 : 0;
-      for (const s of perNation[id]) {
-        xs.push(s.x);
-        ys.push(y);
+    for (let seat = 0; seat < ROSTER.length; seat++) {
+      if (!isNet[seat]) continue;
+      const R = r.winner === seat ? 1 : 0;
+      for (const d of bucket[seat]) {
+        decisions.push(d);
+        returns.push(R);
       }
     }
   }
-  return { xs, ys };
+
+  const baseline = returns.reduce((a, b) => a + b, 0) / Math.max(1, returns.length);
+  for (const R of returns) advantages.push(R - baseline);
+  return { decisions, advantages, winShare: baseline };
 }
 
-/** 학습된 망 한 자리 vs 손으로 만든 네 자리 */
+/**
+ * 정책 기울기 한 바퀴.
+ *
+ *   손실 = -이득 * log p(고른 수)  -  beta * 엔트로피
+ *   d손실/d선호도_j = 이득 * (p_j - 원핫_j) + beta * p_j * (log p_j + H)
+ *
+ * 이득을 전부 1 로 주면 그대로 모방 학습이 된다.
+ * 엔트로피 항이 없으면 한 번의 갱신으로 정책이 결정적으로 굳어버린다 —
+ * 실제로 그렇게 무너지는 걸 봤다.
+ */
+function policyStep(
+  net: Net,
+  decisions: Decision[],
+  advantages: number[],
+  lr: number,
+  temp: number,
+  beta: number,
+  batch: number,
+  rng: RNG
+): { entropy: number; agree: number } {
+  const order = decisions.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+
+  let entSum = 0;
+  let agree = 0;
+
+  let xs: number[][] = [];
+  let ds: number[] = [];
+  let inBatch = 0;
+
+  const flush = () => {
+    if (xs.length === 0) return;
+    trainWithDeltas(net, xs, ds, lr);
+    xs = [];
+    ds = [];
+    inBatch = 0;
+  };
+
+  for (const k of order) {
+    const d = decisions[k];
+    const p = softmax(d.cands.map((x) => predict(net, x) / temp));
+
+    let best = 0;
+    for (let i = 1; i < p.length; i++) if (p[i] > p[best]) best = i;
+    if (best === d.chosen) agree++;
+
+    let H = 0;
+    for (const q of p) H += -q * Math.log(q + 1e-9);
+    entSum += H;
+
+    const adv = advantages[k];
+    for (let i = 0; i < p.length; i++) {
+      xs.push(d.cands[i]);
+      const pg = adv * (p[i] - (i === d.chosen ? 1 : 0));
+      const ent = beta * p[i] * (Math.log(p[i] + 1e-9) + H);
+      ds.push((pg + ent) / temp);
+    }
+    if (++inBatch >= batch) flush();
+  }
+  flush();
+
+  const n = Math.max(1, decisions.length);
+  return { entropy: entSum / n, agree: agree / n };
+}
+
 function evaluate(net: Net, games: number, size: number, seed: number): number {
   const rng = makeRng(seed);
   let wins = 0;
   for (let i = 0; i < games; i++) {
     const policies: (Policy | undefined)[] = [
-      netPolicy(net, 0, null, 0, rng),
+      netPolicy(net, { greedy: true, temp: 1, rate: 0, rng }),
       undefined,
       undefined,
       undefined,
@@ -146,91 +291,92 @@ function evaluate(net: Net, games: number, size: number, seed: number): number {
   return wins / games;
 }
 
-function train(net: Net, xs: number[][], ys: number[], epochs: number, lr: number, rng: RNG): number {
-  const idx = xs.map((_, i) => i);
-  const batch = 64;
-  let last = 0;
-  for (let e = 0; e < epochs; e++) {
-    for (let i = idx.length - 1; i > 0; i--) {
-      const j = Math.floor(rng() * (i + 1));
-      [idx[i], idx[j]] = [idx[j], idx[i]];
-    }
-    let sum = 0;
-    let n = 0;
-    for (let s = 0; s < idx.length; s += batch) {
-      const part = idx.slice(s, s + batch);
-      sum += trainBatch(net, part.map((k) => xs[k]), part.map((k) => ys[k]), lr);
-      n++;
-    }
-    last = sum / Math.max(1, n);
-  }
-  return last;
+function report(label: string, p: number, n: number): void {
+  const [lo, hi] = wilson(p, n);
+  console.log(
+    `${label} ${n}판 — ${(p * 100).toFixed(1)}%  [${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(
+      1
+    )}]  (학습형 78.3%, 무작위 20%)`
+  );
 }
 
 function main() {
   const evalOnly = parseStr('eval');
   const size = parseArg('size', 11);
-  const evalGames = parseArg('evalgames', 200);
+  const evalGames = parseArg('evalgames', 300);
 
   if (evalOnly) {
-    const net = loadNet(evalOnly);
-    const p = evaluate(net, evalGames, size, 20260919);
-    const [lo, hi] = wilson(p, evalGames);
-    console.log(
-      `${evalOnly}\n5인 게임 ${evalGames}판 — ${(p * 100).toFixed(1)}%  [${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(1)}]  (학습형 78.3%, 무작위 20%)`
-    );
+    console.log(evalOnly);
+    report('5인 게임', evaluate(loadNet(evalOnly), evalGames, size, 20260919), evalGames);
     return;
   }
 
-  const iters = parseArg('iters', 6);
-  const games = parseArg('games', 60);
-  const epochs = parseArg('epochs', 10);
-  const lr = parseArg('lr', 0.003);
-  const sampleRate = parseArg('sample', 0.15);
+  const cloneGames = parseArg('clone', 150);
+  const cloneEpochs = parseArg('cloneepochs', 6);
+  const iters = parseArg('iters', 10);
+  const games = parseArg('games', 150);
+  const lr = parseArg('lr', 0.0015);
+  const cloneLr = parseArg('clonelr', 0.004);
+  const temp = parseArg('temp', 1);
+  const beta = parseArg('beta', 0.02);
+  const rate = parseArg('sample', 0.25);
+  const netShare = parseArg('share', 0.6);
   const rng = makeRng(parseArg('seed', 20260919));
 
-  const net = createNet([FEATURE_COUNT, 24, 16, 1], rng);
+  const net = createNet([FEATURE_COUNT, 24, 16, 1], rng, true);
   fs.mkdirSync('sim/nets', { recursive: true });
 
-  console.log(
-    `가치함수 학습 — ${iters}회 · 회당 ${games}판 · 특징 ${FEATURE_COUNT}개 · 망 ${net.sizes.join('-')}\n`
-  );
+  console.log(`정책 학습 — 특징 ${FEATURE_COUNT}개 · 망 ${net.sizes.join('-')} · 온도 ${temp}\n`);
 
-  let bestRate = -1;
+  // 1단계: 손평가식 모방
+  console.log(`1단계 모방 — 기보 ${cloneGames}판`);
+  const demos = collectHand(cloneGames, size, rate, rng);
+  const ones = demos.map(() => 1);
+  for (let e = 1; e <= cloneEpochs; e++) {
+    const { entropy, agree } = policyStep(net, demos, ones, cloneLr, temp, beta, 24, rng);
+    console.log(
+      `  ${e}주기 | 결정 ${demos.length} · 일치 ${(agree * 100).toFixed(1)}% · 엔트로피 ${entropy.toFixed(2)}`
+    );
+  }
+  const cloned = evaluate(net, 150, size, 4242);
+  report('  모방 결과', cloned, 150);
+  saveNet(net, 'sim/nets/clone.json');
+
+  // 2단계: 자가대전으로 그 위를 올린다
+  console.log(`\n2단계 자가대전 — ${iters}회 · 회당 ${games}판`);
+  let bestRate = cloned;
+  saveNet(net, 'sim/nets/best.json');
+
   for (let it = 1; it <= iters; it++) {
-    // 첫 회는 손으로 쓴 평가식으로 자료를 모은다. 무작위 망으로 시작하면
-    // 아무 데나 두는 판만 쌓여서 이기는 수가 뭔지 배울 거리가 없다.
-    const eps = it === 1 ? 0.15 : Math.max(0.05, 0.2 - it * 0.02);
-    const make = (collect: (x: number[]) => void): Policy =>
-      it === 1
-        ? handPolicy(eps, collect, sampleRate, rng)
-        : netPolicy(net, eps, collect, sampleRate, rng);
-
     const t0 = Date.now();
-    const { xs, ys } = collectGames(make, games, size, rng);
+    const { decisions, advantages, winShare } = collectSelf(
+      net,
+      games,
+      size,
+      netShare,
+      temp,
+      rate,
+      rng
+    );
     const gen = ((Date.now() - t0) / 1000).toFixed(0);
-
-    const loss = train(net, xs, ys, epochs, lr, rng);
-    const rate = evaluate(net, 80, size, 777000 + it);
-    const posRate = ys.reduce((a, b) => a + b, 0) / Math.max(1, ys.length);
+    const { entropy } = policyStep(net, decisions, advantages, lr, temp, beta, 24, rng);
+    const score = evaluate(net, 150, size, 777000 + it);
 
     console.log(
-      `${String(it).padStart(2)}회 | 표본 ${String(xs.length).padStart(6)} (승 ${(posRate * 100).toFixed(0)}%) · 손실 ${loss.toFixed(4)} · 탐색 ${(eps * 100).toFixed(0)}% · ${gen}초 | 평가 ${(rate * 100).toFixed(1)}%`
+      `  ${String(it).padStart(2)}회 | 결정 ${String(decisions.length).padStart(6)} · 승 ${(
+        winShare * 100
+      ).toFixed(0)}% · 엔트로피 ${entropy.toFixed(2)} · ${gen}초 | 평가 ${(score * 100).toFixed(1)}%`
     );
 
     saveNet(net, `sim/nets/iter${it}.json`);
-    if (rate > bestRate) {
-      bestRate = rate;
+    if (score > bestRate) {
+      bestRate = score;
       saveNet(net, 'sim/nets/best.json');
     }
   }
 
-  console.log(`\n가장 좋았던 망: ${(bestRate * 100).toFixed(1)}% (sim/nets/best.json)`);
-  const p = evaluate(loadNet('sim/nets/best.json'), evalGames, size, 20260919);
-  const [lo, hi] = wilson(p, evalGames);
-  console.log(
-    `본 평가 ${evalGames}판 — ${(p * 100).toFixed(1)}%  [${(lo * 100).toFixed(1)}–${(hi * 100).toFixed(1)}]  (학습형 78.3%, 무작위 20%)`
-  );
+  console.log(`\n모방 직후 ${(cloned * 100).toFixed(1)}% → 가장 좋았던 망 ${(bestRate * 100).toFixed(1)}%`);
+  report('본 평가', evaluate(loadNet('sim/nets/best.json'), evalGames, size, 20260919), evalGames);
 }
 
 main();
