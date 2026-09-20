@@ -28,6 +28,15 @@ import {
   vassalsOf,
 } from '../src/engine';
 import { takeAITurn, AIWeights, PERSONALITIES } from '../src/engine/ai';
+import { Recorder, MatchLog, snapshot as turnSnapshot, TurnSnapshot } from './recorder';
+
+/** 판을 통째로 남기고 싶을 때 넘긴다 */
+export interface RecordOptions {
+  recorder: Recorder;
+  gameIndex: number;
+  seed: number;
+  labels: string[];
+}
 
 export interface GameResult {
   winner: number | null;
@@ -54,7 +63,8 @@ export function playGame(
   cols: number,
   rng: RNG,
   maxTurns = 250,
-  eco: EconomyConfig = DEFAULT_ECONOMY
+  eco: EconomyConfig = DEFAULT_ECONOMY,
+  record?: RecordOptions
 ): GameResult {
   const n = weightsPerNation.length;
   const state = createGameState(n, rows, cols, rng, eco);
@@ -67,7 +77,40 @@ export function playGame(
   const defended = new Array(n).fill(0);
   const defendedHeld = new Array(n).fill(0);
 
-  const snapshot = (turns: number, winner: number | null): GameResult => ({
+  const snapshots: TurnSnapshot[] = [];
+  let logCursor = 0;
+
+  const finish = (turns: number, winner: number | null): GameResult => {
+    if (record) {
+      const match: MatchLog = {
+        runId: record.recorder.runId,
+        gameIndex: record.gameIndex,
+        seed: record.seed,
+        rows,
+        cols,
+        nations: state.nations.map((nat, i) => ({
+          id: nat.id,
+          name: nat.name,
+          label: record.labels[i] ?? nat.name,
+          weights: weightsPerNation[i],
+        })),
+        snapshots,
+        decisions: [],
+        result: {
+          winner,
+          winnerLabel: winner === null ? '무승부' : record.labels[winner] ?? String(winner),
+          turns,
+          reachedTurnLimit: turns >= maxTurns,
+          attacksPerNation: attacksMade.slice(),
+          finalInfluence: state.nations.map((x) => influenceOf(state, x.id, eco)),
+        },
+      };
+      record.recorder.add(match);
+    }
+    return result(turns, winner);
+  };
+
+  const result = (turns: number, winner: number | null): GameResult => ({
     winner,
     turns,
     finalCells: state.nations.map((x) => nationStats(state, x.id).cells),
@@ -85,6 +128,7 @@ export function playGame(
 
   for (let turn = 1; turn <= maxTurns; turn++) {
     state.turn = turn;
+    if (record) logCursor = state.log.length;
     for (let id = 0; id < n; id++) {
       if (!state.nations[id].alive) continue;
       state.current = id;
@@ -113,8 +157,12 @@ export function playGame(
       stepVoluntarySubmission(state, rng, eco);
       updateAliveFlags(state);
       checkBlocVictory(state);
-      if (state.winner !== null) return snapshot(turn, state.winner);
+      if (state.winner !== null) {
+        if (record) snapshots.push(turnSnapshot(state, logCursor));
+        return finish(turn, state.winner);
+      }
     }
+    if (record) snapshots.push(turnSnapshot(state, logCursor));
   }
 
   // 턴 제한 — 영향력(직할 + 속국)이 가장 큰 나라를 승자로 본다
@@ -128,7 +176,7 @@ export function playGame(
       best = nat.id;
     }
   }
-  return snapshot(maxTurns, best >= 0 ? best : null);
+  return finish(maxTurns, best >= 0 ? best : null);
 }
 
 function parseArg(name: string, fallback: number): number {

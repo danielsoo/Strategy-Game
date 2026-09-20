@@ -10,7 +10,9 @@
     "sim:combat": "tsx sim/combatSim.ts",
     "sim:tune": "tsx sim/tuneCombat.ts",
     "sim:game": "tsx sim/gameSim.ts",
-    "sim:learn": "tsx sim/tuneAI.ts"
+    "sim:learn": "tsx sim/tuneAI.ts",
+    "sim:validate": "tsx sim/validate.ts",
+    "sim:eval": "tsx sim/evaluate.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",
