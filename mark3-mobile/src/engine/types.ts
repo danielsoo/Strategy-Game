@@ -9,6 +9,7 @@
 //     "영토 = 현재 부대 수"가 되어 경제도 전선도 성립하지 않는다.
 
 import type { NationVision } from './vision';
+import type { OrderOutcome } from './orders';
 
 export type Terrain = 'plain' | 'forest' | 'mountain' | 'desert';
 
@@ -162,6 +163,14 @@ export interface GameState {
   winner: number | null;
   /** 왜 이겼는가. "승리"만 띄우면 무엇 때문인지 알 수가 없다. */
   winReason?: string;
+  /**
+   * 끝난 명령의 기록.
+   *
+   * 종주국이 무엇을 보고 어떻게 판단했는지가 남는다. 화면에 보여줄 수 있는
+   * 것은 accepted·unverified 까지다 — truth 와 response 는 속국의 속내라
+   * 종주국에게 드러내면 안 된다. 분석과 저장용으로만 둔다.
+   */
+  orderLog: OrderOutcome[];
 }
 
 export interface EconomyConfig {

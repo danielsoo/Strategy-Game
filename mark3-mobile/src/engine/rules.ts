@@ -176,6 +176,7 @@ export function createGameState(
     turn: 1,
     current: 0,
     log: [],
+    orderLog: [],
     winner: null,
     vision: [],
   };

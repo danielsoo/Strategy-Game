@@ -244,6 +244,11 @@ function refreshOrder(ctx: Ctx, c: Cell, enemyAdjacent: number): Cell | null {
     if (!c.order || c.order.destId !== ctx.rally.id) {
       c.order = { destId: ctx.rally.id, age: 0 };
     }
+  } else if (ctx.token && ctx.token.stackId === c.id) {
+    // 생색내기로 뽑힌 부대 하나만 간다. 나머지는 제 할 일을 한다.
+    if (!c.order || c.order.destId !== ctx.token.dest.id) {
+      c.order = { destId: ctx.token.dest.id, age: 0 };
+    }
   }
 
   let dest = c.order ? ctx.state.cells.find((x) => x.id === c.order!.destId) ?? null : null;
@@ -275,6 +280,13 @@ export interface Ctx {
   distress: Array<{ cell: Cell; severity: number }>;
   /** 종주국이 부른 자리. 명령을 받들 때만 채워진다. */
   rally: Cell | null;
+  /**
+   * 치는 시늉. 태업하는 속국이 눈가림으로 내보내는 한 부대다.
+   *
+   * 이게 있어야 '듣는 척'이 종주국 눈에 이행으로 보인다. 아무것도 안 하면
+   * 어차피 들통나니, 실제 속국이 하는 일은 작은 병력을 생색내듯 보내는 것이다.
+   */
+  token: { stackId: string; dest: Cell } | null;
 }
 
 /**
@@ -336,7 +348,9 @@ function localStrength(state: GameState, center: Cell, owner: number | null): nu
  * 안개 때문에 아직 못 본 본진은 후보가 아니다. 어디 있는지도 모르는 곳을
  * 향해 진군할 수는 없다. 그래서 초반에는 정찰이 곧 전략이 된다.
  */
-function pickTarget(ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress' | 'rally'>): Cell | null {
+function pickTarget(
+  ctx: Omit<Ctx, 'target' | 'homeThreat' | 'distress' | 'rally' | 'token'>
+): Cell | null {
   let best: Cell | null = null;
   let bestScore = -Infinity;
   for (const h of ctx.enemyHomes) {
@@ -748,9 +762,17 @@ function governVassals(
       neighbors(state, c).some((n) => isFoeCell(state, nationId, n))
   );
   // 그 중 속국에게 가장 가까운 자리. 먼 전선에 부르는 건 부리는 게 아니라 버리는 것이다.
+  // 다만 이미 속국 병력이 가 있는 자리는 뺀다 — 가만히 있어도 이행되는 명령은
+  // 시킨 적이 없는 것과 같다.
   let dest: Cell | null = null;
   let closest = Infinity;
   for (const c of front) {
+    let already = 0;
+    for (const x of state.cells) {
+      if (x.owner !== v.id || x.units <= 0 || x.neutral) continue;
+      if (hexDistance(x.row, x.col, c.row, c.col) <= 2) already += x.units;
+    }
+    if (already > 0) continue;
     const d = vHome ? hexDistance(c.row, c.col, vHome.row, vHome.col) : 0;
     if (d < closest) {
       closest = d;
@@ -841,6 +863,7 @@ export function* takeAITurnGen(
     homeThreat: computeHomeThreat(state, nationId, homes),
     distress: findDistress(state, nationId),
     rally: null,
+    token: null,
   };
 
   /**
@@ -873,6 +896,31 @@ export function* takeAITurnGen(
       }
       if (pick) ctx.target = pick;
     }
+  } else if (myOrder && myOrder.response === 'feign' && myOrder.kind === 'attack') {
+    /**
+     * 치는 척.
+     *
+     * 태업이 '아무것도 안 한다'면 종주국 눈에는 그냥 불이행이고, 속국 입장에서
+     * 굳이 속내를 숨길 이유가 없어진다. 실제로는 가장 작은 부대 하나를 떼어
+     * 생색을 낸다 — 종주국은 싸우는 걸 보고, 속국은 힘을 아낀다.
+     */
+    let small: Cell | null = null;
+    for (const c of state.cells) {
+      if (c.owner !== nationId || c.units <= 0 || c.neutral) continue;
+      if (!small || c.units < small.units) small = c;
+    }
+    let dest: Cell | null = null;
+    let near = Infinity;
+    for (const c of state.cells) {
+      if (c.owner !== myOrder.target || c.neutral) continue;
+      if (!isExplored(state, nationId, c)) continue;
+      const d = small ? hexDistance(c.row, c.col, small.row, small.col) : 0;
+      if (d < near) {
+        near = d;
+        dest = c;
+      }
+    }
+    if (small && dest) ctx.token = { stackId: small.id, dest };
   }
 
   // 0. 속국 다루기 — 명령을 내리고, 안 듣는 놈은 손본다
@@ -964,6 +1012,8 @@ export function* takeAITurnGen(
     if (best.kind === 'attack') {
       const wasCastle = best.target.castle;
       const victim = best.target.owner;
+      // 이 싸움에 실제로 건 병력. 전투 뒤에는 알 수 없으므로 미리 적어둔다.
+      const committedUnits = c.units;
       // 사람이 지키는 칸이면 여기서 멈추고 물어본다
       let forced: DefenseChoice | undefined;
       const victimNation = best.target.owner;
@@ -985,16 +1035,30 @@ export function* takeAITurnGen(
       const out = performAttack(state, c, best.target, rng, eco, forced, defenseNoise);
       log.attacks.push(out);
 
-      // 진격 명령을 받들었다면 실제로 친 것만 셈에 넣는다
+      /**
+       * 진격 명령 — 친 것만 셈에 넣되, 진실과 목격을 따로 적는다.
+       *
+       * 실제 이행(progress)은 얼마나 걸었느냐로 잰다. 한 명 찔러보고 오는 건
+       * 참전이 아니다. 반면 종주국이 보는 것(witnessed)은 규모를 가리지 않는다 —
+       * 싸우는 장면을 봤을 뿐이지 얼마나 진심인지는 알 수 없다.
+       * 이 둘의 차이가 곧 '치는 척'이다.
+       */
       const ord = state.nations[nationId]?.order;
       if (
         ord &&
         ord.kind === 'attack' &&
-        ord.response === 'obey' &&
         out.defenderNation !== null &&
         blocOf(state, out.defenderNation) === blocOf(state, ord.target ?? -1)
       ) {
-        ord.progress = Math.min(1, ord.progress + 0.5);
+        const army = nationStats(state, nationId).units;
+        const committed = Math.min(1, committedUnits / Math.max(1, army * 0.25));
+        ord.progress = Math.min(1, ord.progress + 0.5 * committed);
+
+        const lordId = state.nations[nationId].suzerain;
+        if (lordId !== null && isVisible(state, lordId, best.target)) {
+          ord.witnessed = Math.min(1, ord.witnessed + 0.5);
+          ord.observedTurn = state.turn;
+        }
       }
 
       // 마지막 본진을 빼앗았다면 병합할지 속국으로 둘지 정한다

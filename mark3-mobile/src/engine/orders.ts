@@ -17,6 +17,7 @@ import { GameState, Nation, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { pushLog, nationStats, computeLedger, cellPower, neighbors, isFoeCell, blocOf } from './rules';
 import { hexDistance } from '../utils/hexGrid';
 import { vassalsOf, nationPower, breakVassalage } from './vassals';
+import { isVisible } from './vision';
 
 /** 속국이 저울질할 때 쓰는 값들 */
 export interface VassalAssessment {
@@ -134,10 +135,56 @@ export interface VassalOrder {
   deadline: number;
   /** 속국의 속내. 종주국은 revealed 가 되기 전까지 모른다. */
   response: OrderResponse;
-  /** 종주국이 속내를 알아챘는가 */
+  /** 종주국이 불이행을 두 눈으로 확인했는가 */
   revealed: boolean;
-  /** 이행 정도 0~1 */
+  /** 실제로 이행된 정도 0~1 — 지도에서 벌어진 일. 종주국은 이걸 볼 수 없다. */
   progress: number;
+  /** 종주국이 본 만큼의 이행 0~1 — 판단은 오직 이것으로 한다 */
+  witnessed: number;
+  /** 마지막으로 뭔가를 확인한 턴. -1 이면 한 번도 못 봤다. */
+  observedTurn: number;
+}
+
+/** 끝난 명령 한 건 */
+export interface OrderOutcome {
+  lord: number;
+  vassal: number;
+  kind: OrderKind;
+  issuedTurn: number;
+  endedTurn: number;
+  /** 종주국이 이행으로 인정했는가 */
+  accepted: boolean;
+  /** 끝내 확인하지 못했는가 — 벌할 근거도 믿을 근거도 없다 */
+  unverified: boolean;
+  /** 종주국이 본 만큼 */
+  witnessed: number;
+  /** 실제로 이행된 정도. 종주국에게 보여주면 안 된다. */
+  truth: number;
+  /** 속국의 속내. 이것도 종주국에게 보여주면 안 된다. */
+  response: OrderResponse;
+}
+
+function endOrder(
+  state: GameState,
+  lord: Nation,
+  v: Nation,
+  o: VassalOrder,
+  accepted: boolean
+): void {
+  state.orderLog.push({
+    lord: lord.id,
+    vassal: v.id,
+    kind: o.kind,
+    issuedTurn: o.issuedTurn,
+    endedTurn: state.turn,
+    accepted,
+    unverified: !accepted && o.observedTurn < 0,
+    witnessed: o.witnessed,
+    truth: o.progress,
+    response: o.response,
+  });
+  if (state.orderLog.length > 200) state.orderLog.shift();
+  v.order = undefined;
 }
 
 export interface OrderCost {
@@ -226,7 +273,18 @@ export function issueOrder(
     response: 'obey',
     revealed: false,
     progress: 0,
+    witnessed: 0,
+    observedTurn: -1,
   };
+  /**
+   * 이미 되어 있는 일을 시키는 건 명령이 아니다.
+   *
+   * 속국에서 가장 가까운 전선을 고르게 했더니 그 자리에 이미 병력이 있는
+   * 경우가 많았고, 그러면 대놓고 거부한 속국도 가만히 있는 것만으로 이행
+   * 97% 가 나왔다. 아무것도 바꾸지 않는 명령은 순종과 불복을 구별하지 못한다.
+   */
+  if (measureProgress(state, vassal, order) >= 0.5) return null;
+
   order.response = decideResponse(state, lord, vassal, order, rng);
 
   vassal.order = order;
@@ -267,6 +325,43 @@ export function measureProgress(state: GameState, vassal: Nation, order: VassalO
 }
 
 /**
+ * 종주국이 이번 턴에 확인할 수 있는 것.
+ *
+ * 이게 없으면 종주국은 전지적이다 — 속국이 지도 반대편에서 뭘 하든 장부에
+ * 정확히 찍힌다. 실제로는 보내놓고 갔는지 안 갔는지 모르는 게 보통이다.
+ *
+ * null 은 '안 했다'가 아니라 '모른다'다. 둘을 같게 두면 못 본 것이 곧
+ * 불이행이 되어, 시야 밖으로 보낸 명령은 전부 배신으로 기록된다.
+ */
+export function observeOrder(
+  state: GameState,
+  lord: Nation,
+  vassal: Nation,
+  order: VassalOrder
+): number | null {
+  // 조공은 내 국고로 들어온다. 이것만은 확실히 안다.
+  if (order.kind === 'tax') return order.progress;
+  // 공격은 전투가 벌어진 자리에서만 안다 — ai.ts 가 그때 올려준다
+  if (order.kind === 'attack') return null;
+
+  const dest = order.destId ? state.cells.find((c) => c.id === order.destId) : null;
+  if (!dest) return null;
+  // 부른 자리조차 지금 보고 있지 않다면 아무것도 확인할 수 없다
+  if (!isVisible(state, lord.id, dest)) return null;
+
+  const radius = order.kind === 'garrison' ? 1 : 2;
+  let there = 0;
+  for (const c of state.cells) {
+    if (c.owner !== vassal.id || c.units <= 0 || c.neutral) continue;
+    if (hexDistance(c.row, c.col, dest.row, dest.col) > radius) continue;
+    // 보이는 부대만 센다. 숲 너머에 있으면 와 있어도 모른다.
+    if (!isVisible(state, lord.id, c)) continue;
+    there += c.units;
+  }
+  return Math.min(1, there / Math.max(1, order.amount));
+}
+
+/**
  * 매 턴 명령의 진행을 본다.
  *
  * 기한이 지나면 드러난다 — 그 전에도 종주국이 눈치챌 수 있다.
@@ -277,13 +372,20 @@ export function stepOrders(state: GameState, rng: RNG, eco: EconomyConfig = DEFA
     if (!v.alive || v.suzerain === null || !v.order) continue;
     const lord = state.nations[v.suzerain];
     if (!lord || !lord.alive) {
-      v.order = undefined;
+      v.order = undefined; // 명령을 내린 주인이 없다. 기록할 판단도 없다.
       continue;
     }
     const o = v.order;
 
-    // 말이 아니라 지도를 본다
+    // 지도에서 실제로 벌어진 일. 조공처럼 진짜 효과가 걸린 데에만 쓴다.
     o.progress = Math.max(o.progress, measureProgress(state, v, o));
+
+    // 종주국이 이번 턴에 확인한 것. 판단은 오직 이것으로 한다.
+    const seenNow = observeOrder(state, lord, v, o);
+    if (seenNow !== null) {
+      o.witnessed = Math.max(o.witnessed, seenNow);
+      o.observedTurn = state.turn;
+    }
 
     /**
      * 추가 조공은 한 번에 털어내는 게 아니라 매 턴 나간다.
@@ -299,32 +401,36 @@ export function stepOrders(state: GameState, rng: RNG, eco: EconomyConfig = DEFA
         lord.gold += paid;
       }
       o.progress = Math.min(1, o.progress + 1 / span);
+      // 돈은 내 국고로 들어온다. 조공만은 종주국이 틀림없이 안다.
+      o.witnessed = o.progress;
+      o.observedTurn = state.turn;
     }
 
-    if (o.response === 'obey') {
-      if (o.progress >= 1) {
-        // 이행했다. 신뢰가 쌓인다.
-        v.loyalty = Math.min(100, v.loyalty + 3);
-        pushLog(state, `${v.name}이(가) 명령을 이행했습니다`);
-        v.order = undefined;
-        continue;
-      }
-    } else if (o.response === 'feign' && !o.revealed) {
-      // 들킬 확률. 공포로 눌러놓은 주인일수록 감시가 촘촘하다.
-      const watch = 0.06 + (lord.fear / 100) * 0.12;
-      if (rng() < watch) {
-        o.revealed = true;
-        pushLog(state, `${v.name}의 태업이 드러났습니다`);
-      }
+    /**
+     * 이행 판정은 속내가 아니라 목격으로 한다.
+     *
+     * 전에는 response 가 'obey' 인지를 먼저 보고 넘어갔다. 그건 종주국이
+     * 속국의 마음을 읽는 것이다. 이제는 순종이든 태업이든 똑같이 본 만큼만
+     * 인정한다 — 작은 병력으로 치는 시늉만 해도 눈에는 이행으로 보인다.
+     */
+    if (o.witnessed >= 1) {
+      v.loyalty = Math.min(100, v.loyalty + 3);
+      pushLog(state, `${v.name}이(가) 명령을 이행했습니다`);
+      endOrder(state, lord, v, o, true);
+      continue;
     }
 
     if (state.turn > o.deadline) {
-      if (o.response !== 'obey') {
+      if (o.observedTurn >= 0) {
+        // 지켜봤는데 안 했다. 이제야 드러난다.
         o.revealed = true;
         v.loyalty = Math.max(0, v.loyalty - 6);
         pushLog(state, `${v.name}이(가) 기한을 넘겼습니다 — 명령 불이행`);
+      } else {
+        // 끝내 확인하지 못했다. 의심은 남지만 벌할 근거가 없다.
+        pushLog(state, `${v.name}의 이행 여부를 확인하지 못했습니다`);
       }
-      v.order = undefined;
+      endOrder(state, lord, v, o, false);
     }
   }
 }
@@ -372,7 +478,9 @@ export function punishVassal(
 
   // 다른 속국들이 지켜본다
   for (const o of others) o.loyalty = Math.max(0, o.loyalty - (kind === 'war' ? 8 : 3));
-  v.order = undefined;
+  // 응징으로 끝난 명령도 기록에 남는다. 여기서 빠뜨리면 거부는 전부 응징으로
+  // 지워지므로 장부에서 통째로 사라진다 — 없는 일이 되어버린다.
+  if (v.order) endOrder(state, lord, v, v.order, false);
 }
 
 /**
@@ -412,7 +520,7 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
     if (rng() >= p) continue;
 
     breakVassalage(state, v.id, '반란');
-    v.order = undefined;
+    if (v.order) endOrder(state, lord, v, v.order, false);
     // 자기 땅에서 일어선 군대는 사기가 오른다
     for (const c of state.cells) {
       if (c.owner === v.id && c.units > 0) c.morale = Math.min(100, c.morale + 25);
