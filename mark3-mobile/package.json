@@ -22,7 +22,8 @@
     "sim:balance": "tsx sim/balance.ts",
     "sim:difficulty": "tsx sim/difficulty.ts",
     "sim:obey": "tsx sim/obedience.ts",
-    "sim:boards": "tsx sim/boards.ts"
+    "sim:boards": "tsx sim/boards.ts",
+    "sim:scale": "tsx sim/scale.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",
