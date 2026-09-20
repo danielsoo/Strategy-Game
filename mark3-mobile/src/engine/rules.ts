@@ -86,7 +86,9 @@ export function createGameState(
         morale: 100,
         exhaustion: 0,
         driftPP: 0,
-        march: 100,
+        // 0 에서 시작한다. 첫 턴의 beginTurn 이 한 번 채워주므로 100 으로 두면
+        // 1턴부터 200 이 되어 "턴마다 100 차오름"과 어긋난다.
+        march: 0,
         terrain,
         castle: false,
         fortStage: 0,

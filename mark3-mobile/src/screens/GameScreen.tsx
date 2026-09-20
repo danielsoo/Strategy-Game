@@ -54,10 +54,18 @@ import {
   chooseVassalOrAnnex,
 } from '../engine/ai';
 
-const ROWS = 11;
-const COLS = 11;
-const NATIONS = 5;
 const PLAYER = 0;
+
+/**
+ * 판 짜기.
+ *
+ * 1대1 은 9x9 를 쓴다. 11x11 에서 둘이 두면 서로 만나기도 전에 턴이 끝난다 —
+ * 60판 재보니 9x9 는 무승부 0%, 평균 55.8턴이었다.
+ */
+const MODES = [
+  { label: '1대1', nations: 2, size: 9 },
+  { label: '5인 난전', nations: 5, size: 11 },
+] as const;
 
 /** 나라별 AI 성격. 0번 자리는 사람이 둘 때는 쓰이지 않고, 관전 모드에서만 쓰인다. */
 const AI_WEIGHTS: AIWeights[] = [
@@ -150,8 +158,11 @@ export default function GameScreen() {
   const rngRef = useRef<RNG>(makeRng(Date.now() & 0xffffffff));
   const rng = rngRef.current;
 
+  const [modeIdx, setModeIdx] = useState(0);
+  const mode = MODES[modeIdx];
+
   const [state, setState] = useState<GameState>(() => {
-    const s = createGameState(NATIONS, ROWS, COLS, rng);
+    const s = createGameState(MODES[0].nations, MODES[0].size, MODES[0].size, rng);
     beginTurn(s, PLAYER, rng);
     return s;
   });
@@ -316,10 +327,11 @@ export default function GameScreen() {
     });
   };
 
-  const reset = () => {
+  const reset = (idx = modeIdx) => {
     setWatching(false);
+    setModeIdx(idx);
     setState(() => {
-      const s = createGameState(NATIONS, ROWS, COLS, rng);
+      const s = createGameState(MODES[idx].nations, MODES[idx].size, MODES[idx].size, rng);
       beginTurn(s, PLAYER, rng);
       return s;
     });
@@ -559,7 +571,12 @@ export default function GameScreen() {
 
       <ScrollView style={styles.gridWrap} contentContainerStyle={{ paddingBottom: 8 }}>
         <ScrollView horizontal contentContainerStyle={{ paddingRight: 12 }}>
-          <View style={{ width: COLS * HEX_W + HEX_W, height: ROWS * HEX_H * 0.75 + HEX_H * 0.3 }}>
+          <View
+            style={{
+              width: state.cols * HEX_W + HEX_W,
+              height: state.rows * HEX_H * 0.75 + HEX_H * 0.3,
+            }}
+          >
             {state.cells.map(renderCell)}
           </View>
         </ScrollView>
@@ -636,9 +653,23 @@ export default function GameScreen() {
           >
             <Text style={styles.btnText}>턴 종료</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.resetBtn]} onPress={reset}>
+          <TouchableOpacity style={[styles.btn, styles.resetBtn]} onPress={() => reset()}>
             <Text style={styles.btnText}>리셋</Text>
           </TouchableOpacity>
+        </View>
+        {/* 판 짜기를 바꾸면 새 판으로 시작한다 */}
+        <View style={styles.row}>
+          {MODES.map((m, i) => (
+            <TouchableOpacity
+              key={m.label}
+              style={[styles.btn, styles.modeBtn, i !== modeIdx && styles.btnDim]}
+              onPress={() => reset(i)}
+            >
+              <Text style={styles.btnText}>
+                {m.label} ({m.size}x{m.size})
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
         <TouchableOpacity onPress={() => setShowStats((v) => !v)}>
           <Text style={styles.toggle}>{showStats ? '수치 숨기기' : '수치 보기'}</Text>
@@ -908,6 +939,7 @@ const styles = StyleSheet.create({
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   endBtn: { backgroundColor: '#3b82f6' },
   resetBtn: { backgroundColor: '#ef4444' },
+  modeBtn: { backgroundColor: '#475569' },
   recruitBtn: { backgroundColor: '#059669' },
   fortBtn: { backgroundColor: '#a16207' },
   toggle: { color: '#6b7280', fontSize: 11, textAlign: 'center' },
