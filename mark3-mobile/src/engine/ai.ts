@@ -284,7 +284,9 @@ function refreshOrder(ctx: Ctx, c: Cell, enemyAdjacent: number): Cell | null {
 
   let dest = c.order ? ctx.state.cells.find((x) => x.id === c.order!.destId) ?? null : null;
   const arrived = dest ? hexDistance(c.row, c.col, dest.row, dest.col) <= 1 : false;
-  const stale = c.order ? c.order.age >= ORDER.maxAge : false;
+  // 한 칸에 한 턴이니 길이가 곧 시간이다. 판이 두 배면 수명도 두 배여야
+  // 한다 — 안 그러면 도착하기 전에 명령이 늙어 죽고 부대가 제자리를 맴돈다.
+  const stale = c.order ? c.order.age >= ORDER.maxAge * ctx.scale : false;
   // 이미 내 땅이 된 곳으로 계속 갈 이유는 없다
   const taken = dest ? dest.owner === ctx.me && !dest.neutral : false;
 
@@ -309,6 +311,8 @@ export interface Ctx {
   eco: EconomyConfig;
   /** 지금 압박받고 있는 내 진지들. 가까운 부대를 끌어당긴다. */
   distress: Array<{ cell: Cell; severity: number }>;
+  /** 11x11 기준으로 거리를 환산하는 자 (boardScale) */
+  scale: number;
   /** 종주국이 부른 자리. 명령을 받들 때만 채워진다. */
   rally: Cell | null;
   /**
@@ -348,6 +352,24 @@ function findDistress(
     out.push({ cell: c, severity: (shortfall + c.units) * weight });
   }
   return out;
+}
+
+/**
+ * 판을 11x11 기준으로 환산하는 자.
+ *
+ * 평가식 곳곳에 거리와 턴이 절대값으로 박혀 있었다. 그러면 판 크기가 바뀔
+ * 때마다 가중치를 새로 뽑아야 하는데, 그건 틀린 틀이다. 문턱은 같고 재는
+ * 자가 달라져야 한다 — "열네 칸"이 아니라 "판의 3분의 2".
+ *
+ * 가장 나빴던 곳은 전진 항의 14 다. 11x11 은 끝에서 끝이 10칸이라 어떤
+ * 목표든 걸리지만, 21x21 에서는 14칸 넘게 떨어진 목표에 전진 유인이 정확히
+ * 0 이 된다. 부대가 본진에서 평균 3.7칸을 못 벗어나고 최대 진출이 15칸에서
+ * 멎던 것이 이 숫자였다.
+ *
+ * 반지름 5(11x11)에서 1 이므로 그 판의 균형은 한 톨도 안 바뀐다.
+ */
+export function boardScale(state: GameState): number {
+  return Math.max(0.5, Math.floor(Math.min(state.rows, state.cols) / 2) / 5);
 }
 
 function minDist(c: Cell, targets: Cell[]): number {
@@ -407,7 +429,7 @@ function scoutTarget(
     }
     if (unknown === 0) continue;
     // 멀수록 손해지만, 모르는 게 많이 걸린 쪽이면 멀어도 간다
-    const score = unknown * 2 - minDist(c, ctx.homes) * 0.5;
+    const score = unknown * 2 - (minDist(c, ctx.homes) / ctx.scale) * 0.5;
     if (score > bestScore) {
       bestScore = score;
       best = c;
@@ -433,7 +455,7 @@ function pickTarget(
     const prize = ctx.w.castleAssault + wealthValue(gold, ctx.w);
     // 헐거운 본진일수록 크게 끌린다. 본진을 잃은 나라는 징병도 수입도 끊겨
     // 들판의 군대가 저절로 스러지므로, 지금 비어 있다면 그게 곧 기회다.
-    const score = prize / (1 + defense * 0.7) - dist * 0.6;
+    const score = prize / (1 + defense * 0.7) - (dist / ctx.scale) * 0.6;
     if (score > bestScore) {
       bestScore = score;
       best = h;
@@ -467,7 +489,7 @@ function positionValue(ctx: Ctx, c: Cell): number {
   // 상한이 중요하다. 여기를 크게 열어두면 전진 기울기를 압도해
   // 전원이 집에 눌러앉고 모든 나라가 이동 0회로 게임이 멎는다.
   const homePull = w.homeDefense * (1 + Math.min(0.8, ctx.homeThreat / 40));
-  v += homePull * (2 / (1 + minDist(c, ctx.homes)));
+  v += homePull * (2 / (1 + minDist(c, ctx.homes) / ctx.scale));
 
   // 전진은 선형 기울기여야 한다. 5/(1+거리) 형태는 원거리에서 평평해져
   // (거리 9→0.50, 8→0.56) 멀리 있는 부대가 움직일 이유를 잃는다.
@@ -475,7 +497,9 @@ function positionValue(ctx: Ctx, c: Cell): number {
   const dist = ctx.target
     ? hexDistance(c.row, c.col, ctx.target.row, ctx.target.col)
     : minDist(c, ctx.enemyHomes);
-  v += w.advance * Math.max(0, 14 - dist) * 1.0;
+  // 14 는 '11x11 한 판 길이만큼'이라는 뜻이다. 칸으로 두면 큰 판에서
+  // 멀리 있는 목표가 전진 유인을 통째로 잃는다.
+  v += w.advance * Math.max(0, 14 - dist / ctx.scale) * 1.0;
 
   // 압박받는 아군 쪽으로 끌린다. 가까울수록 세게 당긴다.
   //
@@ -575,7 +599,7 @@ function retreatValue(ctx: Ctx, n: Cell): number {
     if (isFoeCell(ctx.state, ctx.me, x)) pressure += cellPower(x, false);
   }
   const terrain = terrainDefense(n.terrain) + (n.fortStage === 4 ? 0.4 : 0) + (n.castle ? 0.3 : 0);
-  const homeward = 6 / (1 + minDist(n, ctx.hubs.length > 0 ? ctx.hubs : ctx.homes));
+  const homeward = 6 / (1 + minDist(n, ctx.hubs.length > 0 ? ctx.hubs : ctx.homes) / ctx.scale);
   return terrain * 4 + homeward - pressure * 0.9;
 }
 
@@ -925,7 +949,7 @@ export function* takeAITurnGen(
       isExplored(state, nationId, c)
   );
   const hubs = adminHubs(state, nationId);
-  const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco };
+  const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco, scale: boardScale(state) };
   const ctx: Ctx = {
     ...partial,
     target: pickTarget(partial),

@@ -42,6 +42,8 @@ export interface RecordOptions {
 
 export interface GameResult {
   winner: number | null;
+  /** 무엇으로 이겼나 — 패권인지 영향력인지 전멸인지 */
+  winReason?: string;
   turns: number;
   finalCells: number[];
   finalUnits: number[];
@@ -122,6 +124,7 @@ export function playGame(
 
   const result = (turns: number, winner: number | null): GameResult => ({
     winner,
+    winReason: state.winReason,
     turns,
     finalCells: state.nations.map((x) => nationStats(state, x.id).cells),
     finalUnits: state.nations.map((x) => nationStats(state, x.id).units),
