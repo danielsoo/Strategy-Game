@@ -185,8 +185,16 @@ const HELP: Array<{ title: string; body: string }> = [
   },
 ];
 
-/** 넓은 화면에서 왼쪽 정보 칸의 너비 */
-const PANE_W = 300;
+/**
+ * 넓은 화면에서 왼쪽 정보 칸의 너비.
+ *
+ * 고정폭으로 두면 창이 좁을수록 손해가 커진다 — 900px 창에서 300px 은
+ * 가로의 3분의 1이다. 표가 읽히는 최소폭(240)과 넉넉한 폭(300) 사이에서
+ * 창 크기를 따라간다.
+ */
+function paneWidth(winW: number): number {
+  return Math.max(240, Math.min(300, Math.round(winW * 0.26)));
+}
 
 /** 세로로 쌓을 때 판 위아래가 쓰는 대략의 높이 (머리말 + 표 + 사건 + 버튼) */
 const CHROME_H = 300;
@@ -223,10 +231,10 @@ function boardUnits(cells: Cell[]): { w: number; h: number } {
  *
  * 그래서 고정된 폭으로 가르지 않고 두 배치의 칸 크기를 직접 비교한다.
  */
-function preferSide(cells: Cell[], winW: number, winH: number): boolean {
+function preferSide(cells: Cell[], winW: number, winH: number, chromeH: number): boolean {
   const u = boardUnits(cells);
   const hexOf = (w: number, h: number) => Math.min(w / (Math.sqrt(3) * u.w), h / (2 * u.h));
-  return hexOf(winW - PANE_W - 16, winH - 16) > hexOf(winW, winH - CHROME_H);
+  return hexOf(winW - paneWidth(winW) - 16, winH - 16) > hexOf(winW, winH - chromeH);
 }
 
 const SPEEDS: Array<{ label: string; ms: number }> = [
@@ -324,10 +332,29 @@ export default function GameScreen() {
    * 옆이 텅 빈 채로 판이 작아진다. 휴대폰(세로)에서는 그대로 아래로 쌓는다.
    */
   const { width: winW, height: winH } = useWindowDimensions();
-  const wide = useMemo(() => preferSide(state.cells, winW, winH), [state.cells, winW, winH]);
+  /**
+   * 판 위아래가 쓰는 높이. onLayout 으로 한 번 잰다.
+   *
+   * onLayout 은 마운트 때만 불리고 창 크기가 바뀔 때는 안 불린다 — 그래서
+   * 여기서 받은 값을 판 크기로 바로 쓰면, 창을 줄여도 판이 그대로 남아
+   * 화면 밖으로 넘친다 (1440x1200 에서 잰 뒤 1200x900 으로 줄이니 112px 넘쳤다).
+   *
+   * 그래서 재는 것은 '위아래가 먹는 높이'까지만 하고, 판 크기는 매번 창
+   * 크기에서 뺀다. 위아래 높이는 머리말·표·버튼의 내용으로 정해지므로
+   * 창 높이가 바뀌어도 그대로다.
+   */
+  const [chromeH, setChromeH] = useState(CHROME_H);
 
-  /** 판을 그릴 수 있는 실제 크기. onLayout 으로 받는다. */
-  const [boardBox, setBoardBox] = useState({ width: 0, height: 0 });
+  const wide = useMemo(
+    () => preferSide(state.cells, winW, winH, chromeH),
+    [state.cells, winW, winH, chromeH]
+  );
+
+  const paneW = paneWidth(winW);
+  const boardBox = wide
+    ? { width: Math.max(0, winW - paneW - 16), height: Math.max(0, winH - 16) }
+    : { width: winW, height: Math.max(0, winH - chromeH) };
+
   const lay = useMemo(
     () => layout(state.cells, boardBox.width, boardBox.height),
     [state.cells, boardBox.width, boardBox.height]
@@ -601,7 +628,7 @@ export default function GameScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, wide && styles.pane]}>
+      <View style={[styles.header, wide && { width: paneW }]}>
         <View style={styles.headerRow}>
           <Text style={styles.title}>턴 {state.turn}</Text>
           <View style={[styles.turnChip, { backgroundColor: current.color }]}>
@@ -666,7 +693,7 @@ export default function GameScreen() {
 
       {/* 수치 표 */}
       {showStats && (
-        <View style={[styles.table, wide && styles.pane]}>
+        <View style={[styles.table, wide && { width: paneW }]}>
           <View style={styles.trHead}>
             <Text style={[styles.th, styles.colName]}>나라</Text>
             <Text style={styles.th}>영향력</Text>
@@ -729,8 +756,11 @@ export default function GameScreen() {
         칸 크기를 거기 맞춘다 — 고정 픽셀로 두면 화면마다 잘리거나 남는다.
       */}
       <View
-        style={[styles.gridWrap, wide && styles.gridWide]}
-        onLayout={(e) => setBoardBox(e.nativeEvent.layout)}
+        style={[styles.gridWrap, wide && styles.gridWide, wide && { left: paneW + 8 }]}
+        onLayout={(e) => {
+          // 옆에 둘 때는 판이 절대 위치라 이 값이 위아래 높이를 말해주지 않는다
+          if (!wide) setChromeH(Math.max(0, winH - e.nativeEvent.layout.height));
+        }}
       >
         {lay && (
           <View style={{ width: lay.width, height: lay.height }}>
@@ -740,7 +770,7 @@ export default function GameScreen() {
       </View>
 
       {/* 최근 사건 */}
-      <View style={[styles.feed, wide && styles.pane]}>
+      <View style={[styles.feed, wide && { width: paneW }]}>
         {state.log.slice(-3).map((l, i) => (
           <Text key={i} style={styles.feedLine} numberOfLines={1}>
             · {l}
@@ -750,7 +780,7 @@ export default function GameScreen() {
       </View>
 
       {selectedCell && (
-        <View style={[styles.panel, wide && styles.pane]}>
+        <View style={[styles.panel, wide && { width: paneW }]}>
           <Text style={styles.panelTitle}>
             병력 {selectedCell.units} · 사기 {Math.round(selectedCell.morale)} · 피로{' '}
             {Math.round(selectedCell.exhaustion)}
@@ -781,7 +811,7 @@ export default function GameScreen() {
         </View>
       )}
 
-      <View style={[styles.footer, wide && styles.pane]}>
+      <View style={[styles.footer, wide && { width: paneW }]}>
         <View style={styles.row}>
           <TouchableOpacity
             style={[
@@ -1091,8 +1121,7 @@ const styles = StyleSheet.create({
   // minHeight 0 이 없으면 flex 항목이 자기 내용보다 작아지지 않는다. 판이
   // 남은 공간을 먹고 아래 버튼을 화면 밖으로 밀어낸다.
   // 넓은 화면: 왼쪽 정보 칸을 비워두고 나머지를 판이 차지한다
-  pane: { width: PANE_W },
-  gridWide: { position: 'absolute', left: PANE_W + 8, top: 8, right: 8, bottom: 8, marginTop: 0 },
+  gridWide: { position: 'absolute', top: 8, right: 8, bottom: 8, marginTop: 0 },
   gridWrap: {
     flex: 1,
     minHeight: 0,
