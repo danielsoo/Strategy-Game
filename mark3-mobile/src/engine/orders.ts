@@ -14,8 +14,108 @@
 
 import { RNG } from '../services/combatSystem';
 import { GameState, Nation, EconomyConfig, DEFAULT_ECONOMY } from './types';
-import { pushLog, nationStats } from './rules';
+import { pushLog, nationStats, computeLedger, cellPower, neighbors, isFoeCell, blocOf } from './rules';
 import { vassalsOf, nationPower, breakVassalage } from './vassals';
+
+/** 속국이 저울질할 때 쓰는 값들 */
+export interface VassalAssessment {
+  /** 내 힘 */
+  myPower: number;
+  /** 종주국의 힘 중 다른 전선에 묶이지 않은 부분 */
+  lordFree: number;
+  /** 종주국이 지금 상대하는 다른 적의 수 */
+  fronts: number;
+  /** 일어섰을 때 살아남을 확률 */
+  survival: number;
+  /** 남아서 얻는 것 (앞으로 내다본 값) */
+  stayValue: number;
+  /** 일어서서 얻는 것의 기대값 */
+  rebelValue: number;
+  /** 매 턴 조공으로 나가는 것. 원한의 크기이기도 하다. */
+  keptPerTurn: number;
+}
+
+/** 앞으로 몇 턴을 내다보고 셈하는가 */
+const HORIZON = 12;
+
+/**
+ * 속국이 하는 계산.
+ *
+ * 실제 나라가 그러듯, 종주국의 '전체 힘'이 아니라 '나에게 돌릴 수 있는 힘'을
+ * 본다. 종주국이 다른 전선에 묶여 있으면 그게 곧 틈이다.
+ *
+ * 남으면 보호를 받는 대신 조공을 바치고, 일어서면 조공을 아끼는 대신 나라를
+ * 걸어야 한다. 둘을 같은 단위(앞으로 12턴어치)로 환산해 견준다.
+ */
+export function assessVassal(
+  state: GameState,
+  lord: Nation,
+  vassal: Nation,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): VassalAssessment {
+  const myPower = nationPower(state, vassal.id);
+
+  // 종주국의 병력을 '나를 겨눌 수 있는 것'과 '다른 전선에 묶인 것'으로 가른다
+  let free = 0;
+  const foes = new Set<number>();
+  for (const c of state.cells) {
+    if (c.owner !== lord.id || c.units <= 0 || c.neutral) continue;
+    let engaged = false;
+    for (const n of neighbors(state, c)) {
+      if (n.units <= 0) continue;
+      if (n.owner === vassal.id) continue; // 나와 맞닿은 것은 '묶였다'고 치지 않는다
+      if (isFoeCell(state, lord.id, n)) {
+        engaged = true;
+        if (n.owner !== null && !n.neutral) foes.add(blocOf(state, n.owner));
+      }
+    }
+    if (!engaged) free += cellPower(c, false);
+  }
+
+  // 내 땅에서 싸운다. 요새와 성이 받쳐준다.
+  let works = 1;
+  for (const c of state.cells) {
+    if (c.owner !== vassal.id) continue;
+    if (c.castle) works += 0.15;
+    else if (c.fortStage === 4) works += 0.1;
+  }
+  const defended = myPower * Math.min(1.6, works);
+  const survival = defended / Math.max(0.001, defended + free);
+
+  // 조공으로 나가는 돈 — 일어서면 이만큼이 내 것이 된다
+  const ledger = computeLedger(state, vassal.id, eco);
+  const rate =
+    vassal.vassalOrigin === 'conquest' ? eco.tributeRateConquest : eco.tributeRateVoluntary;
+  const keptPerTurn = Math.max(0, ledger.net) * rate;
+
+  // 독립하면 누가 나를 노리는가. 종주국의 그늘이 그걸 막아준다.
+  let worstNeighbor = 0;
+  for (const n of state.nations) {
+    if (!n.alive || n.id === vassal.id || blocOf(state, n.id) === blocOf(state, vassal.id)) continue;
+    worstNeighbor = Math.max(worstNeighbor, nationPower(state, n.id));
+  }
+  const exposure = Math.min(1.5, worstNeighbor / Math.max(1, myPower));
+  // 보호의 값어치는 '내가 혼자서는 감당 못 하는 만큼'이다
+  const shieldPerTurn = Math.max(0, exposure - 0.8) * Math.max(1, ledger.income) * 0.5;
+
+  // 져서 잃는 것 — 땅과 군대만이 아니라 앞으로의 나라 전체다.
+  // 이걸 싸게 잡았더니 생존 27% 에서도 '일어설 만하다'가 나왔다.
+  const worth =
+    nationStats(state, vassal.id).cells * 6 + myPower * 4 + Math.max(0, ledger.net) * HORIZON;
+
+  const stayValue = shieldPerTurn * HORIZON;
+  const rebelValue = survival * keptPerTurn * HORIZON - (1 - survival) * worth;
+
+  return {
+    myPower,
+    lordFree: free,
+    fronts: foes.size,
+    survival,
+    stayValue,
+    rebelValue,
+    keptPerTurn,
+  };
+}
 
 export type OrderKind = 'attack' | 'reinforce' | 'tax';
 export type OrderResponse = 'obey' | 'feign' | 'refuse';
@@ -77,18 +177,17 @@ export function decideResponse(
   rng: RNG
 ): OrderResponse {
   const { burden } = orderCost(state, vassal, order);
-  const lp = nationPower(state, lord.id);
-  const vp = nationPower(state, vassal.id);
-  const mightRatio = Math.min(3, lp / Math.max(1, vp));
+  const a = assessVassal(state, lord, vassal);
 
-  // 따를 마음 = 충성 + 정의로운 주인에 대한 신뢰
-  const willing = vassal.loyalty / 100 + (lord.justice - 50) / 200;
+  // 너무 센 주인에게는 그냥 따른다. 버티는 값이 없다.
+  // 반대로 주인이 다른 전선에 묶여 있으면 배짱이 생긴다.
+  const willing =
+    vassal.loyalty / 100 + (lord.justice - 50) / 200 + (0.5 - a.survival) * 0.8;
   if (willing > burden + 0.15) return 'obey';
 
-  // 안 따르기로 했다. 들켰을 때 감당할 수 있는가.
-  // 힘 차이가 크면 대놓고 못 한다 — 그래서 듣는 척을 한다.
-  const daring = (1 - vassal.loyalty / 100) / Math.max(0.5, mightRatio);
-  return rng() < daring * 0.6 ? 'refuse' : 'feign';
+  // 안 따르기로 했다. 들켰을 때 감당할 수 있는가 —
+  // 살아남을 자신이 있을수록 대놓고 거부한다.
+  return rng() < a.survival * 0.8 ? 'refuse' : 'feign';
 }
 
 /** 종주국이 명령을 내린다 */
@@ -232,19 +331,28 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
     const lord = state.nations[v.suzerain];
     if (!lord || !lord.alive) continue;
 
-    const discontent = Math.pow(1 - v.loyalty / 100, 2);
-    if (discontent <= 0.04) continue;
+    const a = assessVassal(state, lord, v, eco);
 
-    // 주인이 약해졌을수록 기회다
-    const lp = nationPower(state, lord.id);
-    const vp = nationPower(state, v.id);
-    const opportunity = Math.min(2, vp / Math.max(1, lp) * 1.5);
+    /**
+     * 셈만으로는 반란이 거의 안 난다. 나라를 거는 일이니 당연하다.
+     * 실제로도 사람들은 계산이 맞아서가 아니라 견딜 수 없어서 일어선다.
+     *
+     * 그래서 두 축으로 나눈다 — 셈(rebelValue - stayValue)과 원한(grievance).
+     * 원한은 '얼마나 빨리고 있는가'에 비례한다. 압도적인 주인 아래에서는
+     * 셈이 워낙 나빠 원한만으로는 못 넘고, 주인이 다른 전선에 묶이면
+     * 셈이 0 근처로 올라와 원한이 결정을 뒤집는다.
+     */
+    const grievance = Math.pow(1 - v.loyalty / 100, 2) * a.keptPerTurn * HORIZON * 2.5;
+    let edge = a.rebelValue - a.stayValue + grievance;
+
     // 불이행이 드러난 참이면 이미 돌아선 것이다
-    const defiant = v.order && v.order.revealed && v.order.response !== 'obey' ? 1.6 : 1;
-    // 형제 속국이 먼저 일어섰나
-    const contagion = vassalsOf(state, lord.id).some((x) => x.id !== v.id && x.loyalty < 15) ? 1.4 : 1;
+    if (v.order && v.order.revealed && v.order.response !== 'obey') edge += 15;
+    // 형제 속국이 먼저 일어섰으면 지금이 그때다
+    if (vassalsOf(state, lord.id).some((x) => x.id !== v.id && x.loyalty < 15)) edge += 15;
 
-    const p = 0.05 * discontent * opportunity * defiant * contagion;
+    if (edge <= 0) continue;
+    // 셈이 맞아도 바로 터지지는 않는다. 때를 본다.
+    const p = Math.min(0.5, edge / 120);
     if (rng() >= p) continue;
 
     breakVassalage(state, v.id, '반란');
