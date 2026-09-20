@@ -56,6 +56,7 @@ import {
   recomputeVision,
   isVisible,
   isExplored,
+  isFoeCell,
   knownCell,
   findPath,
   nextStep,
@@ -439,6 +440,22 @@ export default function GameScreen() {
   );
   const [orderNote, setOrderNote] = useState<string | null>(null);
 
+  /**
+   * 행군이 멈춘 부대. 다음 그림에서 골라준다 —
+   * "뭔가 나와서 멈췄다"는 말만 띄우고 어느 부대인지 안 알려주면
+   * 넓은 판에서는 찾지 못한다.
+   */
+  const haltedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!haltedRef.current) return;
+    const id = haltedRef.current;
+    haltedRef.current = null;
+    if (state.cells.some((c) => c.id === id && c.owner === PLAYER && c.units > 0)) {
+      setSelected(id);
+      setPathTo(null);
+    }
+  }, [state]);
+
   /** 길을 물어본 칸. 같은 칸을 한 번 더 누르면 그리로 보낸다. */
   const [pathTo, setPathTo] = useState<string | null>(null);
 
@@ -605,7 +622,8 @@ export default function GameScreen() {
             setState((prev) => {
               const from = prev.cells.find((c) => c.id === selectedCell.id);
               if (from) from.order = { destId: cell.id, age: 0 };
-              advanceGotos(prev, actedRef.current);
+              const halted = advanceGotos(prev, actedRef.current);
+              if (halted.length > 0) haltedRef.current = halted[0];
               return bump(prev);
             });
           }
@@ -660,36 +678,73 @@ export default function GameScreen() {
    * 목적지를 받은 내 부대를 한 칸씩 옮긴다.
    *
    * 문명의 이동 명령과 같다 — 먼 곳을 찍어두면 매 턴 알아서 한 칸씩 간다.
-   * 다만 적을 만나면 멈추고 목적지를 지운다. 싸울지 말지는 사람이 정할 일이지
-   * 자동으로 밀어 넣을 일이 아니다.
+   * 안개 너머로도 보낼 수 있다. 길찾기는 못 가본 칸을 '비어 있다'고 치고
+   * 긋기 때문에, 가보면 없던 것이 나온다.
+   *
+   * 그때 멈춘다. 적을 만났거나 길이 막혔으면 목적지를 지우고 그 부대를
+   * 골라준다 — 싸울지 돌아갈지는 사람이 정할 일이지, 알아서 밀고 들어갈
+   * 일이 아니다. 이게 정찰을 도박으로 만든다.
+   *
+   * 멈춰 세운 부대들의 칸을 돌려준다.
    */
-  const advanceGotos = (s: GameState, acted: Set<string>) => {
+  const advanceGotos = (s: GameState, acted: Set<string>): string[] => {
     const queued = s.cells
       .filter((c) => c.owner === PLAYER && c.units > 0 && !c.neutral && c.order)
       .map((c) => c.id);
+    const halted: string[] = [];
+
+    /** 이 칸 옆에 지금 보이는 적이 있는가 */
+    const foeBeside = (at: Cell) =>
+      neighbors(s, at).some((n) => isVisible(s, PLAYER, n) && isFoeCell(s, PLAYER, n));
 
     for (const id of queued) {
-      const c = s.cells.find((x) => x.id === id);
+      let c = s.cells.find((x) => x.id === id);
       if (!c || !c.order || c.owner !== PLAYER || c.units <= 0) continue;
-      // 이번 턴에 이미 움직인 부대는 건너뛴다
-      if (acted.has(c.id)) continue;
+      if (acted.has(c.id)) continue; // 이번 턴에 이미 움직였다
 
-      const dest = s.cells.find((x) => x.id === c.order!.destId);
+      const dest = s.cells.find((x) => x.id === c!.order!.destId);
       if (!dest || dest.id === c.id) {
         c.order = undefined;
         continue;
       }
+
+      // 출발하기 전에 이미 적이 옆에 있으면 여기서부터 사람이 정한다
+      if (foeBeside(c)) {
+        c.order = undefined;
+        halted.push(c.id);
+        pushLog(s, '적이 코앞이라 행군을 멈췄습니다');
+        continue;
+      }
+
       const next = nextStep(s, c, dest);
       if (!next) continue; // 행군력이 모자라다. 이번 턴은 쉰다.
-      if (isHostile(c, next, s) || !canMoveTo(c, next)) {
+
+      // 가려던 칸에 뭔가 있었다 — 안개가 걷히니 드러난 것이다
+      if (isHostile(c, next, s) || next.units > 0 || !canMoveTo(c, next)) {
+        c.order = undefined;
+        halted.push(c.id);
+        pushLog(s, '가는 길에 무언가 있어 행군을 멈췄습니다');
+        continue;
+      }
+
+      moveStack(c, next);
+      acted.add(next.id);
+      c = next;
+      // 한 칸 갔으니 보이는 범위가 달라진다. 새로 드러난 것을 그 자리에서 본다.
+      recomputeVision(s, PLAYER);
+
+      if (c.id === dest.id) {
         c.order = undefined;
         continue;
       }
-      moveStack(c, next);
-      acted.add(next.id);
-      if (next.id === dest.id) next.order = undefined;
+      if (foeBeside(c)) {
+        c.order = undefined;
+        halted.push(c.id);
+        pushLog(s, '행군 중 적을 발견해 멈췄습니다');
+      }
     }
     recomputeVision(s, PLAYER);
+    return halted;
   };
 
   /**
@@ -786,7 +841,8 @@ export default function GameScreen() {
     if (s.nations[PLAYER].alive && s.winner === null) {
       beginTurn(s, PLAYER, rng);
       // 찍어둔 목적지로 한 칸씩. 행군력이 찬 뒤라야 제대로 간다.
-      advanceGotos(s, actedRef.current);
+      const halted = advanceGotos(s, actedRef.current);
+      if (halted.length > 0) haltedRef.current = halted[0];
     }
   };
 
@@ -966,18 +1022,32 @@ export default function GameScreen() {
     const mem = known && !seen ? knownCell(state, PLAYER, cell) : null;
 
     if (!known) {
-      // 한 번도 못 가본 곳 — 지형조차 모른다
+      /*
+        한 번도 못 가본 곳. 예전에는 누를 수 없는 View 였는데, 그러면 안개
+        너머로는 부대를 보낼 방법이 아예 없다. 문명처럼 찍어서 보낼 수 있어야
+        정찰이 성립한다 — 가봐야 아는 것이니까.
+      */
       return (
-        <View key={cell.id} style={[styles.hex, { left: lay.x(cell), top: lay.y(cell) }]}>
+        <TouchableOpacity
+          key={cell.id}
+          style={[styles.hex, { left: lay.x(cell), top: lay.y(cell) }]}
+          onPress={() => onCellPress(cell)}
+          activeOpacity={0.8}
+        >
           <Svg width={lay.w} height={lay.h}>
             {/*
               안 가본 칸도 '칸'으로 보여야 한다. 배경(#141414)보다 어둡게 칠하면
               여러 칸이 하나의 검은 덩어리로 뭉쳐서, 판을 키워도 칸이 늘어난 것처럼
               보이지 않는다 — 실제로 그렇게 보였다.
             */}
-            <Polygon points={lay.points} fill="#1d1d1f" stroke="#33333a" strokeWidth={1} />
+            <Polygon
+              points={lay.points}
+              fill={pathTurns.has(cell.id) ? '#24384a' : '#1d1d1f'}
+              stroke={pathTurns.has(cell.id) ? '#38bdf8' : '#33333a'}
+              strokeWidth={1}
+            />
           </Svg>
-        </View>
+        </TouchableOpacity>
       );
     }
 

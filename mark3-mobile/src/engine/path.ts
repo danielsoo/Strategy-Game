@@ -11,8 +11,8 @@
 // 돌아가는 길이 나오고, 그건 플레이어가 모르는 것을 아는 것이다.
 
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY } from './types';
-import { neighbors, marchCost, stackCap, isFoeCell } from './rules';
-import { isExplored } from './vision';
+import { neighbors, marchCost, stackCap, isFoeCell, blocOf, terrainMarch } from './rules';
+import { isExplored, isVisible, memoryOf } from './vision';
 
 export interface PathStep {
   cell: Cell;
@@ -35,6 +35,7 @@ const TURN_LIMIT = 60;
  *
  * 못 가본 칸은 평지로 친다. 실제 지형을 쓰면 안개 너머의 산을 피해 가는
  * 길이 나와서, 정찰하지 않고도 지형을 읽는 셈이 된다.
+ * 가봤지만 지금 안 보이는 칸은 기억 속의 지형으로 친다 — 지형은 안 변한다.
  */
 function enterCost(
   state: GameState,
@@ -43,12 +44,23 @@ function enterCost(
   c: Cell,
   eco: EconomyConfig
 ): number {
-  if (isExplored(state, mover, c)) return marchCost(units, c, eco);
-  // 평지·길 없음 기준값. terrainMarch('plain') 은 1 이라 곱하지 않는다.
-  return eco.marchBase + eco.marchPerUnit * Math.max(0, units);
+  const base = eco.marchBase + eco.marchPerUnit * Math.max(0, units);
+  if (!isExplored(state, mover, c)) return base; // 평지로 가정
+  if (isVisible(state, mover, c)) return marchCost(units, c, eco);
+  const mem = memoryOf(state, mover, c);
+  return mem ? base * terrainMarch({ ...c, terrain: mem.terrain, hasRoad: c.hasRoad }) : base;
 }
 
-/** 지나갈 수 있는 칸인가. 목적지는 적이어도 된다 — 닿는 순간이 공격이다. */
+/**
+ * 지나갈 수 있는 칸인가 — 아는 한도에서.
+ *
+ * 이게 실제 상태를 읽으면 길찾기가 안개를 뚫는다. 못 본 적을 피해 돌아가는
+ * 길이 나오고, 플레이어는 "왜 이쪽으로 돌지?" 를 보고 거기 뭔가 있다는 걸
+ * 알게 된다. 정찰하지 않고 지도를 읽는 셈이다.
+ *
+ * 그래서 못 가본 칸은 '비어 있다'고 가정하고 들어간다. 가보면 뭐가 있을 수도
+ * 있고, 그때 멈춰서 다시 정하면 된다 — 그게 정찰이다.
+ */
 function passable(
   state: GameState,
   mover: number,
@@ -59,11 +71,21 @@ function passable(
 ): boolean {
   if (c.offMap) return false;
   if (isGoal) return true;
+  // 못 가본 곳은 비어 있다고 치고 발을 들인다
+  if (!isExplored(state, mover, c)) return true;
+
+  const seen = isVisible(state, mover, c);
+  const mem = seen ? null : memoryOf(state, mover, c);
+  const owner = seen ? c.owner : mem?.owner ?? null;
+  const troops = seen ? c.units : mem?.units ?? 0;
+  if (troops <= 0) return true;
+
   // 적이 선 칸은 비켜 간다. 길목의 싸움까지 미리 셈할 수는 없다.
-  if (isFoeCell(state, mover, c)) return false;
+  if (seen ? isFoeCell(state, mover, c) : owner === null || blocOf(state, owner) !== blocOf(state, mover)) {
+    return false;
+  }
   // 합쳐서 정원을 넘는 칸은 지나갈 수 없다. 들어갈 수 없는 칸이기 때문이다.
-  const merging = c.units > 0 && c.owner === mover && !c.neutral;
-  if (merging && units + c.units > stackCap(eco)) return false;
+  if (owner === mover && units + troops > stackCap(eco)) return false;
   return true;
 }
 
