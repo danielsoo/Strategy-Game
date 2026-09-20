@@ -65,7 +65,7 @@ function softmax(v: number[]): number[] {
 
 /** 한 번의 선택 — 그 자리에 있던 후보 전부와, 실제로 고른 것 */
 interface Decision {
-  cands: number[][];
+  cands: Float32Array[];
   chosen: number;
   /** 고를 당시 이 수를 고를 확률. 정책이 그때로부터 얼마나 멀어졌는지 재는 데 쓴다. */
   pOld: number;
@@ -85,12 +85,12 @@ function record(
   c: Cell,
   chosen: Action,
   all: Action[],
-  cache: WeakMap<Action, number[]> | null,
+  cache: WeakMap<Action, Float32Array> | null,
   temp: number,
   sink: (d: Decision) => void
 ): void {
   if (all.length < 2) return;
-  const cands: number[][] = [];
+  const cands: Float32Array[] = [];
   let idx = -1;
   for (let i = 0; i < all.length; i++) {
     const x = cache?.get(all[i]) ?? extractFeatures(ctx, c, all[i]);
@@ -129,7 +129,7 @@ interface NetOptions {
  * 평가할 때는 최고점만 둔다.
  */
 function netPolicy(net: Net, opts: NetOptions): Policy {
-  const feat = new WeakMap<Action, number[]>();
+  const feat = new WeakMap<Action, Float32Array>();
   return {
     score: (ctx: Ctx, c: Cell, a: Action) => {
       const x = extractFeatures(ctx, c, a);
@@ -311,7 +311,7 @@ function policyStep(
   let seen = 0;
   let stopped = false;
 
-  let xs: number[][] = [];
+  let xs: Float32Array[] = [];
   let ds: number[] = [];
   let inBatch = 0;
 

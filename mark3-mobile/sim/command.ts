@@ -86,6 +86,9 @@ function main() {
     ['기본 3 + 거점당 2', { ...DEFAULT_ECONOMY, commandBase: 3, commandPerHub: 2 }],
     ['기본 2 + 거점당 1.5', { ...DEFAULT_ECONOMY, commandBase: 2, commandPerHub: 1.5 }],
     ['기본 5 + 거점당 3', { ...DEFAULT_ECONOMY, commandBase: 5, commandPerHub: 3 }],
+    // 한도는 사실상 없고 순서 규칙만 켠다. 앞선 측정에서 두 가지를 같이
+    // 바꿔놓고 좋아졌다고 말할 뻔했다 — 어느 쪽이 효과인지 갈라야 한다.
+    ['순서만 (한도 없음)', { ...DEFAULT_ECONOMY, commandBase: 999, commandPerHub: 0 }],
   ];
 
   console.log(`지휘 용량 — ${games}판씩 · ${size}x${size}\n`);

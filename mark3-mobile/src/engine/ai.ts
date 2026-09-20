@@ -28,6 +28,8 @@ import {
   startFort,
   recruit,
   commandLimit,
+  canMoveTo,
+  canAttackFrom,
   merchantDestinations,
   expectedTradeProfit,
   sendMerchant,
@@ -426,6 +428,8 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
 
   for (const n of neighbors(ctx.state, c)) {
     if (isHostile(c, n)) {
+      // 행군력이 모자라면 칠 수 없다. 후보에조차 올리지 않는다.
+      if (!canAttackFrom(c, n, ctx.eco)) continue;
       // 협공을 셈에 넣는다. 규칙만 바뀌고 AI 가 모르면 행동은 그대로다.
       const myFlank = flankingSupport(ctx.state, n, c, ctx.eco);
       const theirFlank = flankingSupport(ctx.state, n, n, ctx.eco);
@@ -462,6 +466,8 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
     }
 
     if (n.units > 0 && n.owner === ctx.me && !n.neutral) {
+      // 상한을 넘는 합류와 행군력이 없는 이동은 수가 아니다
+      if (!canMoveTo(c, n, ctx.eco)) continue;
       // 합류 가치는 병력 수에만 비례하면 안 된다. 그러면 1~2명짜리 부대가
       // 합칠 이유를 못 찾아 자잘하게 흩어진 채로 각자 싸우다 각개격파당한다.
       // 주변 적 앞에서 내가 약할수록 뭉쳐야 한다.
@@ -482,6 +488,7 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
     }
 
     if (n.units === 0) {
+      if (!canMoveTo(c, n, ctx.eco)) continue;
       // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
       const eff = cellEfficiency(n, ctx.hubs, ctx.eco);

@@ -216,7 +216,7 @@ function around(ctx: Ctx, c: Cell): { foe: number; friend: number } {
  * (상태, 내 부대, 후보 행동) → 숫자 40개.
  * 값은 대체로 0~1 로 눌러둔다. 크기가 제각각이면 학습이 한쪽 축에만 끌려간다.
  */
-export function extractFeatures(ctx: Ctx, c: Cell, a: Action): number[] {
+export function extractFeatures(ctx: Ctx, c: Cell, a: Action): Float32Array {
   const base = turnBase(ctx);
   const { state, me, eco } = ctx;
   const myPower = cellPower(c, false);
@@ -262,7 +262,7 @@ export function extractFeatures(ctx: Ctx, c: Cell, a: Action): number[] {
   if (!n) {
     // 제자리에는 대상이 없다. 나머지는 0 으로 둔다.
     while (f.length < FEATURE_COUNT) f.push(0);
-    return f;
+    return Float32Array.from(f);
   }
 
   const merge = a.kind === 'move' && n.units > 0 && friendly(state, me, n);
@@ -299,5 +299,7 @@ export function extractFeatures(ctx: Ctx, c: Cell, a: Action): number[] {
     Math.max(-1, Math.min(1, myDistressDist - distressDist(ctx, n)))
   );
 
-  return f;
+  // 학습 쪽 뜨거운 반복문이 한 가지 자료형만 보게 한다. number[] 와 섞이면
+  // JIT 가 형을 특정하지 못해 최적화를 포기한다.
+  return Float32Array.from(f);
 }

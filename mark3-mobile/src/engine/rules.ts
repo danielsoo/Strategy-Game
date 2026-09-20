@@ -86,6 +86,7 @@ export function createGameState(
         morale: 100,
         exhaustion: 0,
         driftPP: 0,
+        march: 100,
         terrain,
         castle: false,
         fortStage: 0,
@@ -462,6 +463,7 @@ function clearStack(c: Cell): void {
   c.morale = 100;
   c.exhaustion = 0;
   c.driftPP = 0;
+  c.march = 100;
   c.neutral = undefined;
   c.encircled = false;
 }
@@ -502,6 +504,9 @@ export function performAttack(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): AttackOutcome {
+  // 접촉 전투도 행군을 먹는다. 다만 제자리에서 맞붙는 것이 행군보다는 수월하니
+  // 절반만 문다. 이게 없으면 대군은 느려도 전투는 그대로라 반쪽짜리 규칙이 된다.
+  from.march = Math.max(0, from.march - marchCost(from.units, to, eco) * ATTACK_MARCH_SHARE);
   const attackerNationId = from.neutral ? null : from.owner;
   const defenderNationId = to.neutral ? null : to.owner;
   const powerRatio = cellPower(from, false) / Math.max(0.001, cellPower(to, true));
@@ -591,13 +596,57 @@ export function performAttack(
   };
 }
 
-export function moveStack(from: Cell, to: Cell): void {
+/**
+ * 지형이 행군에 매기는 값. 길이 나 있으면 훨씬 수월하다 —
+ * 무역상이 닦아놓은 길이 군대의 길이 되는 것도 역사 그대로다.
+ */
+export function terrainMarch(c: Cell): number {
+  const base = c.terrain === 'mountain' ? 2 : c.terrain === 'forest' ? 1.5 : c.terrain === 'desert' ? 1.2 : 1;
+  return c.hasRoad ? base * 0.6 : base;
+}
+
+/** 이 부대가 저 칸으로 한 칸 가는 데 드는 행군력 */
+/** 공격이 무는 행군력의 비율 */
+export const ATTACK_MARCH_SHARE = 0.5;
+
+export function marchCost(units: number, to: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): number {
+  return (eco.marchBase + eco.marchPerUnit * Math.max(0, units)) * terrainMarch(to);
+}
+
+/** 한 칸에 설 수 있는 최대 병력 (0 이면 제한 없음) */
+export function stackCap(eco: EconomyConfig = DEFAULT_ECONOMY): number {
+  return eco.maxStackUnits > 0 ? eco.maxStackUnits : Infinity;
+}
+
+/**
+ * 이 부대가 저 칸으로 갈 수 있는가.
+ *
+ * 두 가지를 본다 — 행군력이 남았는가, 그리고 합쳐서 상한을 넘지 않는가.
+ * 상한을 넘는 합류는 아예 수가 아니다. 대신 옆에 붙어서 협공으로 싸우면 된다.
+ */
+/** 이 부대가 저 칸을 칠 수 있는가 */
+export function canAttackFrom(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): boolean {
+  return from.units > 0 && from.march >= marchCost(from.units, to, eco) * ATTACK_MARCH_SHARE;
+}
+
+export function canMoveTo(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): boolean {
+  if (from.units <= 0) return false;
+  if (from.march < marchCost(from.units, to, eco)) return false;
+  const merging = to.units > 0 && to.owner === from.owner && to.neutral === from.neutral;
+  if (merging && from.units + to.units > stackCap(eco)) return false;
+  return true;
+}
+
+export function moveStack(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): void {
+  const spent = marchCost(from.units, to, eco);
   const sameSide = to.units > 0 && to.owner === from.owner && to.neutral === from.neutral;
   if (sameSide) {
     const total = to.units + from.units;
     to.morale = (to.morale * to.units + from.morale * from.units) / total;
     to.exhaustion = (to.exhaustion * to.units + from.exhaustion * from.units) / total;
     to.driftPP = (to.driftPP * to.units + from.driftPP * from.units) / total;
+    // 합친 부대는 느린 쪽을 따른다. 대열이 길어지면 앞이 아니라 뒤가 속도를 정한다.
+    to.march = Math.min(to.march, from.march - spent);
     to.units = total;
   } else {
     to.units = from.units;
@@ -605,6 +654,7 @@ export function moveStack(from: Cell, to: Cell): void {
     to.exhaustion = Math.min(100, from.exhaustion + 10);
     to.driftPP = from.driftPP;
     to.neutral = from.neutral;
+    to.march = Math.max(0, from.march - spent);
     if (!from.neutral) to.owner = from.owner;
   }
   const keepOwner = from.owner;
@@ -683,6 +733,9 @@ export function canRecruitAt(
 ): boolean {
   if (!cell.castle || cell.owner !== nationId) return false;
   if (cell.recruitedTurn === state.turn) return false;
+  // 성도 한 칸이다. 꽉 차 있으면 새 병력을 세울 자리가 없다 —
+  // 먼저 밖으로 내보내야 한다. 이게 있어야 전선으로 병력이 흘러나간다.
+  if (cell.units + eco.maxRecruitPerTurn > stackCap(eco)) return false;
   return state.nations[nationId].gold >= eco.recruitCost;
 }
 
@@ -1000,6 +1053,10 @@ export function beginTurn(
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): void {
   promoteCapitalIfNeeded(state, nationId);
+  // 행군력을 되채운다. 쉰 부대가 다시 걸을 힘을 얻는 자리다.
+  for (const c of state.cells) {
+    if (c.owner === nationId && !c.neutral) c.march = Math.min(eco.marchMax, c.march + eco.marchRegen);
+  }
   applyUpkeep(state, nationId, eco);
   progressForts(state, nationId);
   trySpawnMerchant(state, nationId, eco);

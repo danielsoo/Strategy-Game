@@ -30,6 +30,15 @@ export interface Cell {
   exhaustion: number;
   /** 누적 전투 보정(기세/베테랑). ±15%p 로 제한된다. */
   driftPP: number;
+  /**
+   * 행군력 0~100. 턴마다 차오르고 이동할 때 쓴다.
+   *
+   * 병력이 많을수록 한 칸 옮기는 데 더 든다. 대군이 굼뜬 것은 게임의 편의가
+   * 아니라 실제 전쟁이 그렇기 때문이다 — 보급과 대열이 길어지면 하루에 갈
+   * 수 있는 거리가 줄어든다. 이게 있어야 "느리고 무거운 망치냐, 빠르고 약한
+   * 기병이냐"가 선택이 된다. 없으면 크게 모으는 쪽에 아무 대가가 없다.
+   */
+  march: number;
   terrain: Terrain;
   castle: boolean;
   /** 0 없음, 1~3 건설 중, 4 완공 */
@@ -210,6 +219,31 @@ export interface EconomyConfig {
   commandBase: number;
   /** 거점(성·요새) 하나당 늘어나는 명령 수. 지휘 체계가 있어야 더 부린다. */
   commandPerHub: number;
+  /**
+   * 한 칸에 설 수 있는 최대 병력. 0 이면 제한 없음.
+   *
+   * 전투력이 병력 수에 정비례하니 40명 한 덩어리와 10명 넷은 싸움에서 같은
+   * 힘이다. 그래서 합칠 이유가 없었고, massing 은 어떤 실험에서도 0 이
+   * 최선이었다 — 자리 수를 바꿔도, 명령 수를 제한해도, 협공을 꺼도.
+   *
+   * 상한을 두면 '한 칸 = 한 부대'가 되고, 집중은 포개는 것이 아니라 옆으로
+   * 늘어서는 것으로 표현된다. 이미 있는 협공과 맞물린다.
+   */
+  maxStackUnits: number;
+  /** 턴마다 차오르는 행군력 */
+  marchRegen: number;
+  /**
+   * 쌓아둘 수 있는 행군력의 상한.
+   *
+   * 한 턴 회복분보다 커야 한다. 안 그러면 회복분보다 비싼 이동은 영영 못 하고,
+   * 큰 부대가 느린 게 아니라 아예 못 걷는 돌이 된다 — 실제로 그렇게 만들었다가
+   * 공격 횟수가 30.8 에서 11.4 로 주저앉았다. 느린 것과 못 가는 것은 다르다.
+   */
+  marchMax: number;
+  /** 한 칸 이동의 기본 비용 */
+  marchBase: number;
+  /** 병력 한 명당 더 드는 이동 비용 */
+  marchPerUnit: number;
 }
 
 // 균형의 핵심은 세 가지다.
@@ -252,6 +286,13 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   // 바꾸지는 않는다.
   commandBase: 0,
   commandPerHub: 0,
+  // 10명이면 평지에서도 두 턴에 한 칸이다 (30 + 8*10 = 110 > 100).
+  // 3명은 54 라 매 턴 움직인다. 소부대는 빠르고 대군은 굼뜨다.
+  maxStackUnits: 10,
+  marchRegen: 100,
+  marchMax: 300,
+  marchBase: 30,
+  marchPerUnit: 8,
 };
 
 export const NATION_PRESETS: Array<{ name: string; color: string; taxRate: number }> = [
