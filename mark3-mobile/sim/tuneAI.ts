@@ -78,10 +78,10 @@ function winRate(m: Member): number {
 }
 
 /** 집단에서 5명을 뽑아 한 판 시키고 승패를 기록한다 */
-function playRound(pop: Member[], rng: RNG, size: number): void {
-  const seats = Math.min(5, pop.length);
+function playRound(pop: Member[], rng: RNG, size: number, seats = 5): void {
+  const n = Math.min(seats, pop.length);
   const picked: number[] = [];
-  while (picked.length < seats) {
+  while (picked.length < n) {
     const i = Math.floor(rng() * pop.length);
     if (!picked.includes(i)) picked.push(i);
   }
@@ -96,6 +96,34 @@ function playRound(pop: Member[], rng: RNG, size: number): void {
   if (r.winner !== null) pop[picked[r.winner]].wins++;
 }
 
+/**
+ * 1대1 전원 맞대결.
+ *
+ * 5인 게임의 승패는 신호가 탁하다 — 내가 잘해서 이긴 건지 남 둘이 싸워줘서
+ * 이긴 건지 구분이 안 된다. 1대1 은 제로섬이라 "A가 B를 이겼다"가 그대로
+ * 신호가 되고, 자가대전 이론도 원래 2인 제로섬 전제다.
+ *
+ * 모든 쌍을 자리를 바꿔 두 번씩 둔다. 자리 이점이 상쇄되고 표본도 고르게 쌓인다.
+ */
+function roundRobinDuel(pop: Member[], rng: RNG, size: number, repeats: number): void {
+  for (let r = 0; r < repeats; r++) {
+    for (let i = 0; i < pop.length; i++) {
+      for (let j = i + 1; j < pop.length; j++) {
+        for (const [a, b] of [
+          [i, j],
+          [j, i],
+        ]) {
+          const res = playGame([pop[a].w, pop[b].w], size, size, rng, 180);
+          pop[a].played++;
+          pop[b].played++;
+          if (res.winner === 0) pop[a].wins++;
+          else if (res.winner === 1) pop[b].wins++;
+        }
+      }
+    }
+  }
+}
+
 function parseArg(name: string, fallback: number): number {
   const i = process.argv.indexOf('--' + name);
   if (i === -1) return fallback;
@@ -108,10 +136,13 @@ function fmtWeights(w: AIWeights): string {
 }
 
 function main() {
-  const popSize = parseArg('pop', 14);
+  const duel = process.argv.includes('--duel');
+  const popSize = parseArg('pop', duel ? 10 : 14);
   const gens = parseArg('gens', 7);
   const gamesPerGen = parseArg('games', 40);
-  const size = parseArg('size', 11);
+  // 1대1 에 11x11 은 너무 넓다 — 서로 만나기 전에 턴이 끝난다
+  const size = parseArg('size', duel ? 9 : 11);
+  const repeats = parseArg('repeats', 1);
   const rng = makeRng(parseArg('seed', 777));
 
   // 손으로 만든 성격들을 초기 집단에 섞어 기준선으로 쓴다
@@ -125,16 +156,19 @@ function main() {
     }
   }
 
-  console.log(
-    `자가대전 학습 — 집단 ${popSize} · ${gens}세대 · 세대당 ${gamesPerGen}판 · ${size}x${size}\n`
-  );
+  const mode = duel ? '1대1 전원 맞대결' : '5인 난전';
+  const perGen = duel
+    ? `쌍당 ${repeats * 2}판 (총 ${((popSize * (popSize - 1)) / 2) * repeats * 2}판)`
+    : `세대당 ${gamesPerGen}판`;
+  console.log(`자가대전 학습 — ${mode} · 집단 ${popSize} · ${gens}세대 · ${perGen} · ${size}x${size}\n`);
 
   for (let g = 1; g <= gens; g++) {
     for (const m of pop) {
       m.wins = 0;
       m.played = 0;
     }
-    for (let i = 0; i < gamesPerGen; i++) playRound(pop, rng, size);
+    if (duel) roundRobinDuel(pop, rng, size, repeats);
+    else for (let i = 0; i < gamesPerGen; i++) playRound(pop, rng, size);
 
     pop.sort((a, b) => winRate(b) - winRate(a));
     const top = pop.slice(0, Math.max(2, Math.floor(popSize / 3)));
@@ -171,22 +205,44 @@ function main() {
   console.log(`\n최종 1위: ${best.label}`);
   console.log(fmtWeights(best.w));
 
-  // 검증 — 학습된 가중치를 손으로 만든 성격 4종과 붙인다
-  console.log('\n검증: 학습 결과 vs 손으로 만든 성격 4종');
   const challengers = ['확장형', '공격형', '수비형', '균형'];
+
+  if (duel) {
+    // 1대1 검증 — 상대마다 자리를 바꿔 각각 붙인다
+    console.log('\n검증 1: 1대1, 손으로 만든 성격 4종 각각과');
+    const per = 40;
+    let allWins = 0;
+    let allGames = 0;
+    for (const c of challengers) {
+      const vrng = makeRng(31337);
+      let wins = 0;
+      for (let i = 0; i < per; i++) {
+        // 짝수 판은 0번 자리, 홀수 판은 1번 자리
+        const first = i % 2 === 0;
+        const roster = first ? [best.w, PERSONALITIES[c]] : [PERSONALITIES[c], best.w];
+        const r = playGame(roster, size, size, vrng, 180);
+        if (r.winner === (first ? 0 : 1)) wins++;
+      }
+      allWins += wins;
+      allGames += per;
+      console.log(`  vs ${c.padEnd(4)} ${((wins / per) * 100).toFixed(1)}%  (${wins}/${per})`);
+    }
+    console.log(`  종합 ${((allWins / allGames) * 100).toFixed(1)}%  (무작위 기준선 50%)`);
+  }
+
+  // 5인 게임으로의 전이 검증 — 1대1로 배운 게 난전에서도 통하는지
+  console.log('\n검증 2: 5인 게임 (학습 결과 + 손으로 만든 4종)');
+  const bigSize = 11;
   const verifyGames = 60;
   const vrng = makeRng(31337);
   let bestWins = 0;
   for (let i = 0; i < verifyGames; i++) {
     const roster = [best.w, ...challengers.map((c) => PERSONALITIES[c])];
-    const r = playGame(roster, size, size, vrng, 180);
+    const r = playGame(roster, bigSize, bigSize, vrng, 180);
     if (r.winner === 0) bestWins++;
   }
   console.log(
     `학습 AI 승률 ${((bestWins / verifyGames) * 100).toFixed(1)}%  (5자리 게임, 무작위 기준선 20%)`
-  );
-  console.log(
-    '\n비교용 — 손으로 만든 확장형이 같은 조건에서 얼마나 이겼는지는 npm run sim:game -- --tournament 참고'
   );
 }
 
