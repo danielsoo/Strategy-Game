@@ -28,6 +28,7 @@ import {
   startFort,
   recruit,
   commandLimit,
+  defenseOptions,
   canMoveTo,
   canAttackFrom,
   merchantDestinations,
@@ -40,6 +41,23 @@ import {
 } from './rules';
 import { vassalize } from './vassals';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
+import { DefenseChoice } from './defense';
+
+/**
+ * 사람이 수비할 차례라 AI 턴을 멈추고 물어봐야 할 때 내보내는 것.
+ *
+ * AI 는 규칙으로 즉시 정하지만 사람은 눌러야 정해진다. 엔진은 동기라서
+ * 기다릴 수가 없으니, AI 턴 자체를 제너레이터로 만들어 그 자리에서 양보한다.
+ */
+export interface DefenseRequest {
+  fromId: string;
+  toId: string;
+  options: DefenseChoice[];
+  attackerUnits: number;
+  defenderUnits: number;
+  myPower: number;
+  theirPower: number;
+}
 
 export interface AIWeights {
   territory: number;
@@ -672,14 +690,21 @@ export function chooseVassalOrAnnex(
   return annexGain >= tributeGain ? 'annex' : 'vassalize';
 }
 
-export function takeAITurn(
+/**
+ * AI 한 나라의 턴. 사람이 수비할 차례가 오면 그 자리에서 멈추고 선택을 받는다.
+ *
+ * 시뮬레이터는 takeAITurn() 으로 끝까지 돌리면 되고, 화면만 이 제너레이터를
+ * 직접 몬다.
+ */
+export function* takeAITurnGen(
   state: GameState,
   nationId: number,
   w: AIWeights,
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY,
-  policy?: Policy
-): AITurnLog {
+  policy?: Policy,
+  defenseNoise = 0
+): Generator<DefenseRequest, AITurnLog, DefenseChoice | undefined> {
   const moved = new Set<string>();
   const log: AITurnLog = { attacks: [], recruited: 0, fortsStarted: 0, moved };
 
@@ -783,7 +808,25 @@ export function takeAITurn(
     if (best.kind === 'attack') {
       const wasCastle = best.target.castle;
       const victim = best.target.owner;
-      const out = performAttack(state, c, best.target, rng, eco);
+      // 사람이 지키는 칸이면 여기서 멈추고 물어본다
+      let forced: DefenseChoice | undefined;
+      const victimNation = best.target.owner;
+      if (victimNation !== null && !best.target.neutral && state.nations[victimNation]?.isHuman) {
+        const info = defenseOptions(state, c, best.target, eco);
+        if (info.options.length > 1) {
+          forced =
+            (yield {
+              fromId: c.id,
+              toId: best.target.id,
+              options: info.options,
+              attackerUnits: c.units,
+              defenderUnits: best.target.units,
+              myPower: info.myPower,
+              theirPower: info.theirPower,
+            }) ?? undefined;
+        }
+      }
+      const out = performAttack(state, c, best.target, rng, eco, forced, defenseNoise);
       log.attacks.push(out);
 
       // 마지막 본진을 빼앗았다면 병합할지 속국으로 둘지 정한다
@@ -807,6 +850,26 @@ export function takeAITurn(
   }
 
   return log;
+}
+
+/**
+ * 제너레이터를 끝까지 몰아준다. 사람이 없는 판(시뮬레이터)에서는 멈출 일이
+ * 없으므로 예전과 똑같이 동작한다.
+ */
+export function takeAITurn(
+  state: GameState,
+  nationId: number,
+  w: AIWeights,
+  rng: RNG,
+  eco: EconomyConfig = DEFAULT_ECONOMY,
+  policy?: Policy,
+  defenseNoise = 0
+): AITurnLog {
+  const gen = takeAITurnGen(state, nationId, w, rng, eco, policy, defenseNoise);
+  let step = gen.next();
+  // 멈춰 서면 규칙대로 알아서 정한다
+  while (!step.done) step = gen.next(undefined);
+  return step.value;
 }
 
 export function bestTradeDestination(

@@ -71,7 +71,12 @@ export function decideDefense(
   theirPower: number,
   escape: Cell | null,
   rng: RNG,
-  eco: EconomyConfig = DEFAULT_ECONOMY
+  eco: EconomyConfig = DEFAULT_ECONOMY,
+  /**
+   * 이 확률로 최선이 아닌 선택을 한다. 난이도가 여기에도 들어간다 —
+   * 약한 AI 는 이길 싸움에서 도망가고 질 싸움에서 버틴다.
+   */
+  noise = 0
 ): DefenseChoice {
   // 중립 세력은 물러나지도 항복하지도 않는다. 잃을 나라가 없다.
   if (defender.neutral || defender.owner === null) return 'fight';
@@ -99,4 +104,25 @@ export function decideDefense(
 
   // 갈 곳이 없으면 싸우는 수밖에 없다
   return 'fight';
+}
+
+/** 난이도를 태운 수비 판단 */
+export function decideDefenseAt(
+  state: GameState,
+  attacker: Cell,
+  defender: Cell,
+  myPower: number,
+  theirPower: number,
+  escape: Cell | null,
+  rng: RNG,
+  eco: EconomyConfig,
+  noise: number
+): DefenseChoice {
+  const best = decideDefense(state, attacker, defender, myPower, theirPower, escape, rng, eco);
+  if (noise <= 0 || rng() >= noise) return best;
+  // 헷갈린 선택 — 할 수 있는 것 중 아무거나
+  const opts: DefenseChoice[] = ['fight'];
+  if (escape && !defender.castle && defender.fortStage !== 4 && !defender.neutral) opts.push('retreat');
+  if (defender.owner !== null && !defender.neutral && !defender.castle) opts.push('surrender');
+  return opts[Math.floor(rng() * opts.length)];
 }

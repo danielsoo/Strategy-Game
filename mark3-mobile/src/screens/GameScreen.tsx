@@ -65,7 +65,11 @@ import {
   AIWeights,
   chooseVassalOrAnnex,
   Policy,
+  takeAITurnGen,
+  DefenseRequest,
+  AITurnLog,
 } from '../engine/ai';
+import { DefenseChoice } from '../engine/defense';
 
 const PLAYER = 0;
 
@@ -310,6 +314,13 @@ function bump(s: GameState): GameState {
 }
 
 /** 지금 차례인 나라 하나를 AI 로 두고, 다음 살아있는 나라로 넘긴다. */
+/** 멈춰 선 것인지(사람에게 물어볼 차례인지) 가른다 */
+function isAsk(
+  r: IteratorResult<DefenseRequest, AITurnLog>
+): r is IteratorYieldResult<DefenseRequest> {
+  return !r.done;
+}
+
 /** AI 나라에만 수입 배수를 건다. 사람은 늘 1.0 이다. */
 function applyHandicap(s: GameState, mul: number): void {
   for (const nat of s.nations) nat.incomeMul = nat.id === PLAYER ? 1 : mul;
@@ -393,6 +404,14 @@ export default function GameScreen() {
   const aiPolicy = useMemo(() => difficultyPolicy(difficulty, rng), [difficulty, rng]);
   /** 마지막 본진을 빼앗았을 때의 처분 선택 */
   const [conquest, setConquest] = useState<{ victim: number; castleId: string } | null>(null);
+  /**
+   * 사람이 지키는 칸이 공격받는 중. AI 턴이 여기서 멈춰 서 있다.
+   *
+   * 엔진은 동기라 기다릴 수가 없어서 AI 턴을 제너레이터로 만들었다.
+   * 답을 받으면 멈춘 자리에서 이어 돌린다.
+   */
+  const [defenseAsk, setDefenseAsk] = useState<DefenseRequest | null>(null);
+  const pendingRef = useRef<{ gen: ReturnType<typeof takeAITurnGen>; idx: number } | null>(null);
   /**
    * 이번 턴에 이미 움직인 내 부대들 (부대가 도착한 칸의 id).
    * 제한이 없으면 한 부대로 맵을 가로지르며 연속 공격이 가능해 게임이 성립하지 않는다.
@@ -535,6 +554,84 @@ export default function GameScreen() {
     setSelected(null);
   };
 
+  /** 한 나라의 턴을 마친 뒤 공통으로 도는 것들 */
+  const finishNation = (s: GameState, i: number, moved: Set<string>) => {
+    restUnmoved(s, i, moved);
+    stepMerchants(s);
+    stepNeutrals(s, rng);
+    collectTribute(s);
+    updateLoyalty(s);
+    stepVoluntarySubmission(s, rng);
+    updateAliveFlags(s);
+    checkBlocVictory(s);
+  };
+
+  /** 한 바퀴를 마치고 사람 차례로 돌려놓는다 */
+  const finishRound = (s: GameState) => {
+    s.turn++;
+    s.current = PLAYER;
+    if (s.nations[PLAYER].alive && s.winner === null) beginTurn(s, PLAYER, rng);
+    actedRef.current = new Set();
+  };
+
+  /**
+   * AI 들을 차례로 돌린다. 사람에게 물어봐야 하면 거기서 멈추고 false 를 준다.
+   * 답이 오면 같은 함수를 resume 과 함께 다시 부른다.
+   */
+  const runAI = (
+    s: GameState,
+    from: number,
+    resume?: { gen: ReturnType<typeof takeAITurnGen>; idx: number },
+    answer?: DefenseChoice
+  ): boolean => {
+    const n = s.nations.length;
+    let i = resume ? resume.idx : from;
+    let gen = resume?.gen ?? null;
+
+    for (; i < n; i++) {
+      if (!s.nations[i].alive || s.winner !== null) {
+        gen = null;
+        continue;
+      }
+      if (!gen) {
+        s.current = i;
+        beginTurn(s, i, rng);
+        gen = takeAITurnGen(
+          s,
+          i,
+          AI_WEIGHTS[i] ?? PERSONALITIES['균형'],
+          rng,
+          undefined,
+          aiPolicy,
+          difficulty.noise
+        );
+      }
+      const step: IteratorResult<DefenseRequest, AITurnLog> = gen.next(answer);
+      answer = undefined;
+      if (isAsk(step)) {
+        pendingRef.current = { gen, idx: i };
+        setDefenseAsk(step.value);
+        return false;
+      }
+      finishNation(s, i, step.value.moved);
+      gen = null;
+    }
+    return true;
+  };
+
+  /** 사람이 고른 답을 넣고 멈춘 자리에서 이어 돌린다 */
+  const answerDefense = (choice: DefenseChoice) => {
+    const pending = pendingRef.current;
+    setDefenseAsk(null);
+    pendingRef.current = null;
+    if (!pending) return;
+    setState((prev) => {
+      if (runAI(prev, pending.idx, pending, choice)) finishRound(prev);
+      recomputeVision(prev, PLAYER);
+      return bump(prev);
+    });
+  };
+
   const endTurn = () => {
     setSelected(null);
     setState((prev) => {
@@ -549,34 +646,9 @@ export default function GameScreen() {
       updateAliveFlags(prev);
       checkBlocVictory(prev);
       prev.current = PLAYER;
-      // 사람 차례를 마친 뒤 AI 들을 차례로 돌린다
-      const n = prev.nations.length;
-      for (let i = 1; i < n; i++) {
-        prev.current = i;
-        if (prev.nations[i].alive && prev.winner === null) {
-          beginTurn(prev, i, rng);
-          const log = takeAITurn(
-            prev,
-            i,
-            AI_WEIGHTS[i] ?? PERSONALITIES['균형'],
-            rng,
-            undefined,
-            aiPolicy
-          );
-          restUnmoved(prev, i, log.moved);
-          stepMerchants(prev);
-          stepNeutrals(prev, rng);
-          collectTribute(prev);
-          updateLoyalty(prev);
-          stepVoluntarySubmission(prev, rng);
-          updateAliveFlags(prev);
-          checkBlocVictory(prev);
-        }
-      }
-      prev.turn++;
-      prev.current = PLAYER;
-      if (prev.nations[PLAYER].alive && prev.winner === null) beginTurn(prev, PLAYER, rng);
-      actedRef.current = new Set();
+      // 사람 차례를 마친 뒤 AI 들을 차례로 돌린다.
+      // 사람이 지키는 칸이 공격받으면 여기서 멈추고 물어본다.
+      if (runAI(prev, 1)) finishRound(prev);
       return bump(prev);
     });
   };
@@ -1048,6 +1120,60 @@ export default function GameScreen() {
               <Text style={styles.btnText}>시작</Text>
             </TouchableOpacity>
           </View>
+        </View>
+      </Modal>
+
+      {/* 내 부대가 공격받는 중 — 맞설까, 물러날까, 항복할까 */}
+      <Modal visible={!!defenseAsk} transparent animationType="fade">
+        <View style={styles.overlay}>
+          {defenseAsk && (
+            <View style={styles.modal}>
+              <Text style={styles.modalTitle}>⚔️ 공격받는 중</Text>
+              <Text style={styles.hint}>
+                적 {defenseAsk.attackerUnits}명이 내 {defenseAsk.defenderUnits}명을 친다 · 전력비{' '}
+                {(defenseAsk.myPower / Math.max(0.001, defenseAsk.theirPower)).toFixed(2)}
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
+                onPress={() => answerDefense('fight')}
+              >
+                <Text style={styles.btnText}>맞서 싸운다</Text>
+              </TouchableOpacity>
+              <Text style={styles.helpBody}>
+                사기가 꺾이는 쪽이 무너진다. 지형과 요새, 옆에 붙은 아군이 거든다.
+              </Text>
+
+              {defenseAsk.options.includes('retreat') && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.modeBtn, { marginTop: 10 }]}
+                    onPress={() => answerDefense('retreat')}
+                  >
+                    <Text style={styles.btnText}>물러난다</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.helpBody}>
+                    칸은 내주지만 병력의 일부가 옆으로 빠진다. 연달아 물러날수록 더 많이 잃는다.
+                  </Text>
+                </>
+              )}
+
+              {defenseAsk.options.includes('surrender') && (
+                <>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.resetBtn, { marginTop: 10 }]}
+                    onPress={() => answerDefense('surrender')}
+                  >
+                    <Text style={styles.btnText}>항복한다</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.helpBody}>
+                    포로의 운명은 상대의 평판이 정한다 — 공포가 높으면 처형하고, 정의가 높으면
+                    자기 군대로 받아들인다.
+                  </Text>
+                </>
+              )}
+            </View>
+          )}
         </View>
       </Modal>
 

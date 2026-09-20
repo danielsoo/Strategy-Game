@@ -24,7 +24,13 @@ import {
   Terrain,
 } from './types';
 import { createVision, recomputeVision } from './vision';
-import { decideDefense, retreatSurvivors, surrenderOutcome, DefenseChoice } from './defense';
+import {
+  decideDefense,
+  decideDefenseAt,
+  retreatSurvivors,
+  surrenderOutcome,
+  DefenseChoice,
+} from './defense';
 
 // ─────────────────────────────────────────────────────────────
 // 격자 조회
@@ -680,12 +686,38 @@ function emptyCombat(defBefore: number, attSurvivors: number): DetailedCombatRes
   };
 }
 
+/**
+ * 수비자가 고를 수 있는 것들. 사람에게 물어보려면 먼저 이걸 알아야 한다.
+ */
+export function defenseOptions(
+  state: GameState,
+  from: Cell,
+  to: Cell,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): { options: DefenseChoice[]; escape: Cell | null; myPower: number; theirPower: number } {
+  const escape = retreatSpot(state, to, from);
+  const options: DefenseChoice[] = ['fight'];
+  const fixed = to.castle || to.fortStage === 4 || !!to.neutral || to.owner === null;
+  if (!fixed && escape) options.push('retreat');
+  if (!fixed) options.push('surrender');
+  return {
+    options,
+    escape,
+    myPower: cellPower(to, true) + flankingSupport(state, to, to, eco),
+    theirPower: cellPower(from, false) + flankingSupport(state, to, from, eco),
+  };
+}
+
 export function performAttack(
   state: GameState,
   from: Cell,
   to: Cell,
   rng: RNG,
-  eco: EconomyConfig = DEFAULT_ECONOMY
+  eco: EconomyConfig = DEFAULT_ECONOMY,
+  /** 수비자의 선택을 밖에서 정해줄 때 (사람이 고른 경우) */
+  forced?: DefenseChoice,
+  /** 수비 판단에 섞을 잡음 — 난이도 */
+  defenseNoise = 0
 ): AttackOutcome {
   // 접촉 전투도 행군을 먹는다. 다만 제자리에서 맞붙는 것이 행군보다는 수월하니
   // 절반만 문다. 이게 없으면 대군은 느려도 전투는 그대로라 반쪽짜리 규칙이 된다.
@@ -700,16 +732,19 @@ export function performAttack(
 
   // 맞는 쪽이 먼저 정한다 — 맞설까, 물러날까, 항복할까.
   const escape = retreatSpot(state, to, from);
-  const choice = decideDefense(
-    state,
-    from,
-    to,
-    cellPower(to, true) + defSupport,
-    cellPower(from, false) + attSupport,
-    escape,
-    rng,
-    eco
-  );
+  const choice =
+    forced ??
+    decideDefenseAt(
+      state,
+      from,
+      to,
+      cellPower(to, true) + defSupport,
+      cellPower(from, false) + attSupport,
+      escape,
+      rng,
+      eco,
+      defenseNoise
+    );
 
   if (choice !== 'fight') {
     return resolveWithoutBattle(state, from, to, choice, escape, powerRatio, eco);
