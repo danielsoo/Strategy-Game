@@ -57,6 +57,7 @@ import {
   isVisible,
   isExplored,
   isFoeCell,
+  cellPower,
   knownCell,
   findPath,
   nextStep,
@@ -622,7 +623,7 @@ export default function GameScreen() {
             setState((prev) => {
               const from = prev.cells.find((c) => c.id === selectedCell.id);
               if (from) from.order = { destId: cell.id, age: 0 };
-              const halted = advanceGotos(prev, actedRef.current);
+              const halted = advanceGotos(prev, actedRef.current, selectedCell.id);
               if (halted.length > 0) haltedRef.current = halted[0];
               return bump(prev);
             });
@@ -685,17 +686,38 @@ export default function GameScreen() {
    * 골라준다 — 싸울지 돌아갈지는 사람이 정할 일이지, 알아서 밀고 들어갈
    * 일이 아니다. 이게 정찰을 도박으로 만든다.
    *
+   * freshId 는 방금 명령을 받은 부대다. 이 부대에게는 '옆에 적이 있으면
+   * 출발도 안 한다'를 적용하지 않는다. 판에는 중립 세력이 널려 있어서
+   * 그 규칙을 그대로 두면 두 번 눌러도 아무 일이 안 일어나고, 사람 눈에는
+   * 버튼이 고장난 것으로 보인다. 방금 사람이 직접 고른 길이니 첫 걸음은 뗀다.
+   *
    * 멈춰 세운 부대들의 칸을 돌려준다.
    */
-  const advanceGotos = (s: GameState, acted: Set<string>): string[] => {
+  const advanceGotos = (s: GameState, acted: Set<string>, freshId?: string): string[] => {
     const queued = s.cells
       .filter((c) => c.owner === PLAYER && c.units > 0 && !c.neutral && c.order)
       .map((c) => c.id);
     const halted: string[] = [];
 
-    /** 이 칸 옆에 지금 보이는 적이 있는가 */
-    const foeBeside = (at: Cell) =>
-      neighbors(s, at).some((n) => isVisible(s, PLAYER, n) && isFoeCell(s, PLAYER, n));
+    /**
+     * 이 칸 옆에 행군을 멈춰 세울 만한 것이 있는가.
+     *
+     * 처음엔 '적이 하나라도 옆에 있으면' 으로 뒀다가 직접 해보고 고쳤다.
+     * 판에는 중립 세력이 널려 있어서(331칸에 서른 남짓) 그 규칙이면 열한 칸을
+     * 가는 동안 예닐곱 번 멈춘다. 도적 떼 셋이 옆에 섰다고 여섯 명짜리 대열이
+     * 행군을 접지는 않는다.
+     *
+     * 그래서 '나를 어떻게 할 수 있는 것'만 센다 — 나라의 군대는 전쟁이니
+     * 무조건이고, 중립은 내 힘의 절반은 되어야 걸음을 멈출 값이 된다.
+     */
+    const foeBeside = (at: Cell) => {
+      const mine = cellPower(at, false);
+      return neighbors(s, at).some((n) => {
+        if (!isVisible(s, PLAYER, n) || !isFoeCell(s, PLAYER, n)) return false;
+        if (!n.neutral) return true;
+        return cellPower(n, false) >= mine * 0.5;
+      });
+    };
 
     for (const id of queued) {
       let c = s.cells.find((x) => x.id === id);
@@ -708,8 +730,9 @@ export default function GameScreen() {
         continue;
       }
 
-      // 출발하기 전에 이미 적이 옆에 있으면 여기서부터 사람이 정한다
-      if (foeBeside(c)) {
+      // 출발하기 전에 이미 적이 옆에 있으면 여기서부터 사람이 정한다.
+      // 다만 방금 받은 명령은 예외다 — 사람이 그걸 보고 고른 것이다.
+      if (c.id !== freshId && foeBeside(c)) {
         c.order = undefined;
         halted.push(c.id);
         pushLog(s, '적이 코앞이라 행군을 멈췄습니다');

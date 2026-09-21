@@ -180,7 +180,16 @@ function main() {
   const criteria: Criterion[] = [
     judge('하네스 공정성 (자리 편차)', fair.worstSeat, '< 5%p', fair.worstSeat < 0.05),
     judge('결정성 (턴제한 도달)', fair.limitRate, '< 20%', fair.limitRate < 0.2),
-    judge('게임 길이', fair.avgTurns, '80~150턴', fair.avgTurns >= 80 && fair.avgTurns <= 150, (v) =>
+    /*
+      게임 길이 밴드는 내가 근거 없이 80~150 으로 잡아둔 것이었고, 직접
+      해보니 틀렸다. 21x21 을 한 판 두니 22턴에 331칸이 다섯 나라로 다 갈리고
+      41턴에 영향력 승리로 끝났다 — 늘어지지 않고 비어 있지도 않았다.
+      11x11 은 30턴대에 끝난다. 그런데 밴드는 둘 다 '미달' 이라고 했다.
+
+      늘어지는지는 '턴제한 도달' 이 이미 본다. 여기서 볼 것은 판이 시작하자마자
+      끝나지 않는가뿐이다. 그래서 아래를 25 로 내리고 위는 남긴다.
+    */
+    judge('게임 길이', fair.avgTurns, '25~150턴', fair.avgTurns >= 25 && fair.avgTurns <= 150, (v) =>
       v.toFixed(1) + '턴'
     ),
     judge('전투의 의미 (게임당 공격)', fair.atkPerGame, '≥ 8회', fair.atkPerGame >= 8, (v) =>
