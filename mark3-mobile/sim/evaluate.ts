@@ -15,7 +15,8 @@
 
 import { makeRng } from '../src/services/combatSystem';
 import { playGame } from './gameSim';
-import { PERSONALITIES, AIWeights, LEARNED_WEIGHTS } from '../src/engine/ai';
+import { PERSONALITIES, AIWeights, LEARNED_WEIGHTS, LEARNED_PROVENANCE } from '../src/engine/ai';
+import { rulesStamp, checkProvenance } from '../src/engine/stamp';
 import { Recorder, LogLevel } from './recorder';
 
 const pct = (v: number) => (v * 100).toFixed(1) + '%';
@@ -172,6 +173,18 @@ function main() {
   const rec = new Recorder(level);
 
   console.log(`본 평가 — ${size}x${size} · 시드 ${seeds.join(', ')}`);
+
+  /*
+    이 가중치가 지금 규칙에서 나온 것인가.
+
+    규칙을 건드릴 때마다 다시 학습하면 끝이 없다. 그렇다고 기억에 맡기면
+    옛 규칙에서 뽑은 값을 그대로 쓰게 된다. 언제 다시 해야 하는지를 사람이
+    아니라 하네스가 기억하게 한다.
+  */
+  const stale = checkProvenance(LEARNED_PROVENANCE);
+  console.log(
+    `규칙 도장 ${rulesStamp()}` + (stale ? `  ⚠ ${stale}` : `  (가중치와 같은 규칙)`)
+  );
   if (rec.enabled) console.log(`기록 수준: ${level}`);
 
   const fair = fairnessRun(games, seeds, size, rec);

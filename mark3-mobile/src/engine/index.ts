@@ -5,3 +5,4 @@ export * from './vassals';
 export * from './vision';
 export * from './orders';
 export * from './path';
+export * from './stamp';

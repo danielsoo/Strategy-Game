@@ -45,6 +45,7 @@ import {
 import { vassalize, vassalsOf } from './vassals';
 import { issueOrder, punishVassal } from './orders';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
+import { FitProvenance } from './stamp';
 import { DefenseChoice } from './defense';
 
 /**
@@ -202,6 +203,23 @@ export const LEARNED_WEIGHTS: AIWeights = {
 };
 
 PERSONALITIES['학습형'] = LEARNED_WEIGHTS;
+/**
+ * 이 값이 어느 규칙에서 나왔는가.
+ *
+ * 가중치는 규칙의 함수다. 행정비 식을 바꾸고 거리 기준을 바꿨으면 예전 값은
+ * 옛 게임의 정답이다. 그런데 파일만 봐서는 그걸 알 수 없어서, 불안한 마음에
+ * 규칙을 조금만 건드려도 다시 학습을 돌리게 된다 — 그게 며칠을 먹는다.
+ *
+ * 그래서 도장을 같이 적어둔다(stamp.ts). 하네스가 지금 규칙과 견줘 다르면
+ * 한 줄로 알려주고, 다시 돌릴지는 그때 정한다. 적어도 모르고 지나치지는 않는다.
+ */
+export const LEARNED_PROVENANCE: FitProvenance = {
+  stamp: '0be0f9d6',
+  fittedAt: '2026-09-18',
+  sizes: [11],
+  note: '약탈·속국·초선형 행정비까지 반영한 자가대전. 그 뒤 거리 환산·승리 문턱·행정비 식이 바뀌었다.',
+};
+
 
 /**
  * 판 크기에 따라 가중치를 바꿔봤다가 되돌렸다. 기록해 둔다 — 안 그러면 또 한다.
@@ -733,6 +751,25 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
       const eff = cellEfficiency(n, ctx.hubs, ctx.eco);
       // 안개를 걷는 것 자체가 값어치다. 모르는 곳은 위험이자 기회다.
+      /*
+        모르는 곳이 얼마나 걸려 있나. 반경 2 는 박힌 값이고, 이걸 판 크기에
+        맞춰 키워봤다가 되돌렸다.
+
+        시야는 판이 커지면 같이 넓어지는데(vision.ts visionScale) 이 반경은
+        안 그랬다. 21x21 에서는 부대 시야가 4 라 반경 2 안은 이미 다 밝혀져
+        있고, 그래서 이 항이 늘 0 이었다 — explore 를 0 으로 두든 3 으로 두든
+        게임이 한 판도 안 달라졌다(11x11 에서는 첫 발견이 7.4 → 6.0턴으로
+        줄어드는데).
+
+        반경을 시야에 맞춰 키우니 손잡이는 살아났다(0 → 16.9턴/227칸,
+        3 → 10.2턴/290칸). 그런데 판정이 6/6 에서 4/6 으로 내려갔다 —
+        수비형 29.9 → 36.6%, 집중형 7.5 → 4.5%. 다들 더 많이 밝히니 빈 땅을
+        먼저 줍는 쪽이 더 이득을 봤다.
+
+        죽어 있던 이 항이 사실상 균형추 노릇을 하고 있었던 셈이다. 손잡이를
+        살리는 것 자체가 목적은 아니므로 2 로 둔다. 큰 판의 정찰은 이미
+        scoutTarget 이 맡는다.
+      */
       const scout = w.explore * unexploredCount(ctx.state, ctx.me, n, 2) * 0.6;
       const fresh = n.owner !== ctx.me ? 1.5 : 0.2;
       const gain = w.expansion * w.territory * (2 * eff - 0.4) * fresh + positionValue(ctx, n);

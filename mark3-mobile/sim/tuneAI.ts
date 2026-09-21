@@ -13,7 +13,7 @@
 
 import { makeRng, RNG } from '../src/services/combatSystem';
 import { playGame } from './gameSim';
-import { AIWeights, BASE_WEIGHTS, PERSONALITIES } from '../src/engine/ai';
+import { AIWeights, BASE_WEIGHTS, PERSONALITIES, LEARNED_WEIGHTS } from '../src/engine/ai';
 
 /** 각 가중치의 탐색 범위 */
 const BOUNDS: Record<keyof AIWeights, [number, number]> = {
@@ -77,23 +77,34 @@ function winRate(m: Member): number {
   return m.played === 0 ? 0 : m.wins / m.played;
 }
 
-/** 집단에서 5명을 뽑아 한 판 시키고 승패를 기록한다 */
-function playRound(pop: Member[], rng: RNG, size: number, seats = 5): void {
-  const n = Math.min(seats, pop.length);
-  const picked: number[] = [];
-  while (picked.length < n) {
-    const i = Math.floor(rng() * pop.length);
-    if (!picked.includes(i)) picked.push(i);
+/**
+ * 후보 하나를 고정된 상대 넷 사이에 앉혀 한 판 시킨다.
+ *
+ * 예전에는 집단에서 다섯을 뽑아 자기들끼리 겨루게 했다. 그러면 세 세대만에
+ * 집단 전체가 한 핏줄이 되고(전부 '수비형+...'), 그 안에서 1등 한 값이
+ * 밖에 나가면 손으로 만든 성격들에게 기준선 아래로 진다 — 실제로 16.7%
+ * (기준선 20%) 가 나왔다. 자기 자손하고만 겨루면 그 구석의 왕이 될 뿐이다.
+ *
+ * 상대를 고정하면 점수가 세대끼리 견줄 수 있는 값이 되고, 우리가 정말
+ * 원하는 것(다양한 상대에게 강한가)을 바로 잰다.
+ */
+function playRound(
+  pop: Member[],
+  rng: RNG,
+  size: number,
+  foes: AIWeights[],
+  seats = 5
+): void {
+  const i = Math.floor(rng() * pop.length);
+  const seat = Math.floor(rng() * seats);
+  const roster: AIWeights[] = [];
+  let f = 0;
+  for (let k = 0; k < seats; k++) {
+    roster.push(k === seat ? pop[i].w : foes[f++ % foes.length]);
   }
-  const r = playGame(
-    picked.map((i) => pop[i].w),
-    size,
-    size,
-    rng,
-    180
-  );
-  for (const i of picked) pop[i].played++;
-  if (r.winner !== null) pop[picked[r.winner]].wins++;
+  const r = playGame(roster, size, size, rng, 180);
+  pop[i].played++;
+  if (r.winner === seat) pop[i].wins++;
 }
 
 /**
@@ -135,13 +146,51 @@ function fmtWeights(w: AIWeights): string {
   return KEYS.map((k) => `${k}=${w[k].toFixed(2)}`).join(' ');
 }
 
+/**
+ * 고정 상대. 손으로 만든 성격 넷과 지금 쓰고 있는 학습 가중치.
+ * 이 다섯을 이겨야 바꿀 값어치가 있다.
+ */
+const REFERENCE: AIWeights[] = [
+  PERSONALITIES['확장형'],
+  PERSONALITIES['수비형'],
+  PERSONALITIES['공격형'],
+  PERSONALITIES['경제형'],
+  LEARNED_WEIGHTS,
+];
+
+/** --sizes 11,21 · 없으면 --size · 그것도 없으면 기본값 */
+function parseSizes(fallback: number[]): number[] {
+  const i = process.argv.indexOf('--sizes');
+  if (i !== -1 && process.argv[i + 1]) {
+    const list = process.argv[i + 1]
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((x) => Number.isFinite(x) && x >= 7);
+    if (list.length > 0) return list;
+  }
+  const one = process.argv.indexOf('--size');
+  if (one !== -1 && Number.isFinite(Number(process.argv[one + 1]))) {
+    return [Number(process.argv[one + 1])];
+  }
+  return fallback;
+}
+
 function main() {
   const duel = process.argv.includes('--duel');
   const popSize = parseArg('pop', duel ? 10 : 14);
   const gens = parseArg('gens', 7);
   const gamesPerGen = parseArg('games', 40);
-  // 1대1 에 11x11 은 너무 넓다 — 서로 만나기 전에 턴이 끝난다
-  const size = parseArg('size', duel ? 9 : 11);
+  /*
+    판 크기를 번갈아 쓴다.
+
+    한 크기에서만 뽑으면 그 크기의 정답이 나온다. 11x11 에서 뽑은 값이
+    21x21 에서 바닥이었던 게 바로 그것이었고, 거리·행정비를 판 크기로
+    환산한 지금도 '어느 판에서 재느냐'는 여전히 답을 가른다.
+
+    --sizes 11,21 처럼 준다. --size 로 하나만 줘도 된다.
+  */
+  const sizes = parseSizes(duel ? [9] : [11, 21]);
+  const size = sizes[0];
   const repeats = parseArg('repeats', 1);
   const rng = makeRng(parseArg('seed', 777));
 
@@ -160,15 +209,39 @@ function main() {
   const perGen = duel
     ? `쌍당 ${repeats * 2}판 (총 ${((popSize * (popSize - 1)) / 2) * repeats * 2}판)`
     : `세대당 ${gamesPerGen}판`;
-  console.log(`자가대전 학습 — ${mode} · 집단 ${popSize} · ${gens}세대 · ${perGen} · ${size}x${size}\n`);
+  console.log(`자가대전 학습 — ${mode} · 집단 ${popSize} · ${gens}세대 · ${perGen} · 판 ${sizes.join("·")}\n`);
+
+  /*
+    한 세대에 한 명이 몇 판이나 두는가.
+
+    두 번 돌려보고 알았다. 60판을 12명이 나누면 1인당 5판이다. 5판에서 나온
+    승률은 실력이 아니라 운이고, 그걸로 고르면 혈통이 운을 따라 표류한다.
+    실제로 세대별 1위 승률이 50 → 25 → 57 → 100% 로 튀었고, 두 번 다 결과가
+    손으로 만든 성격들에게 기준선 아래로 졌다(16.7% · 15.0%, 기준선 20%).
+
+    그래서 너무 얇으면 크게 알려준다. 돌리지 말라는 게 아니라, 이 숫자를
+    보고 고른 값은 믿을 수 없다는 것을 알고 있으라는 뜻이다.
+  */
+  const perMember = gamesPerGen / popSize;
+  if (!duel && perMember < 25) {
+    console.log(
+      `⚠ 1인당 ${perMember.toFixed(1)}판이다. 이 표본으로는 실력이 아니라 운을 고른다.`
+    );
+    console.log(
+      `  집단 ${popSize} 이면 --games ${popSize * 25} 이상이어야 세대끼리 견줄 만하다.
+`
+    );
+  }
 
   for (let g = 1; g <= gens; g++) {
     for (const m of pop) {
       m.wins = 0;
       m.played = 0;
     }
-    if (duel) roundRobinDuel(pop, rng, size, repeats);
-    else for (let i = 0; i < gamesPerGen; i++) playRound(pop, rng, size);
+    // 세대마다 판 크기를 돌린다 — 한 크기에 맞춰 굳는 것을 막는다
+    const genSize = sizes[(g - 1) % sizes.length];
+    if (duel) roundRobinDuel(pop, rng, genSize, repeats);
+    else for (let i = 0; i < gamesPerGen; i++) playRound(pop, rng, genSize, REFERENCE);
 
     pop.sort((a, b) => winRate(b) - winRate(a));
     const top = pop.slice(0, Math.max(2, Math.floor(popSize / 3)));
