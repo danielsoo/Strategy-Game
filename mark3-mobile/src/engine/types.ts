@@ -232,6 +232,13 @@ export interface EconomyConfig {
   loyaltyPowerBonus: number;
   /** 승리 판정에서 속국 영토를 직할 영토의 몇 배로 치는가 */
   vassalInfluenceWeight: number;
+  /**
+   * 압도적 우위 승리의 문턱 — 차지된 땅 중 몇 할을 쥐어야 하는가.
+   *
+   * 0 이면 이 승리를 아예 끈다. 그러면 이기는 길은 '모두를 한 진영으로'
+   * 뿐이고, 그건 남의 본진을 털어 병합하거나 속국으로 삼는다는 뜻이다.
+   */
+  dominanceShare: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
   /**
@@ -339,6 +346,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyDecayConquest: 1.2,
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
+  dominanceShare: 0.8,
   voluntarySubmitChance: 0.12,
   flankSupport: 0.42,
   visionRadiusUnit: 2,

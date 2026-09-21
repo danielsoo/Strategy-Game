@@ -37,6 +37,7 @@ const KEYS: Array<keyof EconomyConfig> = [
   'tributeRateConquest',
   'tributeRateVoluntary',
   'vassalInfluenceWeight',
+  'dominanceShare',
   'plunderCellShare',
   'plunderFortShare',
   'plunderCastleShare',

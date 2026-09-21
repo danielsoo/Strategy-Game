@@ -182,7 +182,7 @@ export function playGame(
       stepRebellion(state, rng, eco);
       stepVoluntarySubmission(state, rng, eco);
       updateAliveFlags(state);
-      checkBlocVictory(state);
+      checkBlocVictory(state, eco);
       if (state.winner !== null) {
         if (record) snapshots.push(turnSnapshot(state, logCursor));
         return finish(turn, state.winner);

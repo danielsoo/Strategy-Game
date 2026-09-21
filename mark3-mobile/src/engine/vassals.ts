@@ -256,7 +256,9 @@ export function checkBlocVictory(
     .sort((a, b) => b.inf - a.inf);
   const top = scores[0];
   const second = scores[1];
-  const bar = Math.max(claimed * 0.6, total * 0.2);
+  // 0 이면 이 승리는 없다 — 본진을 털어야만 이긴다
+  if (eco.dominanceShare <= 0) return;
+  const bar = Math.max(claimed * eco.dominanceShare, total * 0.2);
   if (top && top.inf >= bar && (!second || top.inf >= second.inf * 2.5)) {
     state.winner = top.id;
     state.winReason = `영향력 ${top.inf.toFixed(0)} — 차지된 땅의 절반을 넘기고 2위를 두 배 이상 앞섰습니다`;
