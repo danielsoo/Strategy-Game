@@ -11,6 +11,8 @@ import {
   Platform,
 } from 'react-native';
 import Board3D from './Board3D';
+import { encodeSave, decodeSave, describeSave } from '../engine/save';
+import { readSave, writeSave, clearSave } from '../services/saveStore';
 import { DIFFICULTIES, difficultyPolicy } from '../engine/difficulty';
 import Svg, { Polygon, Polyline } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
@@ -615,6 +617,59 @@ export default function GameScreen() {
     placing, pathTo, myTurn, state, readyCastles,
   ]);
 
+  /**
+   * 저장. 턴이 바뀔 때마다 조용히 덮어쓴다.
+   *
+   * 따로 '저장' 단추를 두지 않았다. 21x21 한 판이 예순 턴을 넘기는데 저장을
+   * 사람 손에 맡기면 반드시 잊는다. 되돌리기가 있는 게임이 아니라 매 턴이
+   * 그대로 이어지는 게임이니, 마지막 판 하나만 붙들고 있으면 된다.
+   *
+   * 이긴 판은 저장하지 않는다 — 이어하기를 눌렀는데 이미 끝난 판이 열리면
+   * 그건 저장이 아니라 고장이다.
+   */
+  const [saveFailed, setSaveFailed] = useState(false);
+  useEffect(() => {
+    /*
+      시작 화면이 떠 있는 동안은 저장하지 않는다.
+      앱을 켜면 기본 판이 먼저 만들어지고, 사람이 '이어하기'를 고르기도 전에
+      그 1턴짜리 판이 저장을 덮어쓴다. 실제로 그렇게 5턴짜리 판을 날렸다.
+    */
+    if (showHelp) return;
+    if (state.winner !== null) {
+      // 끝난 판을 남겨두면 이어하기가 이미 끝난 판을 연다
+      clearSave();
+      return;
+    }
+    const ok = writeSave(
+      encodeSave(state, {
+        modeIdx,
+        sizeIdx,
+        diffIdx,
+        acted: [...actedRef.current],
+      })
+    );
+    if (!ok) setSaveFailed(true);
+  }, [state.turn, state.winner, showHelp]);
+
+  /** 켤 때 한 번만 본다. 이어할 판이 있으면 시작 화면에서 물어본다. */
+  const [resumable] = useState(() => decodeSave(readSave()));
+
+  const resumeSaved = () => {
+    // 켤 때 읽어둔 것을 쓴다. 지금 다시 읽으면 그 사이에 덮어써졌을 수 있다.
+    const file = resumable;
+    if (!file) return;
+    setWatching(false);
+    setModeIdx(file.meta.modeIdx);
+    setSizeIdx(file.meta.sizeIdx);
+    setDiffIdx(file.meta.diffIdx);
+    actedRef.current = new Set(file.meta.acted);
+    setSelected(null);
+    setPathTo(null);
+    setCombat(null);
+    setState(file.state);
+    setShowHelp(false);
+  };
+
   const movable = useMemo(() => {
     if (!selectedCell || !myTurn) return new Set<string>();
     const out = new Set<string>();
@@ -1024,6 +1079,9 @@ export default function GameScreen() {
       const s = createGameState(MODES[idx].nations, size, size, rng);
       applyHandicap(s, DIFFICULTIES[dIdx].incomeMul);
       beginTurn(s, PLAYER, rng);
+      // 새 판을 그 자리에서 한 번 적어둔다. 턴이 1 에서 1 로 바뀌지 않아
+      // 저장 효과가 안 뜨는 경우가 있다.
+      writeSave(encodeSave(s, { modeIdx: idx, sizeIdx: sIdx, diffIdx: dIdx, acted: [] }));
       return s;
     });
     setSelected(null);
@@ -1561,6 +1619,11 @@ export default function GameScreen() {
         {Platform.OS === 'web' && (
           <Text style={styles.toggle}>Enter 턴 종료 · R 징병 · Esc 물리기</Text>
         )}
+        {saveFailed && (
+          <Text style={[styles.toggle, { color: '#fca5a5' }]}>
+            저장할 수 없는 창입니다 — 닫으면 판이 사라집니다
+          </Text>
+        )}
       </View>
 
       {state.winner !== null && (
@@ -1622,11 +1685,24 @@ export default function GameScreen() {
                 </View>
               ))}
             </ScrollView>
+            {resumable && (
+              <>
+                <TouchableOpacity
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }]}
+                  onPress={resumeSaved}
+                >
+                  <Text style={styles.btnText}>이어하기 — {describeSave(resumable)}</Text>
+                </TouchableOpacity>
+                <Text style={styles.hint}>
+                  새로 시작하면 저장해둔 판은 사라집니다.
+                </Text>
+              </>
+            )}
             <TouchableOpacity
               style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
               onPress={() => setShowHelp(false)}
             >
-              <Text style={styles.btnText}>시작</Text>
+              <Text style={styles.btnText}>{resumable ? '새로 시작' : '시작'}</Text>
             </TouchableOpacity>
           </View>
         </View>
