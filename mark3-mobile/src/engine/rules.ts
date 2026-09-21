@@ -333,6 +333,28 @@ export interface Ledger {
   units: number;
 }
 
+/**
+ * 행정비.
+ *
+ * 'cells^1.45' 로 두면 칸수가 절대값이라 판이 커질수록 비용이 폭발한다.
+ * 21x21 에서 66칸을 쥐면 396, 11x11 에서 18칸이면 66 이다. 넓은 판에서는
+ * 어느 나라도 제 몫만큼 뻗을 수 없어 다들 웅크리고, 그래서 오래 버티는
+ * 쪽이 이겼다(수비형 43% · 공격형 4%).
+ *
+ * 판이 넓다고 한 고을 다스리기가 어려워질 이유는 없다. 어려워지는 것은
+ * '내가 감당할 몫보다 얼마나 넘치게 쥐었나'다. 그래서 판 크기로 한 번
+ * 나눠서 잰다 — 11x11(91칸)에서 1 이므로 그 판의 셈은 한 톨도 안 바뀐다.
+ *
+ *   admin = 칸당비용 × scale × (칸수 / scale)^지수      scale = 쓸 수 있는 칸 / 91
+ *
+ * 21x21 에서 66칸이면 396 → 231 이 된다. 지수를 1.3 으로 내린 것과 거의
+ * 같은 값인데, 그쪽은 작은 판까지 같이 싸지므로 이 식이 맞다.
+ */
+export function adminCost(cells: number, playable: number, eco: EconomyConfig): number {
+  const scale = Math.max(1, playable / 91);
+  return eco.adminCostPerCell * scale * Math.pow(cells / scale, eco.adminExponent);
+}
+
 export function computeLedger(
   state: GameState,
   nationId: number,
@@ -342,7 +364,9 @@ export function computeLedger(
   let income = 0;
   let units = 0;
   let cells = 0;
+  let playable = 0;
   for (const c of state.cells) {
+    if (!c.offMap) playable++;
     if (c.owner !== nationId) continue;
     cells++;
     units += c.units;
@@ -362,7 +386,7 @@ export function computeLedger(
   income *= state.nations[nationId]?.incomeMul ?? 1;
 
   const upkeep = units * eco.unitUpkeep;
-  const admin = Math.pow(cells, eco.adminExponent) * eco.adminCostPerCell;
+  const admin = adminCost(cells, playable, eco);
   return { income, upkeep, admin, net: income - upkeep - admin, cells, units };
 }
 
