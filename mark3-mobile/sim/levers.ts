@@ -1,5 +1,11 @@
-// 넓은 판에서 원정이 수지맞으려면 무엇을 건드려야 하나
-// 21x21 에서 경제 손잡이를 하나씩 밀고, 공격형이 사는지 / 판이 안 늘어지는지 본다
+// 경제 손잡이 하나하나가 판을 어떻게 바꾸나
+//
+// '넓은 판에서 원정이 수지맞게' 를 찾을 때 쓴 하네스다. 답은 행정비였고,
+// 그건 손잡이를 돌릴 문제가 아니라 칸수가 절대값으로 들어간 버그였다
+// (rules.ts adminCost).
+//
+// 여기 값을 보고 상수를 고칠 때는 반드시 두 판 크기를 같이 본다. 한쪽만
+// 보고 고치면 다른 쪽이 조용히 망가진다.
 import { makeRng } from '../src/services/combatSystem';
 import { PERSONALITIES, LEARNED_WEIGHTS, AIWeights } from '../src/engine/ai';
 import { DEFAULT_ECONOMY, EconomyConfig } from '../src/engine';
