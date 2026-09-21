@@ -346,7 +346,7 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyDecayConquest: 1.2,
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
-  dominanceShare: 0.8,
+  dominanceShare: 0,
   voluntarySubmitChance: 0.12,
   flankSupport: 0.42,
   visionRadiusUnit: 2,
