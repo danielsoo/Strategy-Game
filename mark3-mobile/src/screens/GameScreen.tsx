@@ -565,6 +565,56 @@ export default function GameScreen() {
     return m;
   }, [preview]);
 
+  /**
+   * 키보드. PC 로 낼 것이므로 손이 마우스와 키 사이를 오가지 않아야 한다.
+   *
+   * 직접 해보니 턴 종료를 연달아 누르는 게 이 게임에서 가장 잦은 동작인데,
+   * 부대가 멈춰 자동 선택되면 왼쪽 패널이 늘어나 버튼이 아래로 밀렸다.
+   * 다섯 번 눌렀는데 한 턴만 갔다. 자리를 고정하는 것과 별개로, 이런 동작은
+   * 애초에 키가 맡아야 한다.
+   *
+   *   Enter · Space   턴 종료
+   *   Esc             고르던 것 물리기 (자리 고르기 → 길 → 선택)
+   *   R               징병
+   */
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onKey = (e: KeyboardEvent) => {
+      // 무언가 물어보는 중이면 키는 끈다. 모르고 누른 Enter 가 턴을 넘기면 안 된다.
+      const asking = showHelp || !!defenseAsk || !!conquest || !!merchantPick || showVassals;
+
+      if (e.key === 'Escape') {
+        if (placing) {
+          setPlacing(null);
+          setShowVassals(true);
+        } else if (pathTo) {
+          setPathTo(null);
+        } else {
+          setSelected(null);
+        }
+        return;
+      }
+      if (asking || !myTurn || state.winner !== null) return;
+
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        endTurn();
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (readyCastles > 0) {
+          setState((prev) => {
+            recruit(prev, PLAYER);
+            return bump(prev);
+          });
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [
+    showHelp, defenseAsk, conquest, merchantPick, showVassals,
+    placing, pathTo, myTurn, state, readyCastles,
+  ]);
+
   const movable = useMemo(() => {
     if (!selectedCell || !myTurn) return new Set<string>();
     const out = new Set<string>();
@@ -1392,7 +1442,13 @@ export default function GameScreen() {
         </View>
       )}
 
-      <View style={[styles.footer, wide && { width: paneW }]}>
+      {/*
+        넓은 화면에서는 단추 줄을 바닥에 못박는다.
+        위에 쌓인 것들(기록 줄 수, 부대 패널)의 높이가 바뀌면 단추가 따라
+        움직여서, 턴 종료를 연달아 누르다 엉뚱한 것을 누르게 된다. 직접
+        해보고 알았다 — 다섯 번 눌렀는데 한 턴만 갔다.
+      */}
+      <View style={[styles.footer, wide && styles.footerWide, wide && { width: paneW }]}>
         <View style={styles.row}>
           <TouchableOpacity
             style={[
@@ -1493,6 +1549,9 @@ export default function GameScreen() {
             </TouchableOpacity>
           )}
         </View>
+        {Platform.OS === 'web' && (
+          <Text style={styles.toggle}>Enter 턴 종료 · R 징병 · Esc 물리기</Text>
+        )}
       </View>
 
       {state.winner !== null && (
@@ -1875,10 +1934,17 @@ const styles = StyleSheet.create({
   shaken: { position: 'absolute', bottom: 2, right: 5, color: '#fca5a5', fontSize: 9 },
   encircled: { position: 'absolute', top: 3, left: 4, color: '#fde68a', fontSize: 10 },
 
-  feed: { paddingHorizontal: 14, paddingVertical: 2, minHeight: 20 },
+  // 늘 세 줄 자리를 잡아둔다. 기록이 늘 때마다 아래가 밀리면 안 된다.
+  feed: { paddingHorizontal: 14, paddingVertical: 2, height: 51 },
   feedLine: { color: '#9ca3af', fontSize: 11, lineHeight: 15 },
 
-  panel: { backgroundColor: '#1f1f1f', marginHorizontal: 12, borderRadius: 8, padding: 10 },
+  panel: {
+    backgroundColor: '#1f1f1f',
+    marginHorizontal: 12,
+    borderRadius: 8,
+    padding: 10,
+    overflow: 'hidden',
+  },
   panelTitle: { color: '#e5e7eb', fontSize: 12, marginBottom: 6 },
   panelNote: { color: '#9ca3af', fontSize: 11, marginBottom: 6 },
   hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic' },
@@ -1894,6 +1960,7 @@ const styles = StyleSheet.create({
   pathNote: { color: '#7dd3fc', fontSize: 11, marginBottom: 6 },
 
   footer: { backgroundColor: '#1f1f1f', padding: 10, gap: 6 },
+  footerWide: { position: 'absolute', left: 0, bottom: 0 },
   row: { flexDirection: 'row', gap: 6 },
   btn: { flex: 1, paddingVertical: 11, borderRadius: 8, alignItems: 'center' },
   btnDim: { opacity: 0.4 },
