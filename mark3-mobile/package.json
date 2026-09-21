@@ -25,7 +25,8 @@
     "sim:boards": "tsx sim/boards.ts",
     "sim:scale": "tsx sim/scale.ts",
     "sim:victory": "tsx sim/victory.ts",
-    "sim:levers": "tsx sim/levers.ts"
+    "sim:levers": "tsx sim/levers.ts",
+    "sim:seats": "tsx sim/seats.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",

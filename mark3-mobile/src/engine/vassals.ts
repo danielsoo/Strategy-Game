@@ -168,16 +168,28 @@ export function stepVoluntarySubmission(
     if (myPower <= 0) continue;
 
     // 가장 위협적인 이웃과 가장 정의로운 보호자 후보를 찾는다
+    //
+    // 동점은 제비로 가른다. 예전에는 '>' 하나로 골라서, 정의가 같으면 늘
+    // 번호가 낮은 나라가 보호자가 됐다. 동일한 AI 다섯으로 재보니 21x21 에서
+    // 0번이 속국 0.77 개를 거느리는 동안 3번은 0.45 개였고, 그게 승률 편차로
+    // 그대로 나타났다(0번 26% · 3번 18%). 땅은 똑같이 가졌는데 속국만 달랐다.
     let maxThreat = 0;
     let protector: Nation | null = null;
     let bestJustice = -1;
+    let ties = 0;
     for (const other of independents) {
       if (other.id === weak.id) continue;
       const op = nationPower(state, other.id);
       if (op > maxThreat) maxThreat = op;
-      if (other.justice > bestJustice && op > myPower * 1.3) {
+      if (op <= myPower * 1.3) continue;
+      if (other.justice > bestJustice) {
         bestJustice = other.justice;
         protector = other;
+        ties = 1;
+      } else if (other.justice === bestJustice) {
+        // 같은 값끼리 고르게 — 뒤에 올수록 불리하면 안 된다
+        ties++;
+        if (rng() < 1 / ties) protector = other;
       }
     }
     if (!protector) continue;

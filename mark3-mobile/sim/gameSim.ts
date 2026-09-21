@@ -46,6 +46,8 @@ export interface GameResult {
   winReason?: string;
   turns: number;
   finalCells: number[];
+  /** 끝났을 때 완공된 요새 수 */
+  finalForts: number[];
   finalUnits: number[];
   attacksMade: number[];
   attacksWon: number[];
@@ -127,6 +129,7 @@ export function playGame(
     winReason: state.winReason,
     turns,
     finalCells: state.nations.map((x) => nationStats(state, x.id).cells),
+    finalForts: state.nations.map((x) => state.cells.filter((c) => c.owner === x.id && c.fortStage === 4).length),
     finalUnits: state.nations.map((x) => nationStats(state, x.id).units),
     attacksMade,
     attacksWon,
@@ -140,10 +143,16 @@ export function playGame(
     choices,
   });
 
+  const firstMover = Math.floor(rng() * n);
+
   for (let turn = 1; turn <= maxTurns; turn++) {
     state.turn = turn;
     if (record) logCursor = state.log.length;
-    for (let id = 0; id < n; id++) {
+    // 선수는 돌아가며 잡는다 — 늘 0번이 먼저 두면 그게 곧 이점이다.
+    // 첫 턴의 선수도 판마다 다르게 준다. 돌리기만 하면 1턴 선수가 늘 0번인데,
+    // 초반 한 수는 후반 한 수보다 무겁다.
+    for (let k = 0; k < n; k++) {
+      const id = (turn - 1 + firstMover + k) % n;
       if (!state.nations[id].alive) continue;
       state.current = id;
 

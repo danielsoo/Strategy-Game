@@ -993,6 +993,15 @@ export default function GameScreen() {
       prev.current = PLAYER;
       // 사람 차례를 마친 뒤 AI 들을 차례로 돌린다.
       // 사람이 지키는 칸이 공격받으면 여기서 멈추고 물어본다.
+      /*
+        사람이 늘 먼저 두고 AI 는 1번부터 차례로 둔다.
+
+        동일한 AI 다섯으로 재면 늘 먼저 두는 자리가 5~6%p 이득을 본다
+        (sim/seats.ts). 시뮬레이터는 선수를 돌려 그 이점을 지웠지만, 실제
+        게임에서는 사람이 먼저 두는 쪽을 남겨뒀다 — 단일 플레이 게임의 흔한
+        관례이고, 난이도는 실측 승률로 맞추므로 그 이점은 이미 난이도 곡선에
+        녹아 있다.
+      */
       if (runAI(prev, 1)) finishRound(prev);
       return bump(prev);
     });
