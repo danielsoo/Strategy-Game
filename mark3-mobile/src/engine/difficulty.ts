@@ -21,14 +21,22 @@ export interface Difficulty {
   noise: number;
   /** 수입 배수 */
   incomeMul: number;
+  /**
+   * 이번 원정을 정할 때 몇 턴 앞을 내다보는가 (plan.ts).
+   *
+   * 0 이면 안 본다 — 예전 그대로다. 실수 확률과 수입 배수가 '덜 똑똑하게'
+   * 와 '더 부유하게' 였다면 이건 '더 멀리 본다' 다. 셋 중 이것만이 사람이
+   * "이 AI 똑똑하네" 로 느끼는 종류의 강함이다.
+   */
+  lookahead: number;
 }
 
 export const DIFFICULTIES: Difficulty[] = [
-  { label: '아주 쉬움', noise: 0.6, incomeMul: 0.7 },
-  { label: '쉬움', noise: 0.35, incomeMul: 0.85 },
-  { label: '보통', noise: 0.22, incomeMul: 1 },
-  { label: '어려움', noise: 0, incomeMul: 1 },
-  { label: '아주 어려움', noise: 0, incomeMul: 1.35 },
+  { label: '아주 쉬움', noise: 0.6, incomeMul: 0.7, lookahead: 0 },
+  { label: '쉬움', noise: 0.35, incomeMul: 0.85, lookahead: 0 },
+  { label: '보통', noise: 0.22, incomeMul: 1, lookahead: 0 },
+  { label: '어려움', noise: 0, incomeMul: 1, lookahead: 2 },
+  { label: '아주 어려움', noise: 0, incomeMul: 1.35, lookahead: 3 },
 ];
 
 /**

@@ -60,6 +60,8 @@ import {
   isExplored,
   isFoeCell,
   cellPower,
+  planCandidates,
+  choosePlan,
   knownCell,
   findPath,
   nextStep,
@@ -342,14 +344,27 @@ function applyHandicap(s: GameState, mul: number): void {
   for (const nat of s.nations) nat.incomeMul = nat.id === PLAYER ? 1 : mul;
 }
 
-function playOneNation(s: GameState, rng: RNG, aiPolicy?: Policy): void {
+/**
+ * 관전 중 한 나라의 차례.
+ *
+ * plan 을 받는다. 이게 없으면 관전 화면만 예전 AI 로 도는데, 그러면 화면에서
+ * 보는 것과 실제로 플레이할 때 상대하는 것이 달라진다 — 실제로 그 상태로
+ * "어려움에서 잘 돌아간다" 고 볼 뻔했다.
+ */
+function playOneNation(
+  s: GameState,
+  rng: RNG,
+  aiPolicy?: Policy,
+  plan?: (s: GameState, id: number, w: AIWeights) => Cell | null | undefined
+): void {
   if (s.winner !== null) return;
   const id = s.current;
   const nation = s.nations[id];
 
   if (nation.alive) {
     beginTurn(s, id, rng);
-    const log = takeAITurn(s, id, AI_WEIGHTS[id] ?? PERSONALITIES['균형'], rng, undefined, aiPolicy);
+    const w = AI_WEIGHTS[id] ?? PERSONALITIES['균형'];
+    const log = takeAITurn(s, id, w, rng, undefined, aiPolicy, 0, plan?.(s, id, w));
     restUnmoved(s, id, log.moved);
     for (const a of log.attacks) {
       const res = a.result;
@@ -517,7 +532,7 @@ export default function GameScreen() {
     if (!watching || state.winner !== null) return;
     const t = setTimeout(() => {
       setState((prev) => {
-        playOneNation(prev, rng, aiPolicy);
+        playOneNation(prev, rng, aiPolicy, planFor);
         return bump(prev);
       });
     }, SPEEDS[speedIdx].ms);
@@ -975,6 +990,38 @@ export default function GameScreen() {
   };
 
   /**
+   * 이번 원정을 어디로 — 어려운 난이도는 몇 갈래 굴려보고 고른다.
+   *
+   * 후보는 아는 적 본성 하나하나 + 안개 걷기 + 집 굳히기, 많아야 대여섯이다.
+   * 각각 판을 복사해 lookahead 턴 굴려보고 끝난 자리가 제일 좋은 쪽을 고른다.
+   * lookahead 가 0 이면 undefined 를 주고, 그러면 예전처럼 pickTarget 이 정한다.
+   *
+   * 자가대전에서 승률이 1.7~1.8배가 됐다(sim/planner.ts). 실수 확률과 수입
+   * 배수가 '덜 똑똑하게'와 '더 부유하게'라면 이것만이 '더 멀리 본다'다.
+   */
+  const planFor = (s: GameState, id: number, w: typeof LEARNED_WEIGHTS) => {
+    if (difficulty.lookahead <= 0) return undefined;
+    const cands = planCandidates(s, id, w);
+    if (cands.length <= 1) return undefined;
+    const ranked = choosePlan(
+      s,
+      id,
+      cands,
+      rng,
+      (cs, cid, ct) => {
+        beginTurn(cs, cid, rng);
+        restUnmoved(
+          cs,
+          cid,
+          takeAITurn(cs, cid, w, rng, undefined, undefined, 0, ct).moved
+        );
+      },
+      difficulty.lookahead
+    );
+    return ranked[0].target;
+  };
+
+  /**
    * AI 들을 차례로 돌린다. 사람에게 물어봐야 하면 거기서 멈추고 false 를 준다.
    * 답이 오면 같은 함수를 resume 과 함께 다시 부른다.
    */
@@ -996,14 +1043,16 @@ export default function GameScreen() {
       if (!gen) {
         s.current = i;
         beginTurn(s, i, rng);
+        const w = AI_WEIGHTS[i] ?? PERSONALITIES['균형'];
         gen = takeAITurnGen(
           s,
           i,
-          AI_WEIGHTS[i] ?? PERSONALITIES['균형'],
+          w,
           rng,
           undefined,
           aiPolicy,
-          difficulty.noise
+          difficulty.noise,
+          planFor(s, i, w)
         );
       }
       const step: IteratorResult<DefenseRequest, AITurnLog> = gen.next(answer);
@@ -1064,7 +1113,7 @@ export default function GameScreen() {
 
   const stepOnce = () => {
     setState((prev) => {
-      playOneNation(prev, rng);
+      playOneNation(prev, rng, aiPolicy, planFor);
       return bump(prev);
     });
   };
