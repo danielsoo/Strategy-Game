@@ -133,7 +133,29 @@ export const BASE_WEIGHTS: AIWeights = {
 
 export const PERSONALITIES: Record<string, AIWeights> = {
   균형: { ...BASE_WEIGHTS },
-  공격형: { ...BASE_WEIGHTS, aggression: 1.6, advance: 2.2, homeDefense: 0.3, castleAssault: 18 },
+  /*
+    공격형은 '정복을 노린다' 이지 '던진다' 가 아니다.
+
+    aggression 1.6 이 하던 일이 둘이었다. 태세 문턱을 0.55/1.6 = 0.34 로
+    낮춰 적 전력의 3분의 1 만 있어도 밀어붙이게 했고, 승산도 1.6배로
+    부풀려 보게 했다. 40% 싸움을 64% 로 착각하고 덤빈다는 뜻이다.
+    그래서 끝날 때 병력이 6.3명이었다 — 다른 성격은 30명 안팎이다.
+    정복하는 게 아니라 흘리고 있었고, 어느 설정에서도 승률이 3~9% 로
+    늘 바닥이었다.
+
+    승산을 그대로 보게 하고(1.0), 칠 군대를 미리 모으게 했다(18 → 26).
+    고정 상대 넷과 설정당 350판:
+
+            승률                끝났을때 병력   공격
+      11x11  7.1% [5~10] → 16.0% [13~20]   6.3 → 12.7   21.7 → 22.0
+      21x21  5.4% [4~8]  →  6.9% [5~10]    8.7 → 12.9   37.7 → 36.6
+
+    11x11 에서는 구간이 안 겹치고 21x21 에서는 겹치지만 방향이 같다.
+    공격 횟수는 그대로인데 병력이 두 배 남는다 — 같은 만큼 싸우되 이길
+    싸움을 고른다는 뜻이다. advance 2.2 는 그대로 둔다. 결연히 진군하는
+    것은 공격형의 성격이고, 무모한 것과는 다르다.
+  */
+  공격형: { ...BASE_WEIGHTS, aggression: 1.0, advance: 2.2, homeDefense: 0.3, castleAssault: 18, targetArmy: 26 },
   // 수비형은 '아무것도 안 하기'가 아니라 '적당히 넓히고 요새로 굳히기'다.
   // advance 0.3 / expansion 1.0 으로 두면 1~2칸만 붙들고 있다가 남의 속국이 된다.
   수비형: {
@@ -964,6 +986,36 @@ export function chooseVassalOrAnnex(
  * 시뮬레이터는 takeAITurn() 으로 끝까지 돌리면 되고, 화면만 이 제너레이터를
  * 직접 몬다.
  */
+/**
+ * 이 나라가 세워볼 만한 작전들.
+ *
+ * 작전이란 곧 '이번 원정을 어디로' 다. 아는 적 본진 하나하나가 후보이고,
+ * 거기에 '안개를 걷는다'(scoutTarget)와 '집을 굳힌다'(null)를 더한다.
+ * 많아야 대여섯이라 전부 굴려볼 수 있다.
+ */
+export function planCandidates(
+  state: GameState,
+  nationId: number,
+  w: AIWeights,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): Array<Cell | null> {
+  const homes = state.cells.filter((c) => c.castle && c.owner === nationId);
+  const enemyHomes = state.cells.filter(
+    (c) => c.castle && c.owner !== null && blocOf(state, c.owner) !== blocOf(state, nationId)
+  );
+  const hubs = adminHubs(state, nationId);
+  const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco, scale: boardScale(state) };
+
+  const out: Array<Cell | null> = [];
+  for (const h of enemyHomes) {
+    if (isExplored(state, nationId, h)) out.push(h);
+  }
+  const scout = scoutTarget(partial);
+  if (scout && !out.some((c) => c?.id === scout.id)) out.push(scout);
+  out.push(null); // 집을 굳힌다
+  return out;
+}
+
 export function* takeAITurnGen(
   state: GameState,
   nationId: number,
@@ -971,7 +1023,14 @@ export function* takeAITurnGen(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY,
   policy?: Policy,
-  defenseNoise = 0
+  defenseNoise = 0,
+  /**
+   * 이번 원정의 목표를 밖에서 정한다.
+   *
+   * 작전 탐색(plan.ts)이 여러 목표를 굴려보고 고른 값을 여기로 넣는다.
+   * undefined 면 예전처럼 pickTarget 이 정한다 — 넣지 않으면 아무것도 안 바뀐다.
+   */
+  planTarget?: Cell | null
 ): Generator<DefenseRequest, AITurnLog, DefenseChoice | undefined> {
   const moved = new Set<string>();
   const log: AITurnLog = { attacks: [], recruited: 0, fortsStarted: 0, moved };
@@ -989,7 +1048,7 @@ export function* takeAITurnGen(
   const partial = { state, me: nationId, w, homes, enemyHomes, hubs, eco, scale: boardScale(state) };
   const ctx: Ctx = {
     ...partial,
-    target: pickTarget(partial),
+    target: planTarget !== undefined ? planTarget : pickTarget(partial),
     homeThreat: computeHomeThreat(state, nationId, homes),
     distress: findDistress(state, nationId),
     rally: null,
@@ -1225,9 +1284,10 @@ export function takeAITurn(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY,
   policy?: Policy,
-  defenseNoise = 0
+  defenseNoise = 0,
+  planTarget?: Cell | null
 ): AITurnLog {
-  const gen = takeAITurnGen(state, nationId, w, rng, eco, policy, defenseNoise);
+  const gen = takeAITurnGen(state, nationId, w, rng, eco, policy, defenseNoise, planTarget);
   let step = gen.next();
   // 멈춰 서면 규칙대로 알아서 정한다
   while (!step.done) step = gen.next(undefined);
