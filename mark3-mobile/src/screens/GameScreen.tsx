@@ -4,6 +4,7 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
+  TextInput,
   ScrollView,
   Modal,
   useWindowDimensions,
@@ -13,6 +14,10 @@ import {
 import Board3D from './Board3D';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
 import { readSave, writeSave, clearSave } from '../services/saveStore';
+import {
+  MatchLog, startMatch, recordTurn, finishMatch, emptyHumanTurn,
+} from '../engine/matchLog';
+import { putMatch, downloadMatches } from '../services/matchStore';
 import { DIFFICULTIES, difficultyPolicy } from '../engine/difficulty';
 import Svg, { Polygon, Polyline } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
@@ -434,6 +439,63 @@ export default function GameScreen() {
   const [showStats, setShowStats] = useState(true);
   // 처음 켜면 한 번 띄운다. 규칙을 모르고 만나면 "왜 안 움직이지?" 가 된다.
   const [showHelp, setShowHelp] = useState(true);
+  /**
+   * 판 기록.
+   *
+   * 이 게임에 대해 아는 것이 전부 AI 끼리 돌린 결과다. 하네스는 'AI 들끼리
+   * 균형이 맞나' 를 재지 '사람이 재미있나' 를 재지 않는다. 사람이 두는 판을
+   * 통째로 남겨두면, 한 판이 하네스 삼천 판보다 많은 것을 알려준다.
+   *
+   * 매 턴 덮어쓴다 — 중간에 창을 닫아도 그때까지가 남는다.
+   */
+  const [playerName, setPlayerName] = useState('');
+  const matchRef = useRef<MatchLog | null>(null);
+  /** 이번 턴에 사람이 한 것. 턴이 넘어갈 때 기록에 실린다. */
+  const humanRef = useRef(emptyHumanTurn());
+  /**
+   * 어디까지 적었는지.
+   *
+   * state.log 는 40줄에서 밀려나므로 번호로 셀 수 없다 — 다섯째 줄이 다음
+   * 턴에는 둘째 줄이 되어 있다. 그래서 마지막으로 적은 줄을 들고 있다가,
+   * 다음에 그 줄을 뒤에서부터 찾아 그 뒤만 새로 적는다. 못 찾으면 그 사이에
+   * 40줄이 넘게 밀려난 것이므로 지금 남은 것을 전부 적는다.
+   */
+  const lastLineRef = useRef<string | null>(null);
+
+  const freshEvents = (log: string[]): string[] => {
+    const mark = lastLineRef.current;
+    lastLineRef.current = log.length > 0 ? log[log.length - 1] : mark;
+    if (mark === null) return [...log];
+    for (let i = log.length - 1; i >= 0; i--) {
+      if (log[i] === mark) return log.slice(i + 1);
+    }
+    return [...log];
+  };
+
+  /**
+   * 기록을 연다.
+   *
+   * reset() 에서만 열었더니 '시작' 으로 들어간 첫 판이 통째로 안 남았다 —
+   * 시작 단추는 도움말을 닫을 뿐 reset 을 부르지 않는다. 첫 판이야말로
+   * 사람들이 제일 많이 두는 판이다.
+   */
+  const beginMatch = (s: GameState, dIdx: number) => {
+    const name = playerName.trim().slice(0, 12);
+    if (name) s.nations[PLAYER].name = name;
+    matchRef.current = startMatch(s, name || '이름없음', DIFFICULTIES[dIdx].label);
+    humanRef.current = emptyHumanTurn();
+    lastLineRef.current = s.log.length > 0 ? s.log[s.log.length - 1] : null;
+  };
+
+  const noteMatchTurn = (s: GameState) => {
+    const m = matchRef.current;
+    if (!m) return;
+    recordTurn(m, s, freshEvents(s.log), humanRef.current);
+    if (s.winner !== null) finishMatch(m, s);
+    putMatch(m);
+    humanRef.current = emptyHumanTurn();
+  };
+
   // 3D 는 웹에서만. 네이티브는 expo-gl 위에서 따로 붙여야 한다.
   const [use3D, setUse3D] = useState(Platform.OS === 'web');
   const can3D = Platform.OS === 'web';
@@ -457,6 +519,8 @@ export default function GameScreen() {
     null
   );
   const [orderNote, setOrderNote] = useState<string | null>(null);
+  /** 기록 내보내기 결과 한 줄 */
+  const [logNote, setLogNote] = useState<string | null>(null);
 
   /**
    * 행군이 멈춘 부대. 다음 그림에서 골라준다 —
@@ -619,7 +683,7 @@ export default function GameScreen() {
       } else if (e.key === 'r' || e.key === 'R') {
         if (readyCastles > 0) {
           setState((prev) => {
-            recruit(prev, PLAYER);
+            humanRef.current.recruited += recruit(prev, PLAYER);
             return bump(prev);
           });
         }
@@ -683,6 +747,12 @@ export default function GameScreen() {
     setCombat(null);
     setState(file.state);
     setShowHelp(false);
+    matchRef.current = startMatch(
+      file.state,
+      playerName.trim() || file.state.nations[PLAYER]?.name || '이름없음',
+      DIFFICULTIES[file.meta.diffIdx]?.label ?? '보통'
+    );
+    humanRef.current = emptyHumanTurn();
   };
 
   const movable = useMemo(() => {
@@ -768,6 +838,8 @@ export default function GameScreen() {
         const victim = to.owner;
         const outcome = performAttack(prev, from, to, rng);
         setCombat(outcome.result);
+        humanRef.current.attacks++;
+        if (outcome.capturedCell) humanRef.current.captured++;
         // 이겨서 밀고 들어갔으면 목표 칸에, 아니면 제자리에 남는다
         actedRef.current.add(outcome.capturedCell ? to.id : from.id);
 
@@ -913,6 +985,7 @@ export default function GameScreen() {
         turns: 10,
       });
       issued = out !== null;
+      if (issued) humanRef.current.orders++;
       return bump(prev);
     });
 
@@ -938,6 +1011,7 @@ export default function GameScreen() {
         turns: 12,
       });
       issued = out !== null;
+      if (issued) humanRef.current.orders++;
       return bump(prev);
     });
     const foeName = target !== undefined ? state.nations[target]?.name ?? '' : '';
@@ -978,6 +1052,7 @@ export default function GameScreen() {
 
   /** 한 바퀴를 마치고 사람 차례로 돌려놓는다 */
   const finishRound = (s: GameState) => {
+    noteMatchTurn(s);
     s.turn++;
     s.current = PLAYER;
     actedRef.current = new Set();
@@ -1062,6 +1137,23 @@ export default function GameScreen() {
         setDefenseAsk(step.value);
         return false;
       }
+      /*
+        AI 가 무엇을 했는지 남긴다.
+
+        관전 모드(playOneNation)는 이걸 하는데 실제로 플레이하는 길은 안
+        했다. 그래서 턴을 넘기면 AI 넷이 무엇을 했는지 알 방법이 없었다 —
+        열한 턴을 둬도 사건 표시줄에 '게임 시작' 한 줄뿐이었다.
+        판 기록에도 아무것도 안 남아서, 남겨봐야 형세 숫자뿐이었다.
+      */
+      for (const a of step.value.attacks) {
+        const res = a.result;
+        const verb =
+          res.outcome === 'attacker-win' ? '점령' : res.outcome === 'stalemate' ? '교착' : '격퇴당함';
+        pushLog(
+          s,
+          `${s.nations[i].name}: 공격 ${verb} (${res.rounds.length}R, 생존 ${res.attackerSurvivors})`
+        );
+      }
       finishNation(s, i, step.value.moved);
       gen = null;
     }
@@ -1070,6 +1162,7 @@ export default function GameScreen() {
 
   /** 사람이 고른 답을 넣고 멈춘 자리에서 이어 돌린다 */
   const answerDefense = (choice: DefenseChoice) => {
+    humanRef.current.defense.push(choice);
     const pending = pendingRef.current;
     setDefenseAsk(null);
     pendingRef.current = null;
@@ -1128,6 +1221,7 @@ export default function GameScreen() {
       const s = createGameState(MODES[idx].nations, size, size, rng);
       applyHandicap(s, DIFFICULTIES[dIdx].incomeMul);
       beginTurn(s, PLAYER, rng);
+      beginMatch(s, dIdx);
       // 새 판을 그 자리에서 한 번 적어둔다. 턴이 1 에서 1 로 바뀌지 않아
       // 저장 효과가 안 뜨는 경우가 있다.
       writeSave(encodeSave(s, { modeIdx: idx, sizeIdx: sIdx, diffIdx: dIdx, acted: [] }));
@@ -1574,7 +1668,7 @@ export default function GameScreen() {
             ]}
             onPress={() =>
               setState((prev) => {
-                recruit(prev, PLAYER);
+                humanRef.current.recruited += recruit(prev, PLAYER);
                 return bump(prev);
               })
             }
@@ -1664,7 +1758,16 @@ export default function GameScreen() {
               <Text style={styles.toggle}>{use3D ? '2D 지도' : '중세 3D'}</Text>
             </TouchableOpacity>
           )}
+          {Platform.OS === 'web' && (
+            <TouchableOpacity
+              style={{ flex: 1 }}
+              onPress={() => setLogNote(downloadMatches() ? '기록을 내려받았습니다' : '아직 남은 기록이 없습니다')}
+            >
+              <Text style={styles.toggle}>기록 내보내기</Text>
+            </TouchableOpacity>
+          )}
         </View>
+        {logNote && <Text style={styles.toggle}>{logNote}</Text>}
         {Platform.OS === 'web' && (
           <Text style={styles.toggle}>Enter 턴 종료 · R 징병 · Esc 물리기</Text>
         )}
@@ -1734,6 +1837,23 @@ export default function GameScreen() {
                 </View>
               ))}
             </ScrollView>
+            {/*
+              이름을 받는다. 그게 곧 내 나라 이름이 되고, 남는 기록에도 실린다.
+              가족들이 각자 두고 기록을 보내주면 그게 누구 판인지 알아야 한다.
+            */}
+            <Text style={styles.helpTitle}>이름</Text>
+            <TextInput
+              value={playerName}
+              onChangeText={setPlayerName}
+              placeholder="당신"
+              placeholderTextColor="#6b7280"
+              maxLength={12}
+              style={styles.nameInput}
+            />
+            <Text style={styles.hint}>
+              이 판의 기록이 남습니다 — 매 턴 나라별 형세와 당신이 한 수가 함께 적힙니다.
+            </Text>
+
             {resumable && (
               <>
                 <TouchableOpacity
@@ -1749,7 +1869,13 @@ export default function GameScreen() {
             )}
             <TouchableOpacity
               style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
-              onPress={() => setShowHelp(false)}
+              onPress={() => {
+                setState((prev) => {
+                  beginMatch(prev, diffIdx);
+                  return bump(prev);
+                });
+                setShowHelp(false);
+              }}
             >
               <Text style={styles.btnText}>{resumable ? '새로 시작' : '시작'}</Text>
             </TouchableOpacity>
@@ -2082,6 +2208,18 @@ const styles = StyleSheet.create({
   panelTitle: { color: '#e5e7eb', fontSize: 12, marginBottom: 6 },
   panelNote: { color: '#9ca3af', fontSize: 11, marginBottom: 6 },
   hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic' },
+  nameInput: {
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+    borderRadius: 8,
+    color: '#fff',
+    fontSize: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    marginTop: 6,
+    marginBottom: 6,
+  },
   turnBadge: {
     position: 'absolute',
     backgroundColor: 'rgba(8,20,30,0.92)',
