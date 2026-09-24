@@ -13,6 +13,10 @@ interface Props {
   movable: Set<string>;
   /** 물어본 길 — 출발 칸부터 목적지까지, 밟는 턴과 함께 */
   path?: Array<{ id: string; turn: number }>;
+  /** 길잡이가 '여기를 누르세요' 하고 짚는 칸 */
+  hint?: string | null;
+  /** 스포트라이트 — 주면 이 칸들만 밝고 나머지는 어둡다 */
+  lit?: string[] | null;
   onCellPress: (c: Cell) => void;
 }
 const NO_RAYCAST = () => {};
@@ -205,6 +209,53 @@ function TileRing({ tile, selected }: { tile: Ground; selected: boolean }) {
   </mesh>;
 }
 
+/**
+ * 길잡이 표지. 금빛 고리(갈 수 있는 칸)와 헷갈리지 않게 분홍으로, 그리고
+ * 숨 쉬듯 커졌다 작아진다 — 3D 판에서 가만히 있는 표시는 지형에 묻힌다.
+ * 위에 거꾸로 선 뿔이 '여기' 를 가리킨다.
+ */
+function CoachMarker({ tile }: { tile: Ground }) {
+  const ring = useRef<THREE.Mesh>(null);
+  const cone = useRef<THREE.Mesh>(null);
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    const k = 1 + 0.08 * Math.sin(t * 4);
+    ring.current?.scale.set(k, k, k);
+    if (cone.current) cone.current.position.y = tile.height + 1.25 + 0.15 * Math.sin(t * 3);
+  });
+  return <group>
+    <mesh ref={ring} position={[tile.position[0], tile.height + 0.06, tile.position[2]]}
+      rotation={[-Math.PI / 2, 0, Math.PI / 6]} raycast={NO_RAYCAST}>
+      <ringGeometry args={[0.78, 1.02, 6]} />
+      <meshBasicMaterial color="#f472b6" side={THREE.DoubleSide} toneMapped={false} />
+    </mesh>
+    <mesh ref={cone} position={[tile.position[0], tile.height + 1.25, tile.position[2]]}
+      rotation={[Math.PI, 0, 0]} raycast={NO_RAYCAST}>
+      <coneGeometry args={[0.22, 0.5, 12]} />
+      <meshBasicMaterial color="#f472b6" toneMapped={false} />
+    </mesh>
+  </group>;
+}
+
+/**
+ * 스포트라이트의 어둠. 밝힐 칸을 뺀 모든 칸 위에 검은 반투명 기둥을 씌운다.
+ * 바닥만 덮으면 병사·나무·성이 그대로 밝아서 어두워진 느낌이 안 난다 —
+ * 그래서 납작한 판이 아니라 조각들을 감쌀 만큼 높은 기둥이다.
+ * 누르는 것은 막지 않는다(raycast 없음).
+ * 모르는 칸(안개)은 뺀다 — 이미 가려져 있고, 씌우면 안개 위로 검은 기둥이 선다.
+ */
+function DimVeil({ tiles, lit }: { tiles: Ground[]; lit: string[] }) {
+  const keep = new Set(lit);
+  return <group>
+    {tiles.filter((t) => t.known && !keep.has(t.cell.id)).map((t) =>
+      <mesh key={t.cell.id} position={[t.position[0], t.height + 0.9, t.position[2]]}
+        raycast={NO_RAYCAST} renderOrder={10}>
+        <cylinderGeometry args={[1.0, 1.0, 1.8, 6]} />
+        <meshBasicMaterial color="#000" transparent opacity={0.62} depthWrite={false} />
+      </mesh>)}
+  </group>;
+}
+
 function Rig({ yaw, pitch, span, zoom, target }: { yaw: number; pitch: number; span: number; zoom: number; target: V3 }) {
   const aim = useRef(new THREE.Vector3());
   const desired = useMemo(() => new THREE.Vector3(), []);
@@ -231,7 +282,7 @@ class SceneBoundary extends React.Component<{ children: React.ReactNode }, { fai
   }
 }
 
-export default function Board3D({ state, player, watching, selected, movable, path, onCellPress }: Props) {
+export default function Board3D({ state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
   const scene = useMemo(() => buildMedievalScene(state, player, watching), [state, player, watching]);
 
   /**
@@ -255,6 +306,11 @@ export default function Board3D({ state, player, watching, selected, movable, pa
     for (const p of pathTiles) if (p.turn >= 0) last.set(p.turn, p.tile);
     return [...last.entries()].map(([turn, tile]) => ({ turn, tile }));
   }, [pathTiles]);
+
+  const hintTile = useMemo(
+    () => (hint ? scene.ground.find((t) => t.cell.id === hint) ?? null : null),
+    [hint, scene.ground]
+  );
 
   const unknownMist = useMemo(() => scene.mist.filter(c => !c.memory), [scene]);
   const memoryMist = useMemo(() => scene.mist.filter(c => c.memory), [scene]);
@@ -326,6 +382,8 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         {pathTiles.map((t, i) => i === 0 ? null :
           <PathArrow key={'a' + t.tile.cell.id} from={pathTiles[i - 1].tile.position} to={t.tile.position} />)}
         {turnStops.map(({ tile, turn }) => <TurnBadge key={'b' + tile.cell.id} tile={tile} turn={turn} />)}
+        {lit && <DimVeil tiles={scene.ground} lit={lit} />}
+        {hintTile && <CoachMarker tile={hintTile} />}
       </Canvas>
     </SceneBoundary>
     <View pointerEvents="none" style={styles.heading}>
