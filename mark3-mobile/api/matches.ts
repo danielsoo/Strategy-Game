@@ -17,7 +17,7 @@
 
 import { MongoClient, Collection } from 'mongodb';
 
-const DB = process.env.MONGODB_DB || 'mark3';
+const DB = process.env.MONGODB_DB || 'game';
 const COLL = 'matches';
 /** 백 턴 50KB. 넉넉히 스무 배. Vercel 의 요청 한도(4.5MB)보다 한참 아래다. */
 const MAX_BYTES = 1_000_000;

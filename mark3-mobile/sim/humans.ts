@@ -24,7 +24,7 @@ import { rulesStamp } from '../src/engine/stamp';
   await client.connect();
   try {
     const docs = await client
-      .db(process.env.MONGODB_DB || 'mark3')
+      .db(process.env.MONGODB_DB || 'game')
       .collection('matches')
       .find()
       .sort({ firstSeenAt: 1 })
