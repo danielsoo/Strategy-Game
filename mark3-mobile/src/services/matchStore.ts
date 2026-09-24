@@ -141,3 +141,90 @@ export function downloadMatches(player = ''): boolean {
     return false;
   }
 }
+
+// ── 한곳으로 모으기 ─────────────────────────────────────────
+//
+// 브라우저에만 쌓아두면 가족 기록이 이쪽으로 오지 않는다. 매 턴 서버
+// (api/matches.ts → MongoDB)로 판 전체를 보낸다. 실패해도 게임은 그대로고,
+// 다음 턴에 전체를 다시 보내므로 빠진 턴은 저절로 메워진다.
+
+const DEVICE_KEY = 'mark3.device.v1';
+
+/**
+ * 기기 표시. 같은 이름이 두 기기에서 두면(엄마 폰, 엄마 PC) 가를 수 있게.
+ * 사람을 알아내려는 것이 아니라 무작위 글자일 뿐이다.
+ */
+function deviceId(): string {
+  try {
+    const s = store();
+    let d = s?.getItem(DEVICE_KEY);
+    if (!d) {
+      d = Math.floor(Math.random() * 36 ** 8).toString(36).padStart(8, '0');
+      s?.setItem(DEVICE_KEY, d);
+    }
+    return d;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * 보낼 곳. 배포된 웹에서만 보낸다 — PC 에서 expo start 로 시험하는 판이
+ * 가족 기록에 섞이면 안 된다. EXPO_PUBLIC_MATCH_API 로 덮어쓸 수 있다.
+ */
+function endpoint(): string | null {
+  try {
+    const env = process.env.EXPO_PUBLIC_MATCH_API;
+    if (env) return env;
+    if (typeof location === 'undefined') return null;
+    const h = location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.')) return null;
+    return '/api/matches';
+  } catch {
+    return null;
+  }
+}
+
+let inFlight = false;
+let pending: MatchLog | null = null;
+
+/**
+ * 판을 서버로 보낸다. 기다리지 않는다.
+ *
+ * 보내는 중에 다음 턴이 오면 가장 최근 것 하나만 들고 있다가 끝나면 보낸다.
+ * 매번 판 전체라서 중간 것은 버려도 잃는 게 없고, 느린 망에서 요청이 줄줄이
+ * 쌓이지 않는다.
+ */
+export function sendMatch(m: MatchLog): void {
+  if (!m.id) return;
+  const url = endpoint();
+  if (!url || typeof fetch === 'undefined') return;
+  if (inFlight) {
+    pending = m;
+    return;
+  }
+  inFlight = true;
+  let body: string;
+  try {
+    body = JSON.stringify({ ...m, device: deviceId() });
+  } catch {
+    inFlight = false;
+    return;
+  }
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    // 창을 닫는 순간에도 가도록. 다만 keepalive 는 64KB 까지라 긴 판은 뺀다.
+    keepalive: body.length < 60_000,
+  })
+    .catch(() => {
+      /* 다음 턴에 전체를 다시 보낸다 */
+    })
+    .finally(() => {
+      inFlight = false;
+      const next = pending;
+      pending = null;
+      if (next) sendMatch(next);
+    });
+}
