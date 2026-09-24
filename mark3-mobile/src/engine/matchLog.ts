@@ -20,7 +20,10 @@ import { nationStats, computeLedger } from './rules';
 import { influenceOf, vassalsOf } from './vassals';
 import { rulesStamp } from './stamp';
 
-export const MATCH_LOG_VERSION = 1;
+/**
+ * 2: id 와 resumes 가 붙었다. 1 에는 id 가 없으므로 startedAt 을 대신 쓴다.
+ */
+export const MATCH_LOG_VERSION = 2;
 
 export interface MatchTurn {
   turn: number;
@@ -54,22 +57,41 @@ export interface MatchTurn {
 
 export interface MatchLog {
   version: number;
+  /**
+   * 판 하나에 하나. 저장 파일에도 같이 적어서, 이어하기를 해도 같은 기록에
+   * 이어 붙는다. 전에는 이어할 때마다 새 기록이 열려 한 판이 '1~30턴' 과
+   * '31~60턴' 두 판으로 쪼개졌고, 둘을 잇는 고리가 없었다.
+   * 가족 여럿의 파일을 합칠 때도 이것으로 겹친 판을 걸러낸다.
+   * (version 1 기록에는 없다 — 그때는 startedAt 이 열쇠다.)
+   */
+  id?: string;
   /** 규칙 도장. 다르면 다른 게임의 기록이다. */
   stamp: string;
   startedAt: string;
   player: string;
   setup: { rows: number; cols: number; nations: number; difficulty: string };
   turns: MatchTurn[];
+  /**
+   * 이어하기로 다시 연 턴들. 창을 닫았다 연 자리를 알면 '여기서 그만뒀다' 를
+   * 읽을 수 있다. 기록이 브라우저에서 밀려나 새로 열었으면 첫 값이 곧
+   * 이 기록의 첫 턴이다 — 그 앞은 turns 에 없다.
+   */
+  resumes?: number[];
   result?: { winner: number | null; winnerName: string; reason: string; turns: number };
 }
 
+/**
+ * 판 기록을 연다. id 는 밖에서 받는다 — 엔진은 난수를 스스로 만들지 않는다.
+ */
 export function startMatch(
   state: GameState,
   player: string,
-  difficulty: string
+  difficulty: string,
+  id: string
 ): MatchLog {
   return {
     version: MATCH_LOG_VERSION,
+    id,
     stamp: rulesStamp(),
     startedAt: new Date().toISOString(),
     player,
