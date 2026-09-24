@@ -27,6 +27,12 @@ export interface SaveMeta {
   diffIdx: number;
   /** 이번 턴에 이미 움직인 칸 */
   acted: string[];
+  /**
+   * 이 판의 기록 id. 이어하기가 같은 기록에 이어 붙으려면 저장에 있어야 한다.
+   * 없어도 읽는다(이전 저장) — 그때는 기록을 새로 연다. 그래서 SAVE_VERSION 은
+   * 올리지 않았다. 올리면 두던 판이 통째로 사라진다.
+   */
+  matchId?: string;
 }
 
 export interface SaveFile {

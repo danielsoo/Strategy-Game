@@ -17,7 +17,9 @@ import { readSave, writeSave, clearSave } from '../services/saveStore';
 import {
   MatchLog, startMatch, recordTurn, finishMatch, emptyHumanTurn,
 } from '../engine/matchLog';
-import { putMatch, downloadMatches } from '../services/matchStore';
+import {
+  putMatch, downloadMatches, newMatchId, findMatch, loadPlayerName, savePlayerName,
+} from '../services/matchStore';
 import { DIFFICULTIES, difficultyPolicy } from '../engine/difficulty';
 import Svg, { Polygon, Polyline } from 'react-native-svg';
 import { makeRng, DetailedCombatResult, RNG } from '../services/combatSystem';
@@ -448,7 +450,9 @@ export default function GameScreen() {
    *
    * 매 턴 덮어쓴다 — 중간에 창을 닫아도 그때까지가 남는다.
    */
-  const [playerName, setPlayerName] = useState('');
+  const [playerName, setPlayerName] = useState(loadPlayerName);
+  /** 이름 없이 시작을 눌렀다. 한 번 막고 물어본다. */
+  const [nameAsk, setNameAsk] = useState(false);
   const matchRef = useRef<MatchLog | null>(null);
   /** 이번 턴에 사람이 한 것. 턴이 넘어갈 때 기록에 실린다. */
   const humanRef = useRef(emptyHumanTurn());
@@ -482,7 +486,7 @@ export default function GameScreen() {
   const beginMatch = (s: GameState, dIdx: number) => {
     const name = playerName.trim().slice(0, 12);
     if (name) s.nations[PLAYER].name = name;
-    matchRef.current = startMatch(s, name || '이름없음', DIFFICULTIES[dIdx].label);
+    matchRef.current = startMatch(s, name || '이름없음', DIFFICULTIES[dIdx].label, newMatchId());
     humanRef.current = emptyHumanTurn();
     lastLineRef.current = s.log.length > 0 ? s.log[s.log.length - 1] : null;
   };
@@ -725,6 +729,7 @@ export default function GameScreen() {
         sizeIdx,
         diffIdx,
         acted: [...actedRef.current],
+        matchId: matchRef.current?.id,
       })
     );
     if (!ok) setSaveFailed(true);
@@ -747,12 +752,28 @@ export default function GameScreen() {
     setCombat(null);
     setState(file.state);
     setShowHelp(false);
-    matchRef.current = startMatch(
-      file.state,
-      playerName.trim() || file.state.nations[PLAYER]?.name || '이름없음',
-      DIFFICULTIES[file.meta.diffIdx]?.label ?? '보통'
-    );
+    /*
+      같은 판의 기록에 이어 붙인다. 전에는 여기서 새 기록을 열어, 이어할
+      때마다 한 판이 여러 조각으로 쪼개졌다.
+      기록이 스무 판 밖으로 밀려났거나 id 가 없는 옛 저장이면 새로 연다.
+      그때도 저장의 id 를 그대로 쓴다 — 앞서 내려받은 파일과 id 로 이어진다.
+    */
+    const found = file.meta.matchId ? findMatch(file.meta.matchId) : null;
+    const m =
+      found ??
+      startMatch(
+        file.state,
+        file.state.nations[PLAYER]?.name || playerName.trim() || '이름없음',
+        DIFFICULTIES[file.meta.diffIdx]?.label ?? '보통',
+        file.meta.matchId ?? newMatchId()
+      );
+    m.resumes = [...(m.resumes ?? []), file.state.turn];
+    matchRef.current = m;
     humanRef.current = emptyHumanTurn();
+    // 저장 속 로그는 이미 적었거나(이어 붙일 때) 이 기록 앞의 일이다.
+    // 표시를 안 해두면 다음 턴에 40줄이 통째로 다시 실린다.
+    const log = file.state.log;
+    lastLineRef.current = log.length > 0 ? log[log.length - 1] : null;
   };
 
   const movable = useMemo(() => {
@@ -1224,7 +1245,15 @@ export default function GameScreen() {
       beginMatch(s, dIdx);
       // 새 판을 그 자리에서 한 번 적어둔다. 턴이 1 에서 1 로 바뀌지 않아
       // 저장 효과가 안 뜨는 경우가 있다.
-      writeSave(encodeSave(s, { modeIdx: idx, sizeIdx: sIdx, diffIdx: dIdx, acted: [] }));
+      writeSave(
+        encodeSave(s, {
+          modeIdx: idx,
+          sizeIdx: sIdx,
+          diffIdx: dIdx,
+          acted: [],
+          matchId: matchRef.current?.id,
+        })
+      );
       return s;
     });
     setSelected(null);
@@ -1761,7 +1790,7 @@ export default function GameScreen() {
           {Platform.OS === 'web' && (
             <TouchableOpacity
               style={{ flex: 1 }}
-              onPress={() => setLogNote(downloadMatches() ? '기록을 내려받았습니다' : '아직 남은 기록이 없습니다')}
+              onPress={() => setLogNote(downloadMatches(playerName.trim()) ? '기록을 내려받았습니다' : '아직 남은 기록이 없습니다')}
             >
               <Text style={styles.toggle}>기록 내보내기</Text>
             </TouchableOpacity>
@@ -1844,15 +1873,25 @@ export default function GameScreen() {
             <Text style={styles.helpTitle}>이름</Text>
             <TextInput
               value={playerName}
-              onChangeText={setPlayerName}
+              onChangeText={(t) => {
+                setPlayerName(t);
+                savePlayerName(t.trim());
+                if (t.trim()) setNameAsk(false);
+              }}
               placeholder="당신"
               placeholderTextColor="#6b7280"
               maxLength={12}
               style={styles.nameInput}
             />
-            <Text style={styles.hint}>
-              이 판의 기록이 남습니다 — 매 턴 나라별 형세와 당신이 한 수가 함께 적힙니다.
-            </Text>
+            {nameAsk ? (
+              <Text style={[styles.hint, { color: '#f87171' }]}>
+                이름을 적어주세요 — 기록을 모았을 때 누구 판인지 가려야 합니다.
+              </Text>
+            ) : (
+              <Text style={styles.hint}>
+                이 판의 기록이 남습니다 — 매 턴 나라별 형세와 당신이 한 수가 함께 적힙니다.
+              </Text>
+            )}
 
             {resumable && (
               <>
@@ -1870,6 +1909,15 @@ export default function GameScreen() {
             <TouchableOpacity
               style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
               onPress={() => {
+                /*
+                  이름 없이는 시작하지 않는다. 비워둔 채 시작하게 두면
+                  '이름없음' 이 쌓여 가족 기록을 나눌 수 없다.
+                  이어하기는 막지 않는다 — 그 판의 이름은 이미 기록에 있다.
+                */
+                if (!playerName.trim()) {
+                  setNameAsk(true);
+                  return;
+                }
                 setState((prev) => {
                   beginMatch(prev, diffIdx);
                   return bump(prev);
