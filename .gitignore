@@ -44,3 +44,6 @@ expo-env.d.ts
 # 시뮬레이션 기록
 **/sim/logs/
 **/sim/nets/
+
+# ─ 가족이 둔 판(sim:humans 로 받은 것) — 사람 기록이라 올리지 않는다 ─
+mark3-mobile/sim/humans.json

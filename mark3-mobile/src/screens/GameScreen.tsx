@@ -19,6 +19,7 @@ import {
 } from '../engine/matchLog';
 import {
   putMatch, downloadMatches, newMatchId, findMatch, loadPlayerName, savePlayerName,
+  sendMatch,
 } from '../services/matchStore';
 import { DIFFICULTIES, difficultyPolicy } from '../engine/difficulty';
 import Svg, { Polygon, Polyline } from 'react-native-svg';
@@ -497,6 +498,7 @@ export default function GameScreen() {
     recordTurn(m, s, freshEvents(s.log), humanRef.current);
     if (s.winner !== null) finishMatch(m, s);
     putMatch(m);
+    sendMatch(m);
     humanRef.current = emptyHumanTurn();
   };
 

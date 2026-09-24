@@ -27,7 +27,8 @@
     "sim:victory": "tsx sim/victory.ts",
     "sim:levers": "tsx sim/levers.ts",
     "sim:seats": "tsx sim/seats.ts",
-    "sim:planner": "tsx sim/planner.ts"
+    "sim:planner": "tsx sim/planner.ts",
+    "sim:humans": "tsx sim/humans.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",
@@ -35,6 +36,7 @@
     "expo": "~49.0.0",
     "expo-gl": "~13.0.1",
     "expo-status-bar": "~1.6.0",
+    "mongodb": "^6.21.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
     "react-native": "0.72.10",
