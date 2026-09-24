@@ -69,7 +69,17 @@ export interface MatchLog {
   stamp: string;
   startedAt: string;
   player: string;
-  setup: { rows: number; cols: number; nations: number; difficulty: string };
+  setup: {
+    rows: number;
+    cols: number;
+    nations: number;
+    difficulty: string;
+    /**
+     * 길잡이를 따라 둔 판. 시키는 대로 누른 수라 '사람이 스스로 고른 수' 와
+     * 섞어 보면 안 된다 — 모아서 볼 때 이것으로 거른다.
+     */
+    tutorial?: boolean;
+  };
   turns: MatchTurn[];
   /**
    * 이어하기로 다시 연 턴들. 창을 닫았다 연 자리를 알면 '여기서 그만뒀다' 를

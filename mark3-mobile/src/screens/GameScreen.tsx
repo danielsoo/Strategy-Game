@@ -13,7 +13,11 @@ import {
 } from 'react-native';
 import Board3D from './Board3D';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
-import { readSave, writeSave, clearSave } from '../services/saveStore';
+import {
+  readSave, writeSave, clearSave, tutorialSeen, markTutorialSeen,
+} from '../services/saveStore';
+import Coach from './Coach';
+import { COACH_STEPS, CoachProgress, coachTarget, coachReady } from './tutorial';
 import {
   MatchLog, startMatch, recordTurn, finishMatch, emptyHumanTurn,
 } from '../engine/matchLog';
@@ -467,6 +471,22 @@ export default function GameScreen() {
    */
   const lastLineRef = useRef<string | null>(null);
 
+  /**
+   * 첫 판 길잡이. null 이면 꺼져 있다.
+   *
+   * 셈은 튜토리얼 전용으로 따로 둔다. humanRef 는 턴마다 비워지므로 '움직여
+   * 봤나' 를 물을 수 없다.
+   */
+  const [coach, setCoach] = useState<number | null>(null);
+  /** 지금 단계를 해냈나 — 그러면 카드가 '방금 일어난 일' 풀이로 바뀐다 */
+  const [coachDone, setCoachDone] = useState(false);
+  const tutRef = useRef({ moves: 0, paths: 0, recruits: 0, attacks: 0 });
+  /** 지금 단계가 시작될 때의 값. 앞 단계에서 한 것으로 저절로 넘어가지 않게. */
+  const coachBaseRef = useRef<CoachProgress | null>(null);
+  /** 다음 reset() 이 튜토리얼 판을 여는가. reset 이 한 번 읽고 끈다. */
+  const tutorialNextRef = useRef(false);
+  const [firstVisit] = useState(() => !tutorialSeen());
+
   const freshEvents = (log: string[]): string[] => {
     const mark = lastLineRef.current;
     lastLineRef.current = log.length > 0 ? log[log.length - 1] : mark;
@@ -484,10 +504,11 @@ export default function GameScreen() {
    * 시작 단추는 도움말을 닫을 뿐 reset 을 부르지 않는다. 첫 판이야말로
    * 사람들이 제일 많이 두는 판이다.
    */
-  const beginMatch = (s: GameState, dIdx: number) => {
+  const beginMatch = (s: GameState, dIdx: number, tutorial = false) => {
     const name = playerName.trim().slice(0, 12);
     if (name) s.nations[PLAYER].name = name;
     matchRef.current = startMatch(s, name || '이름없음', DIFFICULTIES[dIdx].label, newMatchId());
+    if (tutorial) matchRef.current.setup.tutorial = true;
     humanRef.current = emptyHumanTurn();
     lastLineRef.current = s.log.length > 0 ? s.log[s.log.length - 1] : null;
   };
@@ -689,7 +710,9 @@ export default function GameScreen() {
       } else if (e.key === 'r' || e.key === 'R') {
         if (readyCastles > 0) {
           setState((prev) => {
-            humanRef.current.recruited += recruit(prev, PLAYER);
+            const got = recruit(prev, PLAYER);
+            humanRef.current.recruited += got;
+            tutRef.current.recruits += got;
             return bump(prev);
           });
         }
@@ -836,6 +859,7 @@ export default function GameScreen() {
             setState((prev) => {
               const from = prev.cells.find((c) => c.id === selectedCell.id);
               if (from) from.order = { destId: cell.id, age: 0 };
+              tutRef.current.paths++;
               const halted = advanceGotos(prev, actedRef.current, selectedCell.id);
               if (halted.length > 0) haltedRef.current = halted[0];
               return bump(prev);
@@ -862,6 +886,8 @@ export default function GameScreen() {
         const outcome = performAttack(prev, from, to, rng);
         setCombat(outcome.result);
         humanRef.current.attacks++;
+        tutRef.current.attacks++;
+        tutRef.current.moves++;
         if (outcome.capturedCell) humanRef.current.captured++;
         // 이겨서 밀고 들어갔으면 목표 칸에, 아니면 제자리에 남는다
         actedRef.current.add(outcome.capturedCell ? to.id : from.id);
@@ -879,6 +905,7 @@ export default function GameScreen() {
         }
       } else if (to.units === 0 || (to.owner === PLAYER && !to.neutral)) {
         moveStack(from, to);
+        tutRef.current.moves++;
         // 합류한 경우에도 도착 칸을 소진 처리한다.
         // 아니면 A를 B에 합친 뒤 B를 또 움직여 사실상 두 번 움직이게 된다.
         actedRef.current.add(to.id);
@@ -1235,6 +1262,14 @@ export default function GameScreen() {
   };
 
   const reset = (idx = modeIdx, sIdx = sizeIdx, dIdx = diffIdx) => {
+    // 길잡이 판은 startTutorial 이 표시해 둔 한 번뿐이다. 리셋·모드 바꾸기로
+    // 새 판을 열면 길잡이는 끝난다.
+    const tut = tutorialNextRef.current;
+    tutorialNextRef.current = false;
+    tutRef.current = { moves: 0, paths: 0, recruits: 0, attacks: 0 };
+    coachBaseRef.current = null;
+    setCoach(tut ? 0 : null);
+    setCoachDone(false);
     setWatching(false);
     setModeIdx(idx);
     setSizeIdx(sIdx);
@@ -1244,7 +1279,7 @@ export default function GameScreen() {
       const s = createGameState(MODES[idx].nations, size, size, rng);
       applyHandicap(s, DIFFICULTIES[dIdx].incomeMul);
       beginTurn(s, PLAYER, rng);
-      beginMatch(s, dIdx);
+      beginMatch(s, dIdx, tut);
       // 새 판을 그 자리에서 한 번 적어둔다. 턴이 1 에서 1 로 바뀌지 않아
       // 저장 효과가 안 뜨는 경우가 있다.
       writeSave(
@@ -1261,6 +1296,92 @@ export default function GameScreen() {
     setSelected(null);
     setCombat(null);
     actedRef.current = new Set();
+  };
+
+  /** 기록이 열린 채 두는 중인가. 도움말 창의 '시작' 이 새 판인지 계속인지 가른다. */
+  const inMatch = matchRef.current !== null && state.winner === null;
+
+  // ── 길잡이 ──────────────────────────────────────────────
+  const coachNow: CoachProgress = {
+    selected: selected !== null,
+    ...tutRef.current,
+    turn: state.turn,
+  };
+  const advanceCoach = () => {
+    coachBaseRef.current = { ...coachNow };
+    setCoachDone(false);
+    setCoach((c) => (c === null ? null : Math.min(c + 1, COACH_STEPS.length - 1)));
+  };
+  const quitCoach = () => {
+    coachBaseRef.current = null;
+    setCoachDone(false);
+    setCoach(null);
+  };
+  const coachStep = coach !== null ? COACH_STEPS[coach] : null;
+  /** 판 위에서 짚는 칸. 해낸 뒤(풀이 중)에는 짚지 않는다. */
+  const coachCell =
+    coachStep && !coachDone && myTurn
+      ? coachTarget(state, PLAYER, coachStep.target, selected, actedRef.current)
+      : null;
+  const coachIsReady = coachStep
+    ? coachReady(state, PLAYER, coachStep, coachCell, selected)
+    : true;
+  /** 반짝이게 할 단추 */
+  const coachButton =
+    coachStep && !coachDone && myTurn && coachIsReady ? coachStep.target : undefined;
+  /**
+   * 스포트라이트 — 누를 것만 밝히고 나머지는 어둡게.
+   *
+   * 반짝이는 표지만으로는 3D 판의 깃발·나무·안개 사이에서 눈이 헤맨다.
+   * 나머지를 누르지 못하게 막지는 않는다. 막으면 짚을 것이 없는 순간
+   * (옆에 적이 없음 등) 판에 갇힌다 — 어둡게만 해서 눈을 끈다.
+   */
+  const spot: 'cell' | 'button' | 'gold' | null =
+    !coachStep || coachDone || !myTurn || !coachIsReady
+      ? null
+      : coachButton === 'recruit' || coachButton === 'endTurn'
+      ? 'button'
+      : coachStep.target === 'gold'
+      ? 'gold'
+      : coachCell
+      ? 'cell'
+      : null;
+  /** 칸 스포트라이트에서 밝게 남길 칸 — 짚은 칸과 고른 부대 */
+  const litCells = spot === 'cell' ? [coachCell!, ...(selected ? [selected] : [])] : null;
+  /*
+    그림이 바뀔 때마다 지금 단계를 해냈는지 본다. 엔진이 상태를 제자리에서
+    고치고 bump() 로 다시 그리므로, 셈(tutRef)이 늘면 곧 여기로 온다.
+  */
+  useEffect(() => {
+    if (coach === null) return;
+    if (!coachBaseRef.current) {
+      coachBaseRef.current = { ...coachNow };
+      return;
+    }
+    if (coachDone) return;
+    const st = COACH_STEPS[coach];
+    if (st?.done?.(coachNow, coachBaseRef.current)) {
+      // 풀이가 있으면 먼저 보여주고, 없으면 바로 다음 과제로
+      if (st.after) setCoachDone(true);
+      else advanceCoach();
+    }
+  });
+
+  /**
+   * 길잡이 판을 연다 — 1대1 · 가장 작은 판 · 아주 쉬움.
+   * 처음 하는 사람이 다섯 나라 난전에 던져지면 무엇이 무엇 때문에 일어났는지
+   * 가릴 수 없다. 상대 하나, 좁은 판이면 몇 턴 만에 적과 닿아 '싸우기'
+   * 단계까지 간다.
+   */
+  const startTutorial = () => {
+    if (!playerName.trim()) {
+      setNameAsk(true);
+      return;
+    }
+    markTutorialSeen();
+    tutorialNextRef.current = true;
+    reset(0, 0, 0);
+    setShowHelp(false);
   };
 
   // ── 렌더 ────────────────────────────────────────────────
@@ -1407,7 +1528,11 @@ export default function GameScreen() {
     return (
       <TouchableOpacity
         key={cell.id}
-        style={[styles.hex, { left: lay.x(cell), top: lay.y(cell) }]}
+        style={[
+          styles.hex,
+          { left: lay.x(cell), top: lay.y(cell) },
+          litCells && !litCells.includes(cell.id) && styles.dim,
+        ]}
         onPress={() => onCellPress(cell)}
         activeOpacity={0.8}
       >
@@ -1417,7 +1542,9 @@ export default function GameScreen() {
             fill={fill}
             fillOpacity={seen ? 1 : 0.85}
             stroke={
-              isSel
+              cell.id === coachCell
+                ? '#f472b6'
+                : isSel
                 ? '#fff'
                 : shownCastle
                 ? '#fbbf24'
@@ -1430,7 +1557,7 @@ export default function GameScreen() {
                 : 'rgba(255,255,255,0.14)'
             }
             strokeWidth={
-              isSel ? 3 : shownCastle ? 3 : shownFort === 4 ? 2.5 : isActive ? 2 : seen && cell.hasRoad ? 2 : 1
+              cell.id === coachCell ? 5 : isSel ? 3 : shownCastle ? 3 : shownFort === 4 ? 2.5 : isActive ? 2 : seen && cell.hasRoad ? 2 : 1
             }
           />
         </Svg>
@@ -1470,7 +1597,14 @@ export default function GameScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, wide && { width: paneW }]}>
+      <View
+        style={[
+          styles.header,
+          wide && { width: paneW },
+          spot !== null && spot !== 'gold' && styles.dim,
+          spot === 'gold' && styles.coachGlow,
+        ]}
+      >
         <View style={styles.headerRow}>
           <Text style={styles.title}>턴 {state.turn}</Text>
           <View style={[styles.turnChip, { backgroundColor: current.color }]}>
@@ -1511,7 +1645,22 @@ export default function GameScreen() {
         )}
       </View>
 
-      {/* 관전 조작 */}
+      {coach !== null && !watching && (
+        <View style={wide ? { width: paneW } : undefined}>
+          <Coach
+            step={coach}
+            done={coachDone}
+            ready={coachIsReady}
+            color={state.nations[PLAYER].color}
+            onNext={advanceCoach}
+            onQuit={quitCoach}
+          />
+        </View>
+      )}
+
+      {/* 관전 조작 — 길잡이 중에는 숨긴다(처음 하는 사람에게는 소음이고, 자리를 먹어
+          부대 정보가 아래 단추에 가려졌다) */}
+      {coach === null && (
       <View style={styles.watchBar}>
         <TouchableOpacity
           style={[styles.chip, watching ? styles.chipOn : styles.chipOff]}
@@ -1532,9 +1681,10 @@ export default function GameScreen() {
           </TouchableOpacity>
         ))}
       </View>
+      )}
 
       {/* 수치 표 */}
-      {showStats && (
+      {showStats && coach === null && (
         <View style={[styles.table, wide && { width: paneW }]}>
           <View style={styles.trHead}>
             <Text style={[styles.th, styles.colName]}>나라</Text>
@@ -1598,7 +1748,12 @@ export default function GameScreen() {
         칸 크기를 거기 맞춘다 — 고정 픽셀로 두면 화면마다 잘리거나 남는다.
       */}
       <View
-        style={[styles.gridWrap, wide && styles.gridWide, wide && { left: paneW + 8 }]}
+        style={[
+          styles.gridWrap,
+          wide && styles.gridWide,
+          wide && { left: paneW + 8 },
+          (spot === 'button' || spot === 'gold') && styles.dim,
+        ]}
         onLayout={(e) => {
           // 옆에 둘 때는 판이 절대 위치라 이 값이 위아래 높이를 말해주지 않는다
           if (!wide) setChromeH(Math.max(0, winH - e.nativeEvent.layout.height));
@@ -1613,6 +1768,8 @@ export default function GameScreen() {
               selected={selected}
               movable={movable}
               path={path3D}
+              hint={coachCell}
+              lit={litCells}
               onCellPress={onCellPress}
             />
           </View>
@@ -1627,7 +1784,7 @@ export default function GameScreen() {
       </View>
 
       {/* 최근 사건 */}
-      <View style={[styles.feed, wide && { width: paneW }]}>
+      <View style={[styles.feed, wide && { width: paneW }, spot !== null && styles.dim]}>
         {state.log.slice(-3).map((l, i) => (
           <Text key={i} style={styles.feedLine} numberOfLines={1}>
             · {l}
@@ -1637,7 +1794,7 @@ export default function GameScreen() {
       </View>
 
       {selectedCell && (
-        <View style={[styles.panel, wide && { width: paneW }]}>
+        <View style={[styles.panel, wide && { width: paneW }, spot !== null && styles.dim]}>
           <Text style={styles.panelTitle}>
             병력 {selectedCell.units} · 사기 {Math.round(selectedCell.morale)} · 피로{' '}
             {Math.round(selectedCell.exhaustion)}
@@ -1689,17 +1846,28 @@ export default function GameScreen() {
         움직여서, 턴 종료를 연달아 누르다 엉뚱한 것을 누르게 된다. 직접
         해보고 알았다 — 다섯 번 눌렀는데 한 턴만 갔다.
       */}
-      <View style={[styles.footer, wide && styles.footerWide, wide && { width: paneW }]}>
+      <View
+        style={[
+          styles.footer,
+          wide && styles.footerWide,
+          wide && { width: paneW },
+          (spot === 'cell' || spot === 'gold') && styles.dim,
+        ]}
+      >
         <View style={styles.row}>
           <TouchableOpacity
             style={[
               styles.btn,
               styles.recruitBtn,
               (!myTurn || readyCastles === 0) && styles.btnDim,
+              spot === 'button' && coachButton !== 'recruit' && styles.dim,
+              coachButton === 'recruit' && styles.coachGlow,
             ]}
             onPress={() =>
               setState((prev) => {
-                humanRef.current.recruited += recruit(prev, PLAYER);
+                const got = recruit(prev, PLAYER);
+                humanRef.current.recruited += got;
+                tutRef.current.recruits += got;
                 return bump(prev);
               })
             }
@@ -1712,16 +1880,27 @@ export default function GameScreen() {
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.btn, styles.endBtn, !myTurn && styles.btnDim]}
+            style={[
+              styles.btn,
+              styles.endBtn,
+              !myTurn && styles.btnDim,
+              spot === 'button' && coachButton !== 'endTurn' && styles.dim,
+              coachButton === 'endTurn' && styles.coachGlow,
+            ]}
             onPress={endTurn}
             disabled={!myTurn}
           >
             <Text style={styles.btnText}>턴 종료</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btn, styles.resetBtn]} onPress={() => reset()}>
+          <TouchableOpacity
+            style={[styles.btn, styles.resetBtn, spot === 'button' && styles.dim]}
+            onPress={() => reset()}
+          >
             <Text style={styles.btnText}>리셋</Text>
           </TouchableOpacity>
         </View>
+        {/* 단추 스포트라이트 중에는 첫 줄 아래를 통째로 어둡게 */}
+        <View style={[styles.footerRest, spot === 'button' && styles.dim]}>
         {myVassals.length > 0 && (
           <View style={styles.row}>
             <TouchableOpacity
@@ -1807,6 +1986,7 @@ export default function GameScreen() {
             저장할 수 없는 창입니다 — 닫으면 판이 사라집니다
           </Text>
         )}
+        </View>
       </View>
 
       {state.winner !== null && (
@@ -1895,7 +2075,30 @@ export default function GameScreen() {
               </Text>
             )}
 
-            {resumable && (
+            {/*
+              처음 온 사람에게는 길잡이를 맨 위에 크게 권한다. 한 번 본 사람에게는
+              작은 글씨로만 — 매번 크게 권하면 귀찮아서 안 읽는다.
+            */}
+            {firstVisit ? (
+              <>
+                <TouchableOpacity
+                  style={[styles.btn, styles.tutorialBtn, { marginTop: 12 }]}
+                  onPress={startTutorial}
+                >
+                  <Text style={styles.btnText}>처음이에요 — 배우면서 한 판</Text>
+                </TouchableOpacity>
+                <Text style={styles.hint}>
+                  1대1 · 작은 판 · 아주 쉬운 상대와, 한 단계씩 해보며 배웁니다.
+                </Text>
+              </>
+            ) : (
+              <TouchableOpacity onPress={startTutorial} style={{ marginTop: 10 }}>
+                <Text style={styles.toggle}>길잡이 다시 하기</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* 두는 중에 연 도움말이면 켤 때 읽어둔 옛 저장을 권하지 않는다 */}
+            {resumable && !inMatch && (
               <>
                 <TouchableOpacity
                   style={[styles.btn, styles.recruitBtn, { marginTop: 12 }]}
@@ -1920,6 +2123,14 @@ export default function GameScreen() {
                   setNameAsk(true);
                   return;
                 }
+                /*
+                  두던 중에 '도움말' 로 연 것이면 창만 닫는다. 전에는 여기서도
+                  기록을 새로 열어, 판은 그대로인데 기록만 두 조각이 났다.
+                */
+                if (inMatch) {
+                  setShowHelp(false);
+                  return;
+                }
                 setState((prev) => {
                   beginMatch(prev, diffIdx);
                   return bump(prev);
@@ -1927,7 +2138,9 @@ export default function GameScreen() {
                 setShowHelp(false);
               }}
             >
-              <Text style={styles.btnText}>{resumable ? '새로 시작' : '시작'}</Text>
+              <Text style={styles.btnText}>
+                {inMatch ? '계속하기' : resumable ? '새로 시작' : '시작'}
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2288,6 +2501,19 @@ const styles = StyleSheet.create({
   btnDim: { opacity: 0.4 },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   endBtn: { backgroundColor: '#3b82f6' },
+  tutorialBtn: { backgroundColor: '#b45309' },
+  /** 스포트라이트 밖 */
+  dim: { opacity: 0.22 },
+  footerRest: { gap: 6 },
+  /** 길잡이가 '이걸 누르세요' 하고 짚는 단추 */
+  coachGlow: {
+    borderWidth: 3,
+    borderColor: '#f472b6',
+    shadowColor: '#f472b6',
+    shadowOpacity: 0.9,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+  },
   resetBtn: { backgroundColor: '#ef4444' },
   modeBtn: { backgroundColor: '#475569' },
   vassalBtn: { backgroundColor: '#7c3aed' },

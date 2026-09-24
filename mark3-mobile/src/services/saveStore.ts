@@ -48,3 +48,26 @@ export function clearSave(): void {
 export function canSave(): boolean {
   return store() !== null;
 }
+
+const TUTORIAL_KEY = 'mark3.tutorial.v1';
+
+/**
+ * 길잡이를 한 번이라도 열었나. 처음 온 사람에게만 크게 권하고, 한 번 본
+ * 사람에게는 작은 글씨로만 남긴다 — 매번 크게 권하면 귀찮아서 끈다.
+ * 저장이 안 되는 곳이면 늘 처음으로 친다(권해서 손해 볼 건 없다).
+ */
+export function tutorialSeen(): boolean {
+  try {
+    return store()?.getItem(TUTORIAL_KEY) === 'seen';
+  } catch {
+    return false;
+  }
+}
+
+export function markTutorialSeen(): void {
+  try {
+    store()?.setItem(TUTORIAL_KEY, 'seen');
+  } catch {
+    /* 다음에 또 권하면 된다 */
+  }
+}
