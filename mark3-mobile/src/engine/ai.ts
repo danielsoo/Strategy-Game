@@ -22,6 +22,8 @@ import {
   adminHubs,
   estimateWinProb,
   performAttack,
+  spareBand,
+  slayBand,
   moveStack,
   AttackOutcome,
   isHostile,
@@ -1261,6 +1263,11 @@ export function* takeAITurnGen(
       }
       const out = performAttack(state, c, best.target, rng, eco, forced, defenseNoise);
       log.attacks.push(out);
+      // 진 무리가 달아난다 — 공포의 나라는 쫓아 섬멸하고, 그 밖에는 보내준다
+      if (out.fledBand) {
+        if (characterOf(state.nations[nationId]) === 'feared') slayBand(state, nationId, out.fledBand);
+        else spareBand(state, nationId);
+      }
 
       /**
        * 진격 명령 — 친 것만 셈에 넣되, 진실과 목격을 따로 적는다.

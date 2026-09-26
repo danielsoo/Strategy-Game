@@ -108,6 +108,9 @@ import {
   CHARACTER_NAME,
   forgiveVassal,
   knows,
+  canHire,
+  hireCost,
+  hireBand,
 } from '../engine';
 import type { Chronicle } from '../engine';
 import type { Encounter, TreatyKind } from '../engine';
@@ -277,6 +280,10 @@ const HELP: Array<{ title: string; body: string }> = [
   {
     title: '정의와 공포',
     body: '모든 나라는 아무 성향 없이 시작한다. 옳은 일(약속을 끝까지 지킴, 청해 온 약자를 받아줌, 법대로 벌함, 동맹의 적과 함께 싸움)이 정의를 쌓고, 잔혹한 일(병합, 약탈, 징발, 토벌, 배신)이 공포를 쌓는다. 공포는 자비(병합 대신 속국으로 살려둠, 용서, 공물을 돌려줌, 마을을 도움)로만 누그러진다. 저절로 돌아오지는 않는다. 한쪽이 다른 쪽을 15 넘게 앞서면 나라의 성격이 바뀐다. 정의의 나라에는 마음(충성)이 붙고 약소국이 기대 오며, 공포의 나라는 명령이 잘 먹히고 적의 사기를 꺾지만 속국의 마음이 떠나고, 흔들리는 순간 한꺼번에 등을 돌린다.',
+  },
+  {
+    title: '도적과 용병',
+    body: '도적(🦹)과 용병(⚔️) 무리는 저마다 움직이고, 저마다 선악이 있다. 도적은 털 만한 나라 땅을 찾아 떠돌다 옆에서 금을 털고, 센 군대가 오면 달아난다. 두려운 나라는 털지 못한다 — 공포의 이득이다. 털 수 있었는데 지나간 무리는 선해지고, 턴 무리는 악해진다. 선해진 도적은 칼을 내려놓고 용병이 되거나 정의로운 군대에 투항하고, 일거리를 잃은 악한 용병은 도적이 된다. 용병 무리는 돈 많은 나라 쪽으로 떠돌며, 내 땅 옆에 온 무리를 누르면 통째로 고용할 수 있다. 무리를 쳐서 이기면 달아나는 자들을 보내줄지(자비) 쫓을지(잔혹) 고른다.',
   },
   {
     title: '행군 중에 만나는 일',
@@ -595,6 +602,8 @@ export default function GameScreen() {
    * 연대기 — 나라의 성격이 바뀐 순간. 내 나라이거나 내가 아는 나라면 크게 띄운다.
    * 마지막으로 본 줄을 붙들고 있다가 그 뒤에 새로 적힌 것만 본다(목록은 30줄에서 밀린다).
    */
+  /** 고용하려고 누른 용병 무리 */
+  const [hirePick, setHirePick] = useState<string | null>(null);
   const lastChronRef = useRef<Chronicle | null>(null);
   const [chron, setChron] = useState<Chronicle | null>(null);
 
@@ -880,6 +889,11 @@ export default function GameScreen() {
       setMerchantPick(merchantHere);
       return;
     }
+    // 내 땅이나 부대 옆의 용병 무리를 누르면 고용을 묻는다
+    if (!selected && cell.neutral === 'mercenary' && canHire(state, PLAYER, cell)) {
+      setHirePick(cell.id);
+      return;
+    }
 
     if (!selected) {
       if (cell.owner === PLAYER && cell.units > 0 && !cell.neutral) {
@@ -947,10 +961,26 @@ export default function GameScreen() {
       if (isHostile(from, to, prev)) {
         const wasCastle = to.castle;
         const victim = to.owner;
+        const wasNeutral = to.neutral;
         const outcome = performAttack(prev, from, to, rng);
         setCombat(outcome.result);
         humanRef.current.attacks++;
         tutRef.current.attacks++;
+        // 진 무리가 달아난다 — 보내줄지 쫓을지 묻는다 (나라의 자비·잔혹)
+        if (outcome.fledBand) {
+          const kind = wasNeutral === 'mercenary' ? '용병' : '도적';
+          encQueueRef.current.push({
+            kind: 'band:fled',
+            title: `달아나는 ${kind} 무리`,
+            story: `싸움에서 진 ${kind} 무리가 무기를 끌며 달아난다. 등을 보인 자들이다.`,
+            options: [
+              { label: '보내준다 (공포 -1)', effect: { fear: -1 } },
+              { label: '쫓아 섬멸한다 (공포 +1)', effect: { fear: 1, slay: outcome.fledBand } },
+            ],
+            nation: PLAYER,
+            cellId: outcome.fledBand,
+          });
+        }
         tutRef.current.moves++;
         if (outcome.capturedCell) humanRef.current.captured++;
         // 이겨서 밀고 들어갔으면 목표 칸에, 아니면 제자리에 남는다
@@ -2204,6 +2234,50 @@ export default function GameScreen() {
       )}
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
+
+      {/* 용병 고용 — 무리가 통째로 내 부대가 된다 */}
+      <Modal visible={!!hirePick} transparent animationType="fade">
+        <View style={styles.overlay}>
+          {(() => {
+            const c = hirePick ? state.cells.find((x) => x.id === hirePick) : null;
+            if (!c || c.neutral !== 'mercenary') return null;
+            const cost = hireCost(c);
+            const g = c.bandGood ?? 0;
+            const temper =
+              g >= 30 ? '믿을 만한 무리다' : g <= -30 ? '평판이 나쁜 무리다 — 값을 더 부른다' : '그저 돈을 따르는 무리다';
+            return (
+              <View style={styles.modal}>
+                <Text style={styles.modalTitle}>⚔️ 용병 무리 {c.units}명</Text>
+                <Text style={styles.helpBody}>{temper}</Text>
+                <Text style={[styles.hint, { marginTop: 6 }]}>
+                  고용하면 그 자리에서 당신의 부대가 됩니다. 선한 무리일수록 싸고, 악한 무리일수록 비쌉니다.
+                </Text>
+                <View style={[styles.row, { marginTop: 12 }]}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.recruitBtn, me.gold < cost && styles.btnDim]}
+                    disabled={me.gold < cost}
+                    onPress={() => {
+                      const id = hirePick;
+                      setHirePick(null);
+                      if (id)
+                        setState((prev) => {
+                          hireBand(prev, PLAYER, id);
+                          recomputeVision(prev, PLAYER);
+                          return bump(prev);
+                        });
+                    }}
+                  >
+                    <Text style={styles.btnText}>고용한다 ({cost}G)</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.btn, styles.resetBtn]} onPress={() => setHirePick(null)}>
+                    <Text style={styles.btnText}>그만둔다</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })()}
+        </View>
+      </Modal>
 
       {/* 연대기 — 나라의 성격이 바뀌었다 */}
       <Modal visible={!!chron} transparent animationType="fade">

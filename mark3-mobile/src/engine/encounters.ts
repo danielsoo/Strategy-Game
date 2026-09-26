@@ -37,6 +37,8 @@ export interface EncounterEffect {
   exhaustion?: number;
   /** 비는 도적 칸 */
   scatter?: string;
+  /** 쫓아 섬멸하는 무리 칸 (달아나는 무리를 쫓을 때) */
+  slay?: string;
 }
 
 export interface EncounterOption {
@@ -243,7 +245,8 @@ const EVENTS: EventKind[] = [
       {
         key: 'join',
         lean: 'J',
-        weight: (c) => 0.4 + 2 * c.J,
+        // 선한 도적일수록 투항하기 쉽다 — 무리 자신이 쌓은 선악이 여기서 보인다
+        weight: (c) => 0.4 + 2 * c.J + Math.max(0, c.bandit?.bandGood ?? 0) / 50,
         make: (c) => ({
           title: '투항하는 도적',
           story: '옆 소굴의 도적들이 무기를 내려놓고 받아달라 청한다.',
@@ -258,7 +261,8 @@ const EVENTS: EventKind[] = [
       },
       {
         key: 'ambush',
-        weight: () => 1.0,
+        // 악한 도적일수록 덮친다
+        weight: (c) => 0.4 + Math.max(0, -(c.bandit?.bandGood ?? -40)) / 50,
         make: () => ({
           title: '도적의 기습',
           story: '옆 소굴의 도적들이 밤을 틈타 야영지를 덮쳤다.',
@@ -394,6 +398,17 @@ export function applyEncounter(
     if (fx.units) c.units = Math.max(1, Math.min(stackCap(eco), c.units + fx.units));
     if (fx.morale) c.morale = Math.max(0, Math.min(100, c.morale + fx.morale));
     if (fx.exhaustion) c.exhaustion = Math.max(0, Math.min(100, c.exhaustion + fx.exhaustion));
+  }
+  if (fx.slay) {
+    const b = state.cells.find((x) => x.id === fx.slay);
+    if (b && b.neutral && b.units > 0) {
+      b.units = 0;
+      b.neutral = undefined;
+      b.bandGood = undefined;
+      b.bandIdle = undefined;
+      b.morale = 100;
+      b.exhaustion = 0;
+    }
   }
   if (fx.scatter) {
     const b = state.cells.find((x) => x.id === fx.scatter);

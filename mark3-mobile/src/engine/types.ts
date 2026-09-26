@@ -48,6 +48,15 @@ export interface Cell {
   encircled: boolean;
   /** owner 가 null 이면서 units > 0 일 때의 세력 종류 */
   neutral?: NeutralKind;
+  /**
+   * 중립 무리의 선·악 -100~100. 나라의 정의·공포와 달리 한 축이다.
+   * 도적은 악 쪽(-40 안팎), 용병은 가운데에서 시작한다. 무리 자신이 한 일로
+   * 바뀐다 — 털 수 있었는데 지나가면 선, 털면 악. 무리가 움직이면 같이
+   * 옮겨간다(moveStack).
+   */
+  bandGood?: number;
+  /** 무리가 털지도, 고용되지도 못한 채 보낸 턴 — 오래 굶은 무리는 흩어지거나 타락한다 */
+  bandIdle?: number;
   /** 무역상이 닦아놓은 길 */
   hasRoad?: boolean;
   /**
@@ -212,6 +221,8 @@ export interface GameState {
    * 참을성이 다하면 주인이 조약을 깬다.
    */
   intrusions?: Record<string, number>;
+  /** 중립 무리가 마지막으로 움직인 턴 — 한 턴에 한 번만 움직이게 */
+  neutralTurn?: number;
   /** 나라의 성격이 바뀐 순간들 — 화면이 연대기처럼 띄운다 */
   chronicle?: import('./reputation').Chronicle[];
   /** 동맹의 명분이 사라진 채 지난 턴 수. 'a-b' → 턴. */

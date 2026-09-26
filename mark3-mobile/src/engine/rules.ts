@@ -263,6 +263,8 @@ export function createGameState(
     const pick = cand[Math.floor(rng() * cand.length)];
     pick.units = 3 + Math.floor(rng() * 3);
     pick.neutral = 'mercenary';
+    pick.bandGood = Math.round((rng() - 0.5) * 40);
+    pick.bandIdle = 0;
   }
 
   for (let i = 0; i < nationCount; i++) recomputeVision(state, i, eco);
@@ -608,6 +610,8 @@ function clearStack(c: Cell): void {
   c.march = 100;
   c.order = undefined;
   c.neutral = undefined;
+  c.bandGood = undefined;
+  c.bandIdle = undefined;
   c.encircled = false;
 }
 
@@ -625,6 +629,8 @@ export interface AttackOutcome {
   choice: DefenseChoice;
   /** 항복했을 때 공격자에 편입된 병력 */
   recruited?: number;
+  /** 싸움에서 진 중립 무리가 달아난 칸 — 나라가 보내줄지 쫓을지 고른다 */
+  fledBand?: string;
 }
 
 /** 이 칸을 빼앗았을 때 상대 국고에서 가져오는 액수 */
@@ -832,6 +838,7 @@ export function performAttack(
   to.exhaustion = Math.min(100, to.exhaustion + 15);
 
   let captured = false;
+  let fledBand: string | undefined;
 
   /*
     동맹의 적과 함께 싸우는 것은 옳은 일이다 — 동맹이 '서로 안 친다' 에서 그치지
@@ -864,15 +871,23 @@ export function performAttack(
       raider.gold += loot;
       pushLog(state, `${raider.name}: ${victim.name}에게서 ${loot}G를 약탈했습니다`);
     }
-    // 수비측 생존자는 인접 빈 칸으로 후퇴, 없으면 흩어진다
-    const refuge = neighbors(state, to).find((n) => n.units === 0 && !n.castle);
+    // 수비측 생존자는 인접 빈 칸으로 후퇴, 없으면 흩어진다.
+    // 중립 무리는 주인 없는 땅으로만 달아난다 — 나라 땅에 서면 그 나라의
+    // 병력으로 셈이 섞인다.
+    const refuge = neighbors(state, to).find(
+      (n) => n.units === 0 && !n.castle && (!to.neutral || n.owner === null)
+    );
     if (res.defenderSurvivors > 0 && refuge) {
       refuge.units = res.defenderSurvivors;
       refuge.morale = Math.max(20, res.defenderMorale);
       refuge.exhaustion = to.exhaustion;
       refuge.driftPP = to.driftPP;
       refuge.neutral = to.neutral;
+      refuge.bandGood = to.bandGood;
+      refuge.bandIdle = 0;
       if (!to.neutral) refuge.owner = to.owner;
+      // 나라가 무리를 이겼다 — 달아나는 자들을 보내줄지 쫓을지는 그 나라의 자비다
+      if (to.neutral && from.owner !== null && !from.neutral) fledBand = refuge.id;
     }
 
     const attackerOwner = from.owner;
@@ -915,6 +930,7 @@ export function performAttack(
     fromId: from.id,
     toId: to.id,
     choice: 'fight',
+    fledBand,
   };
 }
 
@@ -982,6 +998,8 @@ export function moveStack(from: Cell, to: Cell, eco: EconomyConfig = DEFAULT_ECO
     to.march = Math.max(0, from.march - spent);
     to.lastFrom = from.id;
     to.order = from.order;
+    to.bandGood = from.bandGood;
+    to.bandIdle = from.bandIdle;
     if (!from.neutral) to.owner = from.owner;
   }
   const keepOwner = from.owner;
@@ -1100,60 +1118,335 @@ export function recruit(
 // ─────────────────────────────────────────────────────────────
 
 /** 강도는 무역상을 노린다. 공포가 높은 나라의 무역상은 덜 건드린다. */
-export function stepNeutrals(state: GameState, rng: RNG): void {
-  const bandits = state.cells.filter((c) => c.neutral === 'bandit' && c.units > 0);
+/** 무리의 선악을 옮긴다 — 무리 자신이 한 일로만 */
+function shiftBand(c: Cell, d: number): void {
+  c.bandGood = Math.max(-100, Math.min(100, (c.bandGood ?? 0) + d));
+}
 
-  for (const b of bandits) {
-    // 인접한 무역상을 약탈
-    const prey = state.merchants.find(
-      (m) => hexDistance(b.row, b.col, m.row, m.col) <= 1
-    );
-    if (prey) {
-      const owner = state.nations[prey.nation];
-      const fearShield = owner ? effective(owner.fear) / 100 : 0.5;
-      if (rng() > fearShield * 0.6) {
-        state.merchants = state.merchants.filter((m) => m.id !== prey.id);
-        pushLog(state, `강도가 ${owner?.name ?? ''} 무역상을 약탈했습니다 (-${prey.gold}G)`);
-        continue;
-      }
+function bandScale(state: GameState): number {
+  return Math.max(0.5, Math.floor(Math.min(state.rows, state.cols) / 2) / 5);
+}
+
+/** 무리가 발을 디딜 수 있는 칸 — 주인 없는 빈 땅만. 나라 땅에 서면 셈이 섞인다. */
+function openGround(c: Cell): boolean {
+  return !c.offMap && c.units === 0 && c.owner === null && !c.castle && c.fortStage === 0;
+}
+
+/**
+ * 중립 무리 — 도적과 용병. 저마다 하나의 AI 다.
+ *
+ * 예전에는 용병이 판을 만들 때 놓인 자리에 게임 내내 서 있었고, 도적은
+ * 무역상 근처에만 생겼다. 그런데 무역상은 완공 요새가 둘 있어야 생기고
+ * 학습된 AI 는 요새를 짓지 않아서(fort 0.0), 실제 판에는 무역상도 도적도
+ * 한 번도 나오지 않았다(11·21 한 판씩: 무역상 0 · 강도 0).
+ *
+ * 이제 무리는 스스로 움직이고, 스스로 한 일로 선악이 바뀐다.
+ *   도적  털 만한 나라 땅 쪽으로 떠돌다 마주치면 — 털거나(악 +3), 털 수
+ *         있었는데 지나간다(선 +2). 공포 때문에 못 턴 것은 선택이 아니다(그대로).
+ *         센 군대가 오면 달아나고, 털면 불어나고, 오래 굶으면 흩어진다.
+ *         선이 60 을 넘으면 칼을 내려놓고 용병이 된다.
+ *   용병  돈 많은 나라 쪽으로 천천히(2턴에 한 칸) 떠돈다. 마주친 나라에
+ *         통행세를 뜯으면 악, 조용히 지나가면 선. 악한 용병이 오래 일거리를
+ *         못 찾으면 도적이 된다. 고용할 수 있다(hireBand).
+ *
+ * 공포의 이득이 여기 있다 — 두려운 나라는 털지 못한다(공포만큼 억지). 정의의
+ * 이득은 행군 사건 쪽이다 — 선한 도적은 정의로운 군대에 투항하기 쉽다.
+ * 무리는 나라를 먼저 치지 않는다. 옆에서 털고, 센 군대가 오면 달아날 뿐이다.
+ */
+export function stepNeutrals(state: GameState, rng: RNG): void {
+  // 나라마다 불리지만(한 바퀴에 나라 수만큼) 무리는 한 턴에 한 번만 움직인다.
+  // 막지 않으면 다섯 나라 판에서 무리가 한 턴에 다섯 걸음을 간다.
+  if (state.neutralTurn === state.turn) return;
+  state.neutralTurn = state.turn;
+  const scale = bandScale(state);
+  const done = new Set<string>();
+  const ids = state.cells.filter((c) => c.neutral && c.units > 0).map((c) => c.id);
+  for (const id of ids) {
+    if (done.has(id)) continue;
+    const b = state.cells.find((c) => c.id === id);
+    if (!b || !b.neutral || b.units <= 0) continue;
+    if (b.bandGood === undefined) b.bandGood = b.neutral === 'bandit' ? -40 : 0;
+    if (b.bandIdle === undefined) b.bandIdle = 0;
+    const moved = b.neutral === 'bandit' ? stepBandit(state, b, rng, scale) : stepMerc(state, b, rng, scale);
+    if (moved) done.add(moved.id);
+  }
+  spawnBandits(state, rng, scale);
+}
+
+/** 도적 한 무리의 한 턴. 옮겨갔으면 새 칸을 준다. */
+function stepBandit(state: GameState, b: Cell, rng: RNG, scale: number): Cell | null {
+  const myP = cellPower(b, false);
+
+  // 1) 센 군대가 옆에 있으면 달아난다. 두려운 나라의 군대 앞에서는 더 일찍.
+  let threat: Cell | null = null;
+  for (const n of neighbors(state, b)) {
+    if (n.units <= 0 || n.neutral || n.owner === null) continue;
+    const F = (state.nations[n.owner]?.fear ?? 0) / 100;
+    if (cellPower(n, false) >= myP * (1.5 - 0.6 * F)) {
+      threat = n;
+      break;
     }
-    // 가장 가까운 무역상 쪽으로 한 칸
-    let best: Cell | null = null;
-    let bestD = Infinity;
-    for (const n of neighbors(state, b)) {
-      if (n.units > 0 || n.castle) continue;
-      let d = Infinity;
-      for (const m of state.merchants) {
-        d = Math.min(d, hexDistance(n.row, n.col, m.row, m.col));
-      }
-      if (d < bestD) {
-        bestD = d;
-        best = n;
-      }
+  }
+  if (threat) {
+    const t = threat;
+    const esc = neighbors(state, b)
+      .filter(openGround)
+      .sort(
+        (x, y) =>
+          hexDistance(y.row, y.col, t.row, t.col) - hexDistance(x.row, x.col, t.row, t.col)
+      )[0];
+    if (esc) {
+      moveStack(b, esc);
+      return esc;
     }
-    if (best) moveStack(b, best);
+    return null;
   }
 
-  // 무역상이 돌아다니면 이따금 강도가 나타난다.
-  // 판에 도는 돈이 많을수록 자주 나타난다 — 부는 그 자체로 위험을 부른다.
+  // 2) 옆의 무역상을 턴다 (무역상이 있을 때)
+  const prey = state.merchants.find((m) => hexDistance(b.row, b.col, m.row, m.col) <= 1);
+  if (prey) {
+    const owner = state.nations[prey.nation];
+    const fearShield = owner ? effective(owner.fear) / 100 : 0.5;
+    if (rng() > fearShield * 0.6) {
+      state.merchants = state.merchants.filter((m) => m.id !== prey.id);
+      shiftBand(b, -3);
+      b.bandIdle = 0;
+      pushLog(state, `강도가 ${owner?.name ?? ''} 무역상을 약탈했습니다 (-${prey.gold}G)`);
+      return null;
+    }
+  }
+
+  // 3) 나라 땅과 마주쳤다 — 털까, 지나갈까
+  const lands = neighbors(state, b).filter(
+    (n) => !n.offMap && n.owner !== null && !n.neutral && n.units === 0 && !n.castle && n.fortStage === 0
+  );
+  if (lands.length > 0) {
+    // 가장 덜 두려운 나라의 땅을 본다
+    lands.sort(
+      (x, y) => (state.nations[x.owner!]?.fear ?? 0) - (state.nations[y.owner!]?.fear ?? 0)
+    );
+    const n = state.nations[lands[0].owner!];
+    const F = n.fear / 100;
+    /*
+      탐욕 — 악할수록, 배고플수록 턴다. 처음엔 '0.5 - 선/200' 이었다. 선 -40 이면
+      70% 를 털고 한 번 털 때마다 악이 3씩 붙으니 한 번 기울면 끝까지 갔다
+      (21x21 한 판: 도적 여섯 중 다섯이 선 -100, 선한 도적이 용병이 된 일 0).
+      배부른 무리는 지나가기도 해야 선으로 돌아올 길이 있다.
+    */
+    const hunger = Math.min(0.3, (b.bandIdle ?? 0) * 0.03);
+    const greed = Math.max(0.05, Math.min(0.9, 0.35 - (b.bandGood ?? 0) / 300 + hunger));
+    if (rng() < F * 0.9) {
+      // 겁을 먹었다 — 털지 못했을 뿐 선택한 것은 아니다. 선악은 그대로.
+      b.bandIdle = (b.bandIdle ?? 0) + 1;
+    } else if (rng() < greed) {
+      const steal = Math.min(Math.floor(n.gold), 1 + Math.floor(rng() * 3));
+      n.gold -= steal;
+      shiftBand(b, -2);
+      b.bandIdle = 0;
+      if (rng() < 0.5) b.units = Math.min(6, b.units + 1);
+      if (n.isHuman) pushLog(state, `🦹 도적이 ${n.name}의 땅을 털었다 (-${steal}G)`);
+      return null;
+    } else {
+      // 털 수 있었는데 지나갔다
+      shiftBand(b, +2);
+      b.bandIdle = (b.bandIdle ?? 0) + 1;
+      if ((b.bandGood ?? 0) >= 60) {
+        b.neutral = 'mercenary';
+        b.bandIdle = 0;
+        pushLog(state, '🦹 도적 무리가 칼을 내려놓고 용병이 되었다');
+        return null;
+      }
+    }
+  } else {
+    b.bandIdle = (b.bandIdle ?? 0) + 1;
+  }
+
+  // 오래 굶었다 — 흩어진다
+  if ((b.bandIdle ?? 0) > Math.round(14 * scale)) {
+    clearStack(b);
+    return null;
+  }
+
+  // 4) 털 만한 곳 쪽으로 — 덜 두려운 나라의 빈 땅. 없으면 떠돈다.
+  const reach = Math.round(5 * scale);
+  let goal: Cell | null = null;
+  let goalScore = Infinity;
+  for (const c of state.cells) {
+    if (c.offMap || c.owner === null || c.neutral || c.units > 0 || c.castle) continue;
+    const d = hexDistance(b.row, b.col, c.row, c.col);
+    if (d > reach || d <= 1) continue;
+    const score = d + (state.nations[c.owner]?.fear ?? 0) / 20;
+    if (score < goalScore) {
+      goalScore = score;
+      goal = c;
+    }
+  }
+  const steps = neighbors(state, b).filter(openGround);
+  if (steps.length === 0) return null;
+  let next: Cell | null = null;
+  if (goal) {
+    const g = goal;
+    next = steps.reduce((a, x) =>
+      hexDistance(x.row, x.col, g.row, g.col) < hexDistance(a.row, a.col, g.row, g.col) ? x : a
+    );
+  } else if (rng() < 0.5) {
+    next = steps[Math.floor(rng() * steps.length)];
+  }
+  if (!next) return null;
+  moveStack(b, next);
+  return next;
+}
+
+/** 용병 한 무리의 한 턴 */
+function stepMerc(state: GameState, b: Cell, rng: RNG, scale: number): Cell | null {
+  b.bandIdle = (b.bandIdle ?? 0) + 1;
+
+  // 마주친 나라 — 통행세를 뜯을까(악), 조용히 지나갈까(선)
+  const land = neighbors(state, b).find((n) => !n.offMap && n.owner !== null && !n.neutral);
+  if (land) {
+    const n = state.nations[land.owner!];
+    const F = n.fear / 100;
+    if (rng() < F * 0.9) {
+      // 겁을 먹었다 — 선악은 그대로
+    } else if (rng() < Math.max(0.02, 0.3 - (b.bandGood ?? 0) / 300)) {
+      const toll = Math.min(Math.floor(n.gold), 2);
+      n.gold -= toll;
+      shiftBand(b, -3);
+      if (n.isHuman) pushLog(state, `⚔️ 용병 무리가 ${n.name}에게서 통행세를 뜯었다 (-${toll}G)`);
+    } else {
+      shiftBand(b, +1);
+    }
+  }
+
+  // 일거리를 못 찾은 악한 용병은 도적이 된다
+  if ((b.bandGood ?? 0) < -30 && (b.bandIdle ?? 0) > Math.round(16 * scale)) {
+    b.neutral = 'bandit';
+    b.bandIdle = 0;
+    pushLog(state, '⚔️ 일거리를 잃은 용병 무리가 도적이 되었다');
+    return null;
+  }
+
+  // 떠돈다 — 2턴에 한 칸, 돈 많은 나라의 국경 쪽으로
+  if ((state.turn + b.row + b.col) % 2 !== 0) return null;
+  let rich: number | null = null;
+  for (const n of state.nations) {
+    if (!n.alive) continue;
+    if (rich === null || n.gold > state.nations[rich].gold) rich = n.id;
+  }
+  if (rich === null) return null;
+  let goal: Cell | null = null;
+  let best = Infinity;
+  for (const c of state.cells) {
+    if (c.owner !== rich || c.neutral) continue;
+    const d = hexDistance(b.row, b.col, c.row, c.col);
+    if (d < best) {
+      best = d;
+      goal = c;
+    }
+  }
+  if (!goal || best <= 1) return null;
+  const g = goal;
+  const steps = neighbors(state, b).filter(openGround);
+  if (steps.length === 0) return null;
+  const next = steps.reduce((a, x) =>
+    hexDistance(x.row, x.col, g.row, g.col) < hexDistance(a.row, a.col, g.row, g.col) ? x : a
+  );
+  if (hexDistance(next.row, next.col, g.row, g.col) >= best) return null;
+  moveStack(b, next);
+  return next;
+}
+
+/**
+ * 도적이 생겨난다 — 무역상과 상관없이, 주인 없는 변두리에서. 한 턴에 한 번.
+ * 판에 도는 돈이 많을수록 자주. 판 크기만큼 무리 수의 상한도 늘린다.
+ */
+function spawnBandits(state: GameState, rng: RNG, scale: number): void {
+  const alive = state.nations.filter((n) => n.alive).length;
+  const now = state.cells.filter((c) => c.neutral === 'bandit' && c.units > 0).length;
+  if (now >= Math.max(1, Math.round(alive * scale))) return;
   let richest = 0;
   for (const n of state.nations) if (n.alive && n.gold > richest) richest = n.gold;
-  const banditChance = 0.08 + Math.min(0.14, richest / 20000);
-  if (state.merchants.length > 0 && rng() < banditChance) {
-    const m = state.merchants[Math.floor(rng() * state.merchants.length)];
-    const spot = state.cells.find(
-      (c) =>
-        c.units === 0 &&
-        !c.castle &&
-        c.fortStage === 0 &&
-        hexDistance(c.row, c.col, m.row, m.col) === 2
-    );
-    if (spot) {
-      spot.units = 1 + Math.floor(rng() * 3);
-      spot.neutral = 'bandit';
-      pushLog(state, '강도가 출현했습니다');
+  const chance = (0.1 + Math.min(0.15, richest / 6000)) * scale;
+  if (rng() >= chance) return;
+  const spots = state.cells.filter(
+    (c) =>
+      openGround(c) &&
+      distToNearestCastle(state, c) >= 3 &&
+      !neighbors(state, c).some((n) => n.units > 0 && !n.neutral)
+  );
+  if (spots.length === 0) return;
+  const spot = spots[Math.floor(rng() * spots.length)];
+  spot.units = 1 + Math.floor(rng() * 3);
+  spot.neutral = 'bandit';
+  spot.bandGood = -40 + Math.round((rng() - 0.5) * 30);
+  spot.bandIdle = 0;
+  spot.morale = 100;
+  spot.exhaustion = 0;
+  pushLog(state, '🦹 변두리에 도적 무리가 나타났다');
+}
+
+/** 용병 무리를 통째로 고용하는 값 — 선한 무리는 싸고, 악한 무리는 비싸다 */
+export function hireCost(c: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): number {
+  return Math.round(eco.recruitCost * c.units * (1.2 - (c.bandGood ?? 0) / 200));
+}
+
+/** 이 나라가 이 용병 무리를 고용할 수 있나 — 내 땅이나 부대가 옆에 있어야 한다 */
+export function canHire(state: GameState, nationId: number, c: Cell): boolean {
+  return (
+    c.neutral === 'mercenary' &&
+    c.units > 0 &&
+    neighbors(state, c).some((n) => n.owner === nationId && !n.neutral)
+  );
+}
+
+/** 고용한다 — 무리가 그 자리에서 내 부대가 된다 */
+export function hireBand(
+  state: GameState,
+  nationId: number,
+  cellId: string,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): boolean {
+  const c = state.cells.find((x) => x.id === cellId);
+  const n = state.nations[nationId];
+  if (!c || !n || !canHire(state, nationId, c)) return false;
+  const cost = hireCost(c, eco);
+  if (n.gold < cost) return false;
+  n.gold -= cost;
+  c.neutral = undefined;
+  c.bandGood = undefined;
+  c.bandIdle = undefined;
+  c.owner = nationId;
+  c.march = 0;
+  pushLog(state, `${n.name}: 용병 무리 ${c.units}명을 고용했다 (-${cost}G)`);
+  return true;
+}
+
+/** AI 의 고용 — 돈에 넉넉히 여유가 있을 때 옆의 무리 하나 */
+export function aiHireMercs(state: GameState, nationId: number, eco: EconomyConfig = DEFAULT_ECONOMY): void {
+  const n = state.nations[nationId];
+  if (!n || !n.alive) return;
+  for (const c of state.cells) {
+    if (c.neutral !== 'mercenary' || c.units <= 0) continue;
+    if (!canHire(state, nationId, c)) continue;
+    if (n.gold >= hireCost(c, eco) * 2.5) {
+      hireBand(state, nationId, c.id, eco);
+      return;
     }
   }
+}
+
+/**
+ * 싸움에서 진 무리가 달아난다 — 보내주면 자비(공포 -1), 쫓아 섬멸하면 공포 +1.
+ * 무리의 선악은 바꾸지 않는다. 무리의 선악은 무리 자신이 한 일로만 바뀐다.
+ */
+export function spareBand(state: GameState, nationId: number): void {
+  adjustRep(state, nationId, 0, -1);
+}
+
+export function slayBand(state: GameState, nationId: number, cellId: string): void {
+  const c = state.cells.find((x) => x.id === cellId);
+  if (c && c.neutral && c.units > 0) clearStack(c);
+  adjustRep(state, nationId, 0, +1);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1390,6 +1683,8 @@ export function beginTurn(
     if (c.owner === nationId && !c.neutral) c.march = Math.min(eco.marchMax, c.march + eco.marchRegen);
   }
   applyUpkeep(state, nationId, eco);
+  // AI 는 여유가 있으면 옆의 용병 무리를 고용한다 (사람은 무리를 눌러서)
+  if (!state.nations[nationId]?.isHuman) aiHireMercs(state, nationId, eco);
   progressForts(state, nationId);
   trySpawnMerchant(state, nationId, eco);
   recomputeEncirclement(state);
