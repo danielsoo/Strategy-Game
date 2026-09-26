@@ -20,6 +20,7 @@ import { vassalsOf, nationPower, breakVassalage } from './vassals';
 import { isVisible } from './vision';
 import { breakTreaty, ownTreaties } from './diplomacy';
 import { wa } from './treaty';
+import { adjustRep } from './reputation';
 
 /** 속국이 저울질할 때 쓰는 값들 */
 export interface VassalAssessment {
@@ -257,14 +258,22 @@ export function decideResponse(
   // 힘의 격차가 가장 크게 말한다. 혼자서는 못 버티는 속국은 마음이 떠나 있어도
   // 일단 따른다 — 안 따를 수가 없으니까. 반대로 살아남을 자신이 서면
   // 충성이 남아 있어도 명령은 흘려듣기 시작한다.
+  //
+  // 종주국의 공포는 복종을 산다 — 속으로 싫어도 따른다. 정의는 여기서 아무것도
+  // 사지 않는다. 정의가 사는 것은 마음(충성)이고, 그건 위의 loyalty 에 이미 있다.
+  // (예전에는 '정의 - 50' 이 복종을 올렸다. 평판을 0 에서 시작하게 바꾸며 나눴다.)
   const willing =
-    0.35 + (vassal.loyalty / 100) * 0.6 + (lord.justice - 50) / 200 + (0.5 - a.survival) * 1.2;
+    0.35 + (vassal.loyalty / 100) * 0.6 + lord.fear / 200 + (0.5 - a.survival) * 1.2;
   if (willing > burden + 0.15) return 'obey';
 
   // 안 따르기로 했다. 그렇다고 대놓고 말하지는 않는다 —
   // 거부는 그 자리에서 드러나고 응징을 부른다. 토벌을 견딜 자신이 설 때만
   // 그 값을 치른다. 그래서 불복의 기본형은 '듣는 척'이다.
-  return rng() < Math.max(0, a.survival - 0.35) * 1.2 ? 'refuse' : 'feign';
+  //
+  // 대놓고 거부할지 듣는 척할지는 주인의 성격도 본다. 정의로운 주인에게는
+  // 대놓고 말한다(벌하지 않을 걸 안다). 두려운 주인에게는 못 한다.
+  const openly = Math.max(0, a.survival - 0.35) * 1.2 + (lord.justice - lord.fear) / 250;
+  return rng() < openly ? 'refuse' : 'feign';
 }
 
 /** 종주국이 명령을 내린다 */
@@ -506,21 +515,24 @@ export function punishVassal(
 
   const others = vassalsOf(state, lordId).filter((x) => x.id !== vassalId);
 
+  /*
+    벌은 드러난 불이행에만 내릴 수 있다(화면도 AI 도 그렇다). 그래서 법대로 한
+    벌이다 — 몰수는 옳은 일로 친다(정의 +1). 다만 벌은 자비가 아니다(공포 +).
+    토벌은 제 백성을 치는 일이라 법의 테두리를 넘는다(정의 -5).
+  */
   if (kind === 'seize') {
     const take = Math.floor(v.gold * 0.4);
     v.gold -= take;
     lord.gold += take;
     v.loyalty = Math.max(0, v.loyalty - 10);
-    lord.justice = Math.max(0, lord.justice - 3);
+    adjustRep(state, lord.id, +1, +2);
     pushLog(state, `${lord.name}이(가) ${v.name}의 국고를 걷어갔습니다 (${take}G)`);
   } else if (kind === 'strip') {
     v.loyalty = Math.max(0, v.loyalty - 16);
-    lord.fear = Math.min(100, lord.fear + 4);
-    lord.justice = Math.max(0, lord.justice - 5);
+    adjustRep(state, lord.id, 0, +4);
     pushLog(state, `${lord.name}이(가) ${v.name}을(를) 문책했습니다`);
   } else {
-    lord.fear = Math.min(100, lord.fear + 8);
-    lord.justice = Math.max(0, lord.justice - 10);
+    adjustRep(state, lord.id, -5, +8);
     breakVassalage(state, vassalId, '종주국의 토벌');
     v.loyalty = 0;
     pushLog(state, `${lord.name}이(가) ${v.name}을(를) 토벌합니다`);
@@ -558,6 +570,13 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
      */
     const grievance = Math.pow(1 - v.loyalty / 100, 2) * a.keptPerTurn * HORIZON * 2.5;
     let edge = a.rebelValue - a.stayValue + grievance;
+    /*
+      공포는 주인이 강할 때 누르고, 흔들릴 때 한꺼번에 터뜨린다. 살아남을
+      가망(survival)이 0.45 아래면 공포가 반란을 누르고, 위면 부추긴다.
+      정의로운 주인은 흔들려도 쉽게 버림받지 않는다.
+    */
+    edge += (lord.fear / 100) * (a.survival - 0.45) * 40;
+    edge -= (lord.justice / 100) * 8;
 
     // 불이행이 드러난 참이면 이미 돌아선 것이다
     if (v.order && v.order.revealed && v.order.response !== 'obey') edge += 15;
@@ -609,4 +628,19 @@ export function answerBreakOrder(
   v.loyalty = Math.max(0, v.loyalty - 4);
   const lord = v.suzerain !== null ? state.nations[v.suzerain] : null;
   pushLog(state, `${v.name}이(가) ${lord?.name ?? '종주국'}의 명령을 거부했습니다 (조약 파기)`);
+}
+
+/**
+ * 용서한다 — 드러난 불이행을 벌하지 않고 넘어간다.
+ * 자비다(공포 -2). 속국은 고마워하고(충성 +3), 명령은 불이행으로 끝난다.
+ * 다른 속국들도 본다 — 주인이 무섭지 않으면 명령도 덜 먹힌다(복종은 공포가 산다).
+ */
+export function forgiveVassal(state: GameState, lordId: number, vassalId: number): void {
+  const lord = state.nations[lordId];
+  const v = state.nations[vassalId];
+  if (!lord || !v || v.suzerain !== lordId || !v.order?.revealed) return;
+  v.loyalty = Math.min(100, v.loyalty + 3);
+  adjustRep(state, lordId, 0, -2);
+  pushLog(state, `${lord.name}이(가) ${v.name}의 불이행을 용서했습니다`);
+  endOrder(state, lord, v, v.order, false);
 }

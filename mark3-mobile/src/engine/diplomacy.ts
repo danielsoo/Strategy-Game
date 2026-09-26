@@ -19,6 +19,7 @@
 import { RNG } from '../services/combatSystem';
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { Treaty, TreatyKind, blocOf, treatyOf, wa } from './treaty';
+import { adjustRep, characterOf, effective } from './reputation';
 import { getHexNeighborOffsets } from '../utils/hexGrid';
 
 /**
@@ -143,8 +144,11 @@ export function policyOf(state: GameState, lordId: number): VassalPolicy {
   const n = state.nations[lordId];
   if (!n) return 'noEnemies';
   if (n.vassalPolicy) return n.vassalPolicy;
-  if (n.fear > 60) return 'forbid';
-  if (n.justice > 60) return 'free';
+  // 정하지 않았으면 나라의 성격을 따른다 — 공포로 다스리는 나라는 막고,
+  // 정의로운 나라는 풀어준다
+  const c = characterOf(n);
+  if (c === 'feared') return 'forbid';
+  if (c === 'just') return 'free';
   return 'noEnemies';
 }
 
@@ -258,7 +262,8 @@ function trustIn(state: GameState, proposer: number): number {
   const n = state.nations[proposer];
   if (!n) return 0;
   const betrayed = Math.pow(0.5, n.betrayals ?? 0);
-  return Math.max(0.05, Math.min(0.95, 0.8 * betrayed + (n.justice - 50) / 200));
+  // 정의로운 나라의 말은 더 믿고, 두려운 나라의 말은 덜 믿는다
+  return Math.max(0.05, Math.min(0.95, 0.8 * betrayed + (n.justice - n.fear) / 200));
 }
 
 // ── 맺고 깨기 ────────────────────────────────────────────────
@@ -318,8 +323,7 @@ export function breakTreaty(
     pushLog(state, `🗡 ${n.name}: ${victim.name}의 영토 침범을 더 참지 않는다 — ${KIND_NAME[t.kind]} 파기`);
   } else {
     const loss = opts.ordered ? Math.round(eco.betrayJustice / 2) : eco.betrayJustice;
-    n.justice = Math.max(0, n.justice - loss);
-    n.fear = Math.min(100, n.fear + (opts.ordered ? 2 : 5));
+    adjustRep(state, n.id, -loss, opts.ordered ? 2 : 5);
     n.betrayals = (n.betrayals ?? 0) + (opts.ordered ? 0 : 1);
     pushLog(
       state,
@@ -356,6 +360,9 @@ export function dissolveAlliance(
   t.since = state.turn;
   t.until = state.turn + Math.round(eco.truceTurns * scaleOf(state));
   const partner = state.nations[t.a === who ? t.b : t.a];
+  // 칼을 거두고 헤어졌다 — 배신이 아니라 약속을 지킨 것이다
+  adjustRep(state, who, +3, 0);
+  adjustRep(state, partner.id, +3, 0);
   pushLog(
     state,
     `${state.nations[who].name}: ${wa(partner.name)}의 동맹을 풀고 휴전으로 돌렸다${why ? ` — ${why}` : ''}`
@@ -562,7 +569,10 @@ export function stepDiplomacy(
     }
     if (t.until !== undefined && state.turn >= t.until) {
       drop(state, t);
-      pushLog(state, `${state.nations[t.a].name} ↔ ${state.nations[t.b].name}: 휴전 기한이 끝났다`);
+      pushLog(state, `${state.nations[t.a].name} ↔ ${state.nations[t.b].name}: 휴전을 끝까지 지켰다`);
+      // 약속을 끝까지 지킨 것은 옳은 일이다 — 두 나라 모두
+      adjustRep(state, t.a, +3, 0);
+      adjustRep(state, t.b, +3, 0);
     }
   }
   state.proposals = (state.proposals ?? []).filter(
@@ -625,7 +635,7 @@ function aiDiplomacy(state: GameState, me: number, rng: RNG, eco: EconomyConfig)
     if (mine <= theirs * BETRAY.edge) continue;
     const threat = commonThreat(state, b, myHead, oh);
     if (threat && threat.power > theirs) continue;
-    const p = BETRAY.chance * (1 - self.justice / 100);
+    const p = BETRAY.chance * (1 - effective(self.justice) / 100);
     if (rng() < p) {
       breakTreaty(state, me, other, eco);
       return;

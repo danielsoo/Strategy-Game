@@ -44,6 +44,8 @@ interface Props {
   onPickPlace: (vassalId: number, kind: 'garrison' | 'march') => void;
   onOrder: (vassalId: number, kind: OrderKind, target?: number) => void;
   onPunish: (vassalId: number, kind: Punishment) => void;
+  /** 드러난 불이행을 벌하지 않고 넘어간다 — 자비(공포 -2) */
+  onForgive: (vassalId: number) => void;
   /** 속국의 외교를 어디까지 허락하나 */
   onPolicy: (p: VassalPolicy) => void;
   /** 방금 무슨 일이 있었는지 한 줄 */
@@ -79,6 +81,7 @@ export default function VassalPanel({
   onPickPlace,
   onOrder,
   onPunish,
+  onForgive,
   onPolicy,
   note,
 }: Props) {
@@ -132,6 +135,7 @@ export default function VassalPanel({
                 onPickPlace={onPickPlace}
                 onOrder={onOrder}
                 onPunish={onPunish}
+                onForgive={onForgive}
               />
             ))}
 
@@ -181,6 +185,7 @@ function VassalRow({
   onPickPlace,
   onOrder,
   onPunish,
+  onForgive,
 }: {
   state: GameState;
   v: Nation;
@@ -188,6 +193,7 @@ function VassalRow({
   onPickPlace: Props['onPickPlace'];
   onOrder: Props['onOrder'];
   onPunish: Props['onPunish'];
+  onForgive: Props['onForgive'];
 }) {
   const [pickFoe, setPickFoe] = React.useState(false);
   const stats = nationStats(state, v.id);
@@ -249,11 +255,16 @@ function VassalRow({
               <TouchableOpacity style={[s.btn, s.war]} onPress={() => onPunish(v.id, 'war')}>
                 <Text style={s.btnText}>토벌</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={[s.btn, s.forgive]} onPress={() => onForgive(v.id)}>
+                <Text style={s.btnText}>용서한다</Text>
+              </TouchableOpacity>
             </View>
           )}
           {o.revealed && (
             <Text style={s.hint}>
-              벌하면 당장은 말을 듣지만 다른 속국들도 지켜본다. 마음은 더 멀어진다.
+              벌하면 당장은 말을 듣지만 마음은 멀어진다. 몰수는 법대로 한 벌이라 정의가
+              조금 오르고, 문책·토벌은 공포를 키운다. 용서하면 공포가 누그러지고 마음이
+              붙지만, 무섭지 않은 주인의 명령은 덜 먹힌다.
             </Text>
           )}
         </>
@@ -347,5 +358,6 @@ const s = StyleSheet.create({
   close: { backgroundColor: '#3b82f6', marginTop: 10 },
   treatyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   warnInline: { color: '#fca5a5' },
+  forgive: { backgroundColor: '#0d9488' },
   smallBtn: { paddingVertical: 5, paddingHorizontal: 10, borderRadius: 6 },
 });

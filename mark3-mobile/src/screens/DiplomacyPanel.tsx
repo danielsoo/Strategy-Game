@@ -24,6 +24,8 @@ import {
   violatesPolicy,
   guestsIn,
   wa,
+  characterOf,
+  CHARACTER_NAME,
 } from '../engine';
 
 const KIND: Record<TreatyKind, string> = { truce: '휴전', alliance: '동맹' };
@@ -83,7 +85,7 @@ export default function DiplomacyPanel({
             믿습니다.
           </Text>
           <Text style={s.meta}>
-            나의 정의 {Math.round(me.justice)} · 공포 {Math.round(me.fear)}
+            나는 {CHARACTER_NAME[characterOf(me)]} · 정의 {Math.round(me.justice)} · 공포 {Math.round(me.fear)}
             {(me.betrayals ?? 0) > 0 ? ` · 배신 ${me.betrayals}번` : ''}
           </Text>
           {lord && (
@@ -122,7 +124,8 @@ export default function DiplomacyPanel({
                   </View>
                   {met && (
                     <Text style={s.meta}>
-                      정의 {Math.round(n.justice)} · 공포 {Math.round(n.fear)} · 영토 {st.cells}
+                      {CHARACTER_NAME[characterOf(n)]} · 정의 {Math.round(n.justice)} · 공포{' '}
+                      {Math.round(n.fear)} · 영토 {st.cells}
                       {(n.betrayals ?? 0) > 0 ? ` · 배신 ${n.betrayals}번` : ''}
                     </Text>
                   )}
@@ -272,6 +275,7 @@ export function EncounterCard({
         <View style={s.modal}>
           <Text style={s.eyebrow}>행군 중에</Text>
           <Text style={s.title}>{encounter.title}</Text>
+          {encounter.rumor && <Text style={s.rumor}>{encounter.rumor}</Text>}
           <Text style={s.story}>{encounter.story}</Text>
           {encounter.options.map((o, i) => (
             <TouchableOpacity
@@ -304,6 +308,7 @@ const s = StyleSheet.create({
   eyebrow: { color: '#fbbf24', fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
   title: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
   story: { color: '#e5e7eb', fontSize: 14, lineHeight: 21, marginBottom: 6 },
+  rumor: { color: '#d4b483', fontSize: 12, fontStyle: 'italic', marginBottom: 4 },
   hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic', lineHeight: 16 },
   note: { color: '#fbbf24', fontSize: 12, marginTop: 8 },
   meta: { color: '#9ca3af', fontSize: 11, marginTop: 4 },

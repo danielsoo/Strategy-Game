@@ -25,6 +25,7 @@ import {
 } from './types';
 import { createVision, recomputeVision } from './vision';
 import { blocOf, atPeace, allied } from './treaty';
+import { adjustRep, effective } from './reputation';
 import { stepDiplomacy, settleGuests } from './diplomacy';
 export { blocOf };
 import {
@@ -236,8 +237,9 @@ export function createGameState(
       name: preset.name,
       color: preset.color,
       gold: eco.startingGold,
-      fear: 50,
-      justice: 50,
+      // 아무 성향 없이 시작한다 — 한 일이 쌓여 성격이 된다(reputation.ts)
+      fear: 0,
+      justice: 0,
       taxRate: preset.taxRate,
       alive: true,
       isHuman: i === 0,
@@ -375,7 +377,7 @@ export function computeLedger(
   // 공포가 높을수록 더 걷는다 — 약탈로 연명하는 군대다.
   const hasCastle = state.cells.some((c) => c.castle && c.owner === nationId);
   if (!hasCastle && units > 0) {
-    const fear = state.nations[nationId]?.fear ?? 50;
+    const fear = effective(state.nations[nationId]?.fear ?? 0);
     income += units * eco.forageIncomePerUnit * (0.5 + fear / 100);
   }
 
@@ -475,7 +477,7 @@ export function applyUpkeep(
  * 정의로운 군주의 군대는 외상으로도 따라온다 — 정의가 높을수록 오래 버틴다.
  */
 export function desertionGrace(n: Nation, eco: EconomyConfig = DEFAULT_ECONOMY): number {
-  return eco.graceTurnsBase + Math.round((n.justice / 100) * eco.graceTurnsJustice);
+  return eco.graceTurnsBase + Math.round((effective(n.justice) / 100) * eco.graceTurnsJustice);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -528,9 +530,11 @@ export function estimateWinProb(myPower: number, theirPower: number): number {
 
 /** 중립 세력은 소속 국가가 없으므로 기본 평판을 쓴다 */
 function repOf(state: GameState, c: Cell): { fear: number; justice: number } {
+  // 나라가 아닌 것(도적·용병)은 평판이 없다 — 중립
   if (c.owner === null) return { fear: 50, justice: 50 };
   const n = state.nations[c.owner];
-  return n ? { fear: n.fear, justice: n.justice } : { fear: 50, justice: 50 };
+  // 전투 공식은 옛 척도(50 중립)로 맞춰져 있다 — reputation.effective
+  return n ? { fear: effective(n.fear), justice: effective(n.justice) } : { fear: 50, justice: 50 };
 }
 
 /**
@@ -690,7 +694,7 @@ function resolveWithoutBattle(
     pushLog(state, `${nameOf(state, defenderNationId)}: 물러났다 (${before} → ${survivors})`);
   } else {
     const att = from.owner !== null ? state.nations[from.owner] : null;
-    const out = surrenderOutcome(before, att?.fear ?? 50, att?.justice ?? 50);
+    const out = surrenderOutcome(before, effective(att?.fear ?? 0), effective(att?.justice ?? 0));
     recruited = out.recruited;
     pushLog(
       state,
@@ -829,6 +833,20 @@ export function performAttack(
 
   let captured = false;
 
+  /*
+    동맹의 적과 함께 싸우는 것은 옳은 일이다 — 동맹이 '서로 안 친다' 에서 그치지
+    않고 함께 짐을 지는 것이 되게. 공격마다 조금씩(+0.5): 한 판에 공격이 백 번을
+    넘으니 크게 주면 정의가 싸움의 부산물이 된다.
+  */
+  if (from.owner !== null && to.owner !== null && !from.neutral && !to.neutral) {
+    const me = from.owner;
+    const foe = to.owner;
+    const withAlly = state.nations.some(
+      (a) => a.alive && a.id !== me && allied(state, me, a.id) && !atPeace(state, a.id, foe)
+    );
+    if (withAlly) adjustRep(state, me, +0.5, 0);
+  }
+
   if (res.outcome === 'attacker-win') {
     captured = true;
 
@@ -840,8 +858,7 @@ export function performAttack(
       const raider = state.nations[from.owner];
       victim.gold = Math.max(0, victim.gold - loot);
       raider.gold += loot;
-      raider.fear = clamp(raider.fear + 2, 0, 100);
-      raider.justice = clamp(raider.justice - 1, 0, 100);
+      adjustRep(state, raider.id, -1, +2);
       pushLog(state, `${raider.name}: ${victim.name}에게서 ${loot}G를 약탈했습니다`);
     }
     // 수비측 생존자는 인접 빈 칸으로 후퇴, 없으면 흩어진다
@@ -1090,7 +1107,7 @@ export function stepNeutrals(state: GameState, rng: RNG): void {
     );
     if (prey) {
       const owner = state.nations[prey.nation];
-      const fearShield = owner ? owner.fear / 100 : 0.5;
+      const fearShield = owner ? effective(owner.fear) / 100 : 0.5;
       if (rng() > fearShield * 0.6) {
         state.merchants = state.merchants.filter((m) => m.id !== prey.id);
         pushLog(state, `강도가 ${owner?.name ?? ''} 무역상을 약탈했습니다 (-${prey.gold}G)`);
@@ -1436,18 +1453,21 @@ export function resolveCastleLoss(
   if (!loser || !winner) return;
 
   if (choice === 'vassalize') {
-    // 왕좌는 돌려주되 신하로 삼는다
+    // 왕좌는 돌려주되 신하로 삼는다. 나라를 살려두었다 — 자비다.
     castle.owner = loserId;
     castle.units = Math.max(1, Math.floor(castle.units * 0.4));
+    adjustRep(state, winnerId, 0, -3);
     return;
   }
+  // 나라를 지웠다 — 세상은 그것을 잊지 않는다
+  adjustRep(state, winnerId, 0, +4);
 
   for (const c of state.cells) {
     if (c.owner === loserId) c.owner = winnerId;
   }
   state.merchants = state.merchants.filter((m) => m.nation !== loserId);
   loser.alive = false;
-  pushLog(state, `이(가) 에 병합되었습니다`);
+  pushLog(state, `${loser.name}이(가) ${winner.name}에 병합되었습니다`);
 }
 
 export { DEFAULT_ECONOMY };

@@ -116,9 +116,12 @@ export interface Nation {
   name: string;
   color: string;
   gold: number;
-  /** 공포 0~100 */
+  /**
+   * 공포 0~100. 0 에서 시작하고 저절로 줄지 않는다 — 자비로만 누그러진다.
+   * 정의와 함께 나라의 성격을 정한다(reputation.ts). 바꿀 때는 adjustRep 으로.
+   */
   fear: number;
-  /** 정의 0~100 */
+  /** 정의 0~100. 0 에서 시작한다 — 옳은 일로만 쌓인다. */
   justice: number;
   /** 자국에 도착한 무역에 매기는 세율 */
   taxRate: number;
@@ -209,6 +212,8 @@ export interface GameState {
    * 참을성이 다하면 주인이 조약을 깬다.
    */
   intrusions?: Record<string, number>;
+  /** 나라의 성격이 바뀐 순간들 — 화면이 연대기처럼 띄운다 */
+  chronicle?: import('./reputation').Chronicle[];
   /** 동맹의 명분이 사라진 채 지난 턴 수. 'a-b' → 턴. */
   allianceDoubt?: Record<string, number>;
 }

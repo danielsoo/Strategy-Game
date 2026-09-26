@@ -104,7 +104,12 @@ import {
   answerBreakOrder,
   dissolveAlliance,
   wa,
+  characterOf,
+  CHARACTER_NAME,
+  forgiveVassal,
+  knows,
 } from '../engine';
+import type { Chronicle } from '../engine';
 import type { Encounter, TreatyKind } from '../engine';
 import {
   takeAITurn,
@@ -270,8 +275,12 @@ const HELP: Array<{ title: string; body: string }> = [
     body: '"외교" 단추로 휴전이나 동맹을 청할 수 있다. 휴전은 한동안, 동맹은 기한 없이 서로 치지 않는 약속이고, 동맹군은 붙어 있으면 협공을 거든다. 동맹이어도 속사정은 보이지 않는다 — 내 부대가 가서 봐야 안다. 조약 상대의 땅에 군대를 들일 수는 있지만 무례한 일이라, 상대가 철수를 요구하고 버티면 조약을 깬다. 조약을 스스로 깨면 배신이다 — 정의가 깎이고 다른 나라들이 당신을 덜 믿는다. 속국도 따로 조약을 맺을 수 있고, 종주국은 허락 밖의 조약을 끊으라 명할 수 있다. 동맹은 이긴 것으로 치지 않는다 — 공동의 적이 사라지면 풀린다.',
   },
   {
+    title: '정의와 공포',
+    body: '모든 나라는 아무 성향 없이 시작한다. 옳은 일(약속을 끝까지 지킴, 청해 온 약자를 받아줌, 법대로 벌함, 동맹의 적과 함께 싸움)이 정의를 쌓고, 잔혹한 일(병합, 약탈, 징발, 토벌, 배신)이 공포를 쌓는다. 공포는 자비(병합 대신 속국으로 살려둠, 용서, 공물을 돌려줌, 마을을 도움)로만 누그러진다. 저절로 돌아오지는 않는다. 한쪽이 다른 쪽을 15 넘게 앞서면 나라의 성격이 바뀐다. 정의의 나라에는 마음(충성)이 붙고 약소국이 기대 오며, 공포의 나라는 명령이 잘 먹히고 적의 사기를 꺾지만 속국의 마음이 떠나고, 흔들리는 순간 한꺼번에 등을 돌린다.',
+  },
+  {
     title: '행군 중에 만나는 일',
-    body: '새 땅에 들어서면 가끔 일이 생긴다. 정의로운 나라에는 마을이 곡식을 내놓고 용병이 합류를 청하며, 두려운 나라에는 공물이 들어오고 도적이 흩어지지만 원한을 품은 주민이 우물에 독을 풀기도 한다. 그 앞에서 무엇을 고르느냐가 다시 평판이 된다.',
+    body: '새 땅에 들어서면 가끔 마을·용병·도적·보급 마차·돌림병을 만난다. 무엇을 만나는지는 누구나 같지만, 상대의 반응은 평판을 따라 기운다 — 정의로운 군대에게 마을은 곡식을 들고 나오기 쉽고, 두려운 군대에게는 곡식을 숨기고 엎드리기 쉽다. 반드시 그런 것은 아니다. 그리고 그 앞에서 무엇을 고르느냐가 다시 평판이 된다.',
   },
   {
     title: '부대는 한 턴에 한 번',
@@ -582,6 +591,12 @@ export default function GameScreen() {
    * 다음 그림에서 첫 것을 띄운다.
    */
   const encQueueRef = useRef<Encounter[]>([]);
+  /**
+   * 연대기 — 나라의 성격이 바뀐 순간. 내 나라이거나 내가 아는 나라면 크게 띄운다.
+   * 마지막으로 본 줄을 붙들고 있다가 그 뒤에 새로 적힌 것만 본다(목록은 30줄에서 밀린다).
+   */
+  const lastChronRef = useRef<Chronicle | null>(null);
+  const [chron, setChron] = useState<Chronicle | null>(null);
 
   /**
    * 행군이 멈춘 부대. 다음 그림에서 골라준다 —
@@ -1154,6 +1169,15 @@ export default function GameScreen() {
     );
   };
 
+  const doForgive = (vassalId: number) => {
+    const v = state.nations[vassalId];
+    setState((prev) => {
+      forgiveVassal(prev, PLAYER, vassalId);
+      return bump(prev);
+    });
+    setOrderNote((v?.name ?? '') + '의 불이행을 용서했다. 마음은 붙지만, 명령은 덜 먹힐 것이다.');
+  };
+
   const doPunish = (vassalId: number, kind: Punishment) => {
     const v = state.nations[vassalId];
     setState((prev) => {
@@ -1380,6 +1404,23 @@ export default function GameScreen() {
 
   /** 기록이 열린 채 두는 중인가. 도움말 창의 '시작' 이 새 판인지 계속인지 가른다. */
   const inMatch = matchRef.current !== null && state.winner === null;
+
+  useEffect(() => {
+    const list = state.chronicle ?? [];
+    if (list.length === 0) return;
+    const last = list[list.length - 1];
+    if (last === lastChronRef.current) return;
+    // 켜자마자(시작·이어하기) 옛 줄을 띄우지 않는다
+    if (showHelp) {
+      lastChronRef.current = last;
+      return;
+    }
+    let i = list.length - 1;
+    while (i >= 0 && list[i] !== lastChronRef.current) i--;
+    const fresh = list.slice(i + 1).filter((c) => c.nation === PLAYER || knows(state, PLAYER, c.nation));
+    lastChronRef.current = last;
+    if (fresh.length > 0) setChron(fresh[fresh.length - 1]);
+  });
 
   // ── 길잡이 ──────────────────────────────────────────────
   const coachNow: CoachProgress = {
@@ -1704,6 +1745,21 @@ export default function GameScreen() {
                 {ledger.net.toFixed(1)}/턴
               </Text>
             </Text>
+            {/* 나라의 성격 — 한 일이 쌓여 이름이 된다 */}
+            <Text style={styles.repLine}>
+              ⚖ 정의 {Math.round(me.justice)} · 🩸 공포 {Math.round(me.fear)} —{' '}
+              <Text
+                style={
+                  characterOf(me) === 'just'
+                    ? styles.repJust
+                    : characterOf(me) === 'feared'
+                    ? styles.repFear
+                    : styles.breakdownDim
+                }
+              >
+                {CHARACTER_NAME[characterOf(me)]}
+              </Text>
+            </Text>
             <Text style={styles.breakdown}>
               수입 <Text style={styles.plus}>+{ledger.income.toFixed(1)}</Text>
               {'   '}지출{' '}
@@ -1718,7 +1774,7 @@ export default function GameScreen() {
             {me.unpaidTurns > 0 && (
               <Text style={styles.arrears}>
                 ⚠ 급여 체납 {me.unpaidTurns}/{desertionGrace(me)}턴 — 넘기면 병력이 이탈합니다
-                {me.justice > 50 ? ` (정의 ${me.justice}로 유예 연장됨)` : ''}
+                {me.justice > 0 ? ` (정의 ${Math.round(me.justice)}로 유예 연장됨)` : ''}
               </Text>
             )}
           </>
@@ -1800,6 +1856,8 @@ export default function GameScreen() {
                     {!n.alive && discovered ? ' ×' : ''}
                     {n.alive && n.id !== PLAYER && relationOf(state, PLAYER, n.id) === 'alliance' ? ' 🤝' : ''}
                     {n.alive && n.id !== PLAYER && relationOf(state, PLAYER, n.id) === 'truce' ? ' 🕊' : ''}
+                    {discovered && characterOf(n) === 'just' ? ' ⚖' : ''}
+                    {discovered && characterOf(n) === 'feared' ? ' 🩸' : ''}
                   </Text>
                 </View>
                 <Text style={[styles.td, styles.influence]}>
@@ -2117,6 +2175,7 @@ export default function GameScreen() {
         }}
         onOrder={issuePlain}
         onPunish={doPunish}
+        onForgive={doForgive}
         onPolicy={(p) =>
           setState((prev) => {
             prev.nations[PLAYER].vassalPolicy = p;
@@ -2145,6 +2204,27 @@ export default function GameScreen() {
       )}
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
+
+      {/* 연대기 — 나라의 성격이 바뀌었다 */}
+      <Modal visible={!!chron} transparent animationType="fade">
+        <View style={styles.chronOverlay}>
+          {chron && (
+            <TouchableOpacity activeOpacity={0.9} style={styles.chronCard} onPress={() => setChron(null)}>
+              <Text style={styles.chronEyebrow}>연 대 기 · {chron.turn}턴</Text>
+              <Text
+                style={[
+                  styles.chronTitle,
+                  { color: state.nations[chron.nation]?.color ?? '#fff' },
+                ]}
+              >
+                {state.nations[chron.nation]?.name} — {CHARACTER_NAME[chron.to]}
+              </Text>
+              <Text style={styles.chronLine}>{chron.line}</Text>
+              <Text style={[styles.hint, { marginTop: 14 }]}>눌러서 닫기</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Modal>
 
       <EncounterCard
         encounter={!combat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
@@ -2714,6 +2794,23 @@ const styles = StyleSheet.create({
   fortBtn: { backgroundColor: '#a16207' },
   toggle: { color: '#6b7280', fontSize: 11, textAlign: 'center' },
 
+  repLine: { color: '#d1d5db', fontSize: 11, marginTop: 2 },
+  repJust: { color: '#93c5fd', fontWeight: 'bold' },
+  repFear: { color: '#fca5a5', fontWeight: 'bold' },
+  chronOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'center', alignItems: 'center' },
+  chronCard: {
+    width: '86%',
+    maxWidth: 560,
+    backgroundColor: '#161311',
+    borderColor: '#a16207',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 22,
+    alignItems: 'center',
+  },
+  chronEyebrow: { color: '#a16207', fontSize: 11, letterSpacing: 4, marginBottom: 8 },
+  chronTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  chronLine: { color: '#f5f0e6', fontSize: 16, lineHeight: 26, textAlign: 'center', fontStyle: 'italic' },
   banner: {
     position: 'absolute',
     top: '42%',

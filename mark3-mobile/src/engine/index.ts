@@ -10,3 +10,4 @@ export * from './plan';
 export * from './treaty';
 export * from './diplomacy';
 export * from './encounters';
+export * from './reputation';

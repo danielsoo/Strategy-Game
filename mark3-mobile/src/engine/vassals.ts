@@ -15,6 +15,7 @@
 import { RNG } from '../services/combatSystem';
 import { GameState, EconomyConfig, DEFAULT_ECONOMY, Nation } from './types';
 import { computeLedger, nationStats, pushLog, cellPower } from './rules';
+import { adjustRep, loyaltyDrift, characterOf, effective } from './reputation';
 
 /** 이 나라의 속국들 */
 export function vassalsOf(state: GameState, lordId: number): Nation[] {
@@ -79,11 +80,11 @@ export function vassalize(
   vassal.loyalty = origin === 'conquest' ? 40 : 70;
 
   if (origin === 'conquest') {
-    lord.fear = clamp(lord.fear + 4, 0, 100);
-    lord.justice = clamp(lord.justice - 2, 0, 100);
+    // 정복의 평판은 처분(병합이냐 속국이냐)에서 붙는다 — rules.resolveCastleLoss
     pushLog(state, `${vassal.name}이(가) ${lord.name}의 속국이 되었습니다 (정복)`);
   } else {
-    lord.justice = clamp(lord.justice + 3, 0, 100);
+    // 청해 온 약자를 받아주는 것은 옳은 일이다
+    adjustRep(state, lord.id, +3, 0);
     pushLog(state, `${vassal.name}이(가) ${lord.name}에 보호를 청했습니다 (자발)`);
   }
 }
@@ -137,13 +138,13 @@ export function updateLoyalty(state: GameState, eco: EconomyConfig = DEFAULT_ECO
     let delta = Math.min(eco.loyaltyPowerBonus, (ratio - 1) * 1.2);
 
     if (v.vassalOrigin === 'conquest') delta -= eco.loyaltyDecayConquest;
-    // 정의로운 종주국은 속국이 따른다. 공포로만 누르면 마음이 떠난다.
-    delta += (lord.justice - 50) / 50;
+    // 정의로운 종주국에게는 마음이 붙고, 공포로 누르면 마음이 떠난다
+    delta += loyaltyDrift(lord);
 
     v.loyalty = clamp(v.loyalty + delta, 0, 100);
     if (v.loyalty <= 0) {
       breakVassalage(state, v.id, '반란');
-      v.fear = clamp(v.fear + 5, 0, 100);
+      adjustRep(state, v.id, 0, +5);
     }
   }
 }
@@ -198,7 +199,14 @@ export function stepVoluntarySubmission(
     const desperation = Math.max(0, Math.min(2, maxThreat / myPower - 1));
     if (desperation <= 0.2) continue;
 
-    const justicePower = Math.pow(protector.justice / 100, 2);
+    /*
+      이름난 나라가 없어도 약소국은 강한 이웃에 기댄다 — 정의로운 나라에 더 잘
+      기대고(환산 정의², 0 → 0.25, 100 → 1), 공포의 나라에는 잘 안 기댄다(×0.3).
+      칼을 든 손에 목을 내미는 나라는 드물다.
+    */
+    const justicePower =
+      Math.pow(effective(protector.justice) / 100, 2) *
+      (characterOf(protector) === 'feared' ? 0.3 : 1);
     const p = eco.voluntarySubmitChance * justicePower * desperation;
     if (rng() < p) {
       vassalize(state, protector.id, weak.id, 'voluntary');

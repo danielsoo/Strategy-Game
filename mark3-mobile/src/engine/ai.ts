@@ -43,7 +43,8 @@ import {
   flankingSupport,
 } from './rules';
 import { vassalize, vassalsOf } from './vassals';
-import { issueOrder, punishVassal } from './orders';
+import { issueOrder, punishVassal, forgiveVassal } from './orders';
+import { characterOf } from './reputation';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 import { FitProvenance } from './stamp';
 import { isGuestLand } from './treaty';
@@ -878,9 +879,13 @@ function governVassals(
 
   for (const v of mine) {
     if (v.order?.revealed && v.order.response !== 'obey') {
-      // 공포를 쓰는 나라는 세게, 정의를 쓰는 나라는 국고만 건드린다
-      const harsh = lord.fear > 60 && v.loyalty < 25;
-      punishVassal(state, nationId, v.id, harsh ? 'strip' : 'seize', eco);
+      // 나라의 성격대로 — 공포의 나라는 문책하고, 정의의 나라는 법대로 몰수하거나
+      // 절반은 용서한다. 성향이 없으면 몰수. (난수를 한 번 더 쓰는 것은 정의의
+      // 나라일 때뿐이다.)
+      const c = characterOf(lord);
+      if (c === 'feared') punishVassal(state, nationId, v.id, 'strip', eco);
+      else if (c === 'just' && rng() < 0.5) forgiveVassal(state, nationId, v.id);
+      else punishVassal(state, nationId, v.id, 'seize', eco);
     }
   }
 
