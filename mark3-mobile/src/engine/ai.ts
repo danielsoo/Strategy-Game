@@ -24,6 +24,9 @@ import {
   performAttack,
   spareBand,
   slayBand,
+  hireCost,
+  contractBand,
+  demandLeave,
   moveStack,
   AttackOutcome,
   isHostile,
@@ -1237,6 +1240,28 @@ export function* takeAITurnGen(
     // 제자리도 하나의 수다. 학습 자료에서 빼면 '가만히 있기'를 영영 못 배운다.
     policy?.onChoose?.(ctx, c, best, actions);
     if (best.kind === 'stay') continue;
+
+    /*
+      무리와 맞닿았다 — 사람처럼 조우한다. 돈에 여유가 있고 상대가 용병이면
+      먼저 계약을 청하고, 훨씬 세면 물러나라 한다. 둘 다 안 되면 친다.
+      계약·물러나라가 통하면 그 부대는 이번 턴에 할 일을 한 것이다.
+    */
+    if (best.kind === 'attack' && best.target.neutral) {
+      const band = best.target;
+      const me = state.nations[nationId];
+      let settled = false;
+      if (band.neutral === 'mercenary' && me.gold >= hireCost(band, eco) * 2.5) {
+        settled = contractBand(state, c.id, band.id, rng, eco).ok;
+      }
+      if (!settled && cellPower(c, false) >= cellPower(band, false) * 2) {
+        settled = demandLeave(state, c.id, band.id, rng).ok;
+      }
+      if (settled) {
+        moved.add(id);
+        budget--;
+        continue;
+      }
+    }
 
     if (best.kind === 'attack') {
       const wasCastle = best.target.castle;

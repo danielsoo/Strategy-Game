@@ -1,7 +1,8 @@
 // 행군 중에 만나는 일들
 //
-// 새 땅에 들어설 때 가끔 일이 생긴다. 무슨 일이 생기는지(마을·용병·도적·
-// 보급 마차·돌림병)는 누구에게나 같다. 달라지는 것은 상대의 반응이다 —
+// 새 땅에 들어설 때 가끔 일이 생긴다. 무슨 일이 생기는지(마을·보급 마차·
+// 돌림병)는 누구에게나 같다. (도적·용병 무리와의 일은 여기가 아니라 조우다 —
+// 부대가 직접 가서 마주쳐 계약하거나 물러나라 하거나 친다. rules.contractBand 등) 달라지는 것은 상대의 반응이다 —
 // 정의로운 이름이 앞서 간 군대에게 마을은 곡식을 들고 나오고, 공포가 앞서 간
 // 군대에게는 곡식을 숨기고 엎드린다. 다만 정해지지는 않는다. 반응마다 무게가
 // 있고, 평판은 그 무게를 기울일 뿐이다. 정의의 나라에게도 문을 닫는 마을이 있고,
@@ -9,8 +10,6 @@
 //
 //   반응의 무게 (J = 정의/100, F = 공포/100)
 //     마을   반긴다 0.6+3J · 문을 닫는다 1.2 · 엎드린다 0.6+3F · 독을 푼다 0.2+1.5F(1-J)
-//     용병   청한다 0.6+3J · 값을 부른다 1.2 · 겁먹는다 0.6+3F
-//     도적   투항 0.4+2J · 기습 1.0 · 달아난다 0.4+3F
 //
 // 그리고 반응마다 고를 수 있는 대처가 다르다. 고른 것이 다시 평판이 된다 —
 // 선물을 사양하면 공포가 누그러지고, 문을 부수면 정의가 깎이고 공포가 오른다.
@@ -181,105 +180,6 @@ const EVENTS: EventKind[] = [
           ],
         }),
         pick: (c) => (characterOf(c.n) === 'feared' && c.F < 0.6 ? 1 : 0),
-      },
-    ],
-  },
-  {
-    key: 'mercs',
-    weight: (c) => (c.room >= 2 ? 0.2 : 0),
-    reactions: [
-      {
-        key: 'ask',
-        lean: 'J',
-        weight: (c) => 0.6 + 3 * c.J,
-        make: (c) => ({
-          title: '용병의 청',
-          story: '떠돌이 용병 무리가 이 군대의 이름을 듣고 합류를 청한다.',
-          options: [
-            { label: `고용한다 (-${merc(c)}G, 병력 +2)`, effect: { gold: -merc(c), units: 2 } },
-            { label: '돌려보낸다', effect: {} },
-          ],
-        }),
-        pick: (c) => (c.n.gold >= merc(c) * 2 ? 0 : 1),
-      },
-      {
-        key: 'haggle',
-        weight: () => 1.2,
-        make: (c) => {
-          const cost = Math.round(merc(c) * 1.6);
-          return {
-            title: '흥정하는 용병',
-            story: '용병 무리가 값을 부른다. 싸게 굴 생각은 없어 보인다.',
-            options: [
-              { label: `비싸게 고용한다 (-${cost}G, 병력 +2)`, effect: { gold: -cost, units: 2 } },
-              { label: '거절한다', effect: {} },
-            ],
-          };
-        },
-        pick: (c) => (c.n.gold >= merc(c) * 3 ? 0 : 1),
-      },
-      {
-        key: 'cowed',
-        lean: 'F',
-        weight: (c) => 0.6 + 3 * c.F,
-        make: (c) => {
-          const cheap = Math.round(merc(c) * 0.4);
-          return {
-            title: '겁먹은 용병',
-            story: '이 군대를 알아본 용병들이 겁에 질려 있다.',
-            options: [
-              { label: `헐값에 부린다 (-${cheap}G, 병력 +2, 공포 +1)`, effect: { gold: -cheap, units: 2, fear: 1 } },
-              { label: `제값을 치른다 (-${merc(c)}G, 병력 +2, 공포 -1)`, effect: { gold: -merc(c), units: 2, fear: -1 } },
-              { label: '쫓아 보낸다', effect: {} },
-            ],
-          };
-        },
-        pick: (c) => (c.F < 0.6 ? 0 : c.n.gold >= merc(c) ? 1 : 2),
-      },
-    ],
-  },
-  {
-    key: 'bandits',
-    weight: (c) => (c.bandit ? 0.15 : 0),
-    reactions: [
-      {
-        key: 'join',
-        lean: 'J',
-        // 선한 도적일수록 투항하기 쉽다 — 무리 자신이 쌓은 선악이 여기서 보인다
-        weight: (c) => 0.4 + 2 * c.J + Math.max(0, c.bandit?.bandGood ?? 0) / 50,
-        make: (c) => ({
-          title: '투항하는 도적',
-          story: '옆 소굴의 도적들이 무기를 내려놓고 받아달라 청한다.',
-          options: [
-            ...(c.room >= 1
-              ? [{ label: '받아들인다 (소굴이 비고 병력 +1)', effect: { scatter: c.bandit!.id, units: 1 } }]
-              : []),
-            { label: '살려서 흩어 보낸다 (소굴이 비고 공포 -1)', effect: { scatter: c.bandit!.id, fear: -1 } },
-          ],
-        }),
-        pick: () => 0,
-      },
-      {
-        key: 'ambush',
-        // 악한 도적일수록 덮친다
-        weight: (c) => 0.4 + Math.max(0, -(c.bandit?.bandGood ?? -40)) / 50,
-        make: () => ({
-          title: '도적의 기습',
-          story: '옆 소굴의 도적들이 밤을 틈타 야영지를 덮쳤다.',
-          options: [{ label: '확인 (병력 -1, 사기 -10)', effect: { units: -1, morale: -10 } }],
-        }),
-        pick: () => 0,
-      },
-      {
-        key: 'flee',
-        lean: 'F',
-        weight: (c) => 0.4 + 3 * c.F,
-        make: (c) => ({
-          title: '달아나는 도적',
-          story: '소문을 들은 도적 떼가 싸우지도 않고 소굴을 버리고 달아났다.',
-          options: [{ label: '확인 (옆 도적 소굴이 비었다)', effect: { scatter: c.bandit!.id } }],
-        }),
-        pick: () => 0,
       },
     ],
   },

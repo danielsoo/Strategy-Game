@@ -1385,54 +1385,120 @@ function spawnBandits(state: GameState, rng: RNG, scale: number): void {
   pushLog(state, '🦹 변두리에 도적 무리가 나타났다');
 }
 
-/** 용병 무리를 통째로 고용하는 값 — 선한 무리는 싸고, 악한 무리는 비싸다 */
-export function hireCost(c: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): number {
-  return Math.round(eco.recruitCost * c.units * (1.2 - (c.bandGood ?? 0) / 200));
-}
-
-/** 이 나라가 이 용병 무리를 고용할 수 있나 — 내 땅이나 부대가 옆에 있어야 한다 */
-export function canHire(state: GameState, nationId: number, c: Cell): boolean {
+/**
+ * 조우 — 내 부대가 무리와 맞닿았다. 무리와의 일은 모두 여기서 시작한다:
+ * 계약하거나, 물러나라 하거나, 친다(performAttack). 무리를 멀리서 고용하는
+ * 길은 없다 — 직접 가서 마주쳐야 한다.
+ */
+export function inContact(state: GameState, from: Cell, band: Cell): boolean {
   return (
-    c.neutral === 'mercenary' &&
-    c.units > 0 &&
-    neighbors(state, c).some((n) => n.owner === nationId && !n.neutral)
+    !!band.neutral &&
+    band.units > 0 &&
+    from.owner !== null &&
+    !from.neutral &&
+    from.units > 0 &&
+    hexDistance(from.row, from.col, band.row, band.col) === 1
   );
 }
 
-/** 고용한다 — 무리가 그 자리에서 내 부대가 된다 */
-export function hireBand(
-  state: GameState,
-  nationId: number,
-  cellId: string,
-  eco: EconomyConfig = DEFAULT_ECONOMY
-): boolean {
-  const c = state.cells.find((x) => x.id === cellId);
+/** 이 무리가 계약을 받아들일 가망 — 용병은 쉽고, 도적은 선할수록. 정의로운 나라에 더. */
+export function contractOdds(state: GameState, nationId: number, band: Cell): number {
   const n = state.nations[nationId];
-  if (!c || !n || !canHire(state, nationId, c)) return false;
-  const cost = hireCost(c, eco);
-  if (n.gold < cost) return false;
-  n.gold -= cost;
-  c.neutral = undefined;
-  c.bandGood = undefined;
-  c.bandIdle = undefined;
-  c.owner = nationId;
-  c.march = 0;
-  pushLog(state, `${n.name}: 용병 무리 ${c.units}명을 고용했다 (-${cost}G)`);
-  return true;
+  const g = band.bandGood ?? 0;
+  const J = (n?.justice ?? 0) / 100;
+  const F = (n?.fear ?? 0) / 100;
+  const base = band.neutral === 'mercenary' ? 0.6 + g / 200 : 0.15 + g / 150;
+  // 두려운 나라에게는 겁먹고 응하기도 한다 — 다만 정의만큼은 아니다
+  return Math.max(0.05, Math.min(0.95, base + J * 0.3 + F * 0.15));
 }
 
-/** AI 의 고용 — 돈에 넉넉히 여유가 있을 때 옆의 무리 하나 */
-export function aiHireMercs(state: GameState, nationId: number, eco: EconomyConfig = DEFAULT_ECONOMY): void {
-  const n = state.nations[nationId];
-  if (!n || !n.alive) return;
-  for (const c of state.cells) {
-    if (c.neutral !== 'mercenary' || c.units <= 0) continue;
-    if (!canHire(state, nationId, c)) continue;
-    if (n.gold >= hireCost(c, eco) * 2.5) {
-      hireBand(state, nationId, c.id, eco);
-      return;
-    }
+/** 물러나라 할 때 물러날 가망 — 내 힘이 셀수록, 두려울수록, 무리가 선할수록 */
+export function leaveOdds(state: GameState, from: Cell, band: Cell): number {
+  const F = (from.owner !== null ? state.nations[from.owner]?.fear ?? 0 : 0) / 100;
+  const ratio = (cellPower(from, false) * (1 + F)) / Math.max(0.5, cellPower(band, false));
+  return Math.max(0.05, Math.min(0.95, 0.2 + (ratio - 1) * 0.5 + (band.bandGood ?? 0) / 200));
+}
+
+/** 계약 값 — 선한 무리는 싸고, 악한 무리는 비싸다. 도적은 더 비싸다. */
+export function hireCost(c: Cell, eco: EconomyConfig = DEFAULT_ECONOMY): number {
+  const bandit = c.neutral === 'bandit' ? 1.3 : 1;
+  return Math.round(eco.recruitCost * c.units * (1.2 - (c.bandGood ?? 0) / 200) * bandit);
+}
+
+/**
+ * 계약을 청한다. 무리가 받아들이면 그 자리에서 내 부대가 된다.
+ * 받든 안 받든 돈은 받아들일 때만 나간다.
+ */
+export function contractBand(
+  state: GameState,
+  fromId: string,
+  bandId: string,
+  rng: RNG,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): { ok: boolean; reason: string } {
+  const from = state.cells.find((x) => x.id === fromId);
+  const band = state.cells.find((x) => x.id === bandId);
+  if (!from || !band || !inContact(state, from, band)) return { ok: false, reason: '맞닿아 있지 않다' };
+  const n = state.nations[from.owner!];
+  const cost = hireCost(band, eco);
+  if (n.gold < cost) return { ok: false, reason: '돈이 모자라다' };
+  const what = band.neutral === 'mercenary' ? '용병' : '도적';
+  if (rng() >= contractOdds(state, n.id, band)) {
+    pushLog(state, `${n.name}: ${what} 무리가 계약을 거절했다`);
+    return { ok: false, reason: band.neutral === 'mercenary' ? '값이 맞지 않는다며 고개를 젓는다' : '비웃으며 침을 뱉는다' };
   }
+  n.gold -= cost;
+  const units = band.units;
+  band.neutral = undefined;
+  band.bandGood = undefined;
+  band.bandIdle = undefined;
+  band.owner = n.id;
+  band.march = 0;
+  pushLog(state, `${n.name}: ${what} 무리 ${units}명과 계약했다 (-${cost}G)`);
+  return { ok: true, reason: '' };
+}
+
+/**
+ * 물러나라 한다. 무리가 정한다 — 물러나면(선 +1) 두 칸쯤 떨어진 빈 땅으로
+ * 가고, 갈 곳이 없으면 흩어진다. 거부하면 악 -1.
+ */
+export function demandLeave(
+  state: GameState,
+  fromId: string,
+  bandId: string,
+  rng: RNG
+): { ok: boolean; reason: string } {
+  const from = state.cells.find((x) => x.id === fromId);
+  const band = state.cells.find((x) => x.id === bandId);
+  if (!from || !band || !inContact(state, from, band)) return { ok: false, reason: '맞닿아 있지 않다' };
+  const n = state.nations[from.owner!];
+  const what = band.neutral === 'mercenary' ? '용병' : '도적';
+  if (rng() >= leaveOdds(state, from, band)) {
+    shiftBand(band, -1);
+    pushLog(state, `${n.name}: ${what} 무리가 물러나기를 거부했다`);
+    return { ok: false, reason: '꿈쩍도 하지 않는다' };
+  }
+  shiftBand(band, +1);
+  // 내 부대에게서 멀어지는 쪽으로 두 걸음
+  let at: Cell = band;
+  for (let step = 0; step < 2; step++) {
+    const away = neighbors(state, at)
+      .filter(openGround)
+      .sort(
+        (x, y) =>
+          hexDistance(y.row, y.col, from.row, from.col) - hexDistance(x.row, x.col, from.row, from.col)
+      )[0];
+    if (!away || hexDistance(away.row, away.col, from.row, from.col) <= hexDistance(at.row, at.col, from.row, from.col)) break;
+    moveStack(at, away);
+    at = away;
+  }
+  if (at === band) {
+    clearStack(band);
+    pushLog(state, `${n.name}: ${what} 무리가 물러나 흩어졌다`);
+  } else {
+    pushLog(state, `${n.name}: ${what} 무리가 물러났다`);
+  }
+  return { ok: true, reason: '' };
 }
 
 /**
@@ -1683,8 +1749,6 @@ export function beginTurn(
     if (c.owner === nationId && !c.neutral) c.march = Math.min(eco.marchMax, c.march + eco.marchRegen);
   }
   applyUpkeep(state, nationId, eco);
-  // AI 는 여유가 있으면 옆의 용병 무리를 고용한다 (사람은 무리를 눌러서)
-  if (!state.nations[nationId]?.isHuman) aiHireMercs(state, nationId, eco);
   progressForts(state, nationId);
   trySpawnMerchant(state, nationId, eco);
   recomputeEncirclement(state);

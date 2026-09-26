@@ -108,9 +108,12 @@ import {
   CHARACTER_NAME,
   forgiveVassal,
   knows,
-  canHire,
   hireCost,
-  hireBand,
+  contractBand,
+  demandLeave,
+  contractOdds,
+  leaveOdds,
+  inContact,
 } from '../engine';
 import type { Chronicle } from '../engine';
 import type { Encounter, TreatyKind } from '../engine';
@@ -283,7 +286,7 @@ const HELP: Array<{ title: string; body: string }> = [
   },
   {
     title: '도적과 용병',
-    body: '도적(🦹)과 용병(⚔️) 무리는 저마다 움직이고, 저마다 선악이 있다. 도적은 털 만한 나라 땅을 찾아 떠돌다 옆에서 금을 털고, 센 군대가 오면 달아난다. 두려운 나라는 털지 못한다 — 공포의 이득이다. 털 수 있었는데 지나간 무리는 선해지고, 턴 무리는 악해진다. 선해진 도적은 칼을 내려놓고 용병이 되거나 정의로운 군대에 투항하고, 일거리를 잃은 악한 용병은 도적이 된다. 용병 무리는 돈 많은 나라 쪽으로 떠돌며, 내 땅 옆에 온 무리를 누르면 통째로 고용할 수 있다. 무리를 쳐서 이기면 달아나는 자들을 보내줄지(자비) 쫓을지(잔혹) 고른다.',
+    body: '도적(🦹)과 용병(⚔️) 무리는 저마다 움직이고, 저마다 선악이 있다. 도적은 털 만한 나라 땅을 찾아 떠돌다 옆에서 금을 털고, 센 군대가 오면 달아난다. 두려운 나라는 털지 못한다 — 공포의 이득이다. 털 수 있었는데 지나간 무리는 선해지고, 턴 무리는 악해진다. 선해진 도적은 칼을 내려놓고 용병이 되거나 정의로운 군대에 투항하고, 일거리를 잃은 악한 용병은 도적이 된다. 용병 무리는 돈 많은 나라 쪽으로 떠돈다. 무리와의 일은 부대로 직접 찾아가 마주쳐서 한다 — 부대를 고르고 옆의 무리를 누르면 조우 창이 뜬다. 계약하거나(무리가 받아들이면 그 자리에서 내 부대가 된다), 물러나라 하거나, 친다. 받아들일지는 무리가 정한다 — 선한 무리와 정의로운 나라 사이는 쉽고, 두려운 군대 앞에서는 잘 물러난다. 무리를 쳐서 이기면 달아나는 자들을 보내줄지(자비) 쫓을지(잔혹) 고른다.',
   },
   {
     title: '행군 중에 만나는 일',
@@ -602,8 +605,10 @@ export default function GameScreen() {
    * 연대기 — 나라의 성격이 바뀐 순간. 내 나라이거나 내가 아는 나라면 크게 띄운다.
    * 마지막으로 본 줄을 붙들고 있다가 그 뒤에 새로 적힌 것만 본다(목록은 30줄에서 밀린다).
    */
-  /** 고용하려고 누른 용병 무리 */
-  const [hirePick, setHirePick] = useState<string | null>(null);
+  /** 조우 중인 무리 — 내 부대(from)와 무리(band) */
+  const [contact, setContact] = useState<{ from: string; band: string } | null>(null);
+  /** 조우 창에서 '공격한다' 를 골랐다 — 이번 한 번은 조우를 건너뛰고 친다 */
+  const forceAttackRef = useRef(false);
   const lastChronRef = useRef<Chronicle | null>(null);
   const [chron, setChron] = useState<Chronicle | null>(null);
 
@@ -889,9 +894,16 @@ export default function GameScreen() {
       setMerchantPick(merchantHere);
       return;
     }
-    // 내 땅이나 부대 옆의 용병 무리를 누르면 고용을 묻는다
-    if (!selected && cell.neutral === 'mercenary' && canHire(state, PLAYER, cell)) {
-      setHirePick(cell.id);
+    // 고른 부대 옆의 무리를 누르면 바로 치지 않고 조우한다
+    if (
+      selected &&
+      selectedCell &&
+      !forceAttackRef.current &&
+      cell.neutral &&
+      cell.units > 0 &&
+      inContact(state, selectedCell, cell)
+    ) {
+      setContact({ from: selectedCell.id, band: cell.id });
       return;
     }
 
@@ -2235,44 +2247,84 @@ export default function GameScreen() {
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
 
-      {/* 용병 고용 — 무리가 통째로 내 부대가 된다 */}
-      <Modal visible={!!hirePick} transparent animationType="fade">
+      {/*
+        조우 — 무리와 맞닿았다. 계약하거나, 물러나라 하거나, 치거나, 그냥 둔다.
+        무리가 받아들일지는 무리가 정한다(선악 · 내 평판 · 내 힘).
+      */}
+      <Modal visible={!!contact} transparent animationType="fade">
         <View style={styles.overlay}>
           {(() => {
-            const c = hirePick ? state.cells.find((x) => x.id === hirePick) : null;
-            if (!c || c.neutral !== 'mercenary') return null;
-            const cost = hireCost(c);
-            const g = c.bandGood ?? 0;
-            const temper =
-              g >= 30 ? '믿을 만한 무리다' : g <= -30 ? '평판이 나쁜 무리다 — 값을 더 부른다' : '그저 돈을 따르는 무리다';
+            const from = contact ? state.cells.find((x) => x.id === contact.from) : null;
+            const band = contact ? state.cells.find((x) => x.id === contact.band) : null;
+            if (!from || !band || !band.neutral) return null;
+            const merc = band.neutral === 'mercenary';
+            const what = merc ? '용병' : '도적';
+            const g = band.bandGood ?? 0;
+            const temper = g >= 30 ? '이름난 무리다 — 약속을 지킨다는 소문이 있다' : g <= -30 ? '악명 높은 무리다' : '그저 먹고살려는 무리다';
+            const cost = hireCost(band);
+            const cOdds = contractOdds(state, PLAYER, band);
+            const lOdds = leaveOdds(state, from, band);
+            const word = (p: number) => (p >= 0.7 ? '받아들일 것 같다' : p >= 0.4 ? '반반이다' : '어려워 보인다');
+            const mood =
+              characterOf(me) === 'feared'
+                ? '무리가 당신의 깃발을 알아보고 움찔한다.'
+                : characterOf(me) === 'just' && g > -30
+                ? '무리의 우두머리가 무기를 내리고 말을 건다.'
+                : g <= -30
+                ? '무리가 칼을 뽑아 들고 노려본다.'
+                : '무리가 경계하며 거리를 둔다.';
+            const act = (fn: (s: GameState) => { ok: boolean; reason: string }, label: string) => {
+              setContact(null);
+              setState((prev) => {
+                const r = fn(prev);
+                actedRef.current.add(from.id);
+                setOrderNote(r.ok ? null : `${what} 무리: ${r.reason}`);
+                humanRef.current.encounters.push(`contact:${label}:${r.ok ? 'ok' : 'no'}`);
+                return bump(prev);
+              });
+              setSelected(null);
+            };
             return (
               <View style={styles.modal}>
-                <Text style={styles.modalTitle}>⚔️ 용병 무리 {c.units}명</Text>
-                <Text style={styles.helpBody}>{temper}</Text>
-                <Text style={[styles.hint, { marginTop: 6 }]}>
-                  고용하면 그 자리에서 당신의 부대가 됩니다. 선한 무리일수록 싸고, 악한 무리일수록 비쌉니다.
+                <Text style={styles.chronEyebrow}>조 우</Text>
+                <Text style={styles.modalTitle}>
+                  {merc ? '⚔️' : '🦹'} {what} 무리 {band.units}명
                 </Text>
-                <View style={[styles.row, { marginTop: 12 }]}>
-                  <TouchableOpacity
-                    style={[styles.btn, styles.recruitBtn, me.gold < cost && styles.btnDim]}
-                    disabled={me.gold < cost}
-                    onPress={() => {
-                      const id = hirePick;
-                      setHirePick(null);
-                      if (id)
-                        setState((prev) => {
-                          hireBand(prev, PLAYER, id);
-                          recomputeVision(prev, PLAYER);
-                          return bump(prev);
-                        });
-                    }}
-                  >
-                    <Text style={styles.btnText}>고용한다 ({cost}G)</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.btn, styles.resetBtn]} onPress={() => setHirePick(null)}>
-                    <Text style={styles.btnText}>그만둔다</Text>
-                  </TouchableOpacity>
-                </View>
+                <Text style={styles.helpBody}>{temper}</Text>
+                <Text style={[styles.helpBody, { fontStyle: 'italic', marginTop: 4 }]}>{mood}</Text>
+                <TouchableOpacity
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 12, flex: 0 }, me.gold < cost && styles.btnDim]}
+                  disabled={me.gold < cost}
+                  onPress={() => act((s) => contractBand(s, from.id, band.id, rng), 'contract')}
+                >
+                  <Text style={styles.btnText}>
+                    계약한다 ({cost}G) — {word(cOdds)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.endBtn, { marginTop: 6, flex: 0 }]}
+                  onPress={() => act((s) => demandLeave(s, from.id, band.id, rng), 'leave')}
+                >
+                  <Text style={styles.btnText}>물러나라고 한다 — {word(lOdds)}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.resetBtn, { marginTop: 6, flex: 0 }, !movable.has(band.id) && styles.btnDim]}
+                  disabled={!movable.has(band.id)}
+                  onPress={() => {
+                    setContact(null);
+                    forceAttackRef.current = true;
+                    onCellPress(band);
+                    forceAttackRef.current = false;
+                  }}
+                >
+                  <Text style={styles.btnText}>공격한다{movable.has(band.id) ? '' : ' (행군력이 모자라다)'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.modeBtn, { marginTop: 6, flex: 0 }]}
+                  onPress={() => setContact(null)}
+                >
+                  <Text style={styles.btnText}>그냥 둔다</Text>
+                </TouchableOpacity>
               </View>
             );
           })()}
