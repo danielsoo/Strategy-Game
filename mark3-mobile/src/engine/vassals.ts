@@ -15,7 +15,7 @@
 import { RNG } from '../services/combatSystem';
 import { GameState, EconomyConfig, DEFAULT_ECONOMY, Nation } from './types';
 import { computeLedger, nationStats, pushLog, cellPower } from './rules';
-import { adjustRep, loyaltyDrift, characterOf, effective } from './reputation';
+import { adjustRep, loyaltyDrift, characterOf, effJ } from './reputation';
 
 /** 이 나라의 속국들 */
 export function vassalsOf(state: GameState, lordId: number): Nation[] {
@@ -77,7 +77,7 @@ export function vassalize(
 
   vassal.suzerain = lordId;
   vassal.vassalOrigin = origin;
-  vassal.loyalty = origin === 'conquest' ? 40 : 70;
+  vassal.loyalty = origin === 'conquest' ? DEFAULT_ECONOMY.conquestLoyalty : 70;
 
   if (origin === 'conquest') {
     // 정복의 평판은 처분(병합이냐 속국이냐)에서 붙는다 — rules.resolveCastleLoss
@@ -205,7 +205,7 @@ export function stepVoluntarySubmission(
       칼을 든 손에 목을 내미는 나라는 드물다.
     */
     const justicePower =
-      Math.pow(effective(protector.justice) / 100, 2) *
+      Math.pow(effJ(protector.justice) / 100, 2) *
       (characterOf(protector) === 'feared' ? 0.3 : 1);
     const p = eco.voluntarySubmitChance * justicePower * desperation;
     if (rng() < p) {

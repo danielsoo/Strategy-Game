@@ -16,7 +16,7 @@
 // 이 파일은 types 말고는 아무것도 불러오지 않는다 — rules·diplomacy·orders·
 // vassals·encounters 가 모두 이걸 부른다.
 
-import { GameState, Nation } from './types';
+import { GameState, Nation, DEFAULT_ECONOMY } from './types';
 
 export type Character = 'just' | 'feared' | 'none';
 
@@ -119,7 +119,19 @@ export function adjustRep(state: GameState, nationId: number, dJustice: number, 
  * 공포는 '지금' 을 사고, 정의는 '나중' 을 산다.
  */
 export function loyaltyDrift(lord: Nation): number {
-  return (lord.justice - lord.fear) / 50;
+  return (lord.justice * wJ() - lord.fear * wF()) / 50;
+}
+
+/**
+ * 두 저울추. 판마다 넘기지 않고 DEFAULT_ECONOMY 에서 읽는다 — 평판 효과는
+ * 전투·항복·충성·도적 등 eco 를 받지 않는 곳곳에서 쓰이기 때문이다.
+ * 하네스(sim/paths.ts)는 이 값을 바꿔가며 두 길의 승률을 잰다.
+ */
+export function wJ(): number {
+  return DEFAULT_ECONOMY.justiceWeight;
+}
+export function wF(): number {
+  return DEFAULT_ECONOMY.fearWeight;
 }
 
 /**
@@ -132,5 +144,25 @@ export function loyaltyDrift(lord: Nation): number {
  * 도 13% 쯤 이긴다')과 AI 배신 확률(두 배가 된다)이 통째로 흔들린다.
  */
 export function effective(v: number): number {
-  return 50 + v / 2;
+  return 50 + Math.max(0, Math.min(100, v)) / 2;
 }
+/** 정의 쪽 효과값 — 저울추를 곱한다 */
+export function effJ(v: number): number {
+  return effective(v * wJ());
+}
+/** 공포 쪽 효과값 — 저울추를 곱한다 */
+export function effF(v: number): number {
+  return effective(v * wF());
+}
+
+/**
+ * 길(Nation.path)이 어느 선택에 닿는지 — 하네스가 하나씩 꺼서 어느 선택이 두 길의
+ * 승률 차이를 만드는지 가른다(sim/paths.ts --off). 게임에서는 늘 전부 켜져 있다.
+ */
+export const PATH_KNOBS = {
+  conquest: true, // 병합 대 속국
+  vassals: true, // 문책 대 용서
+  bands: true, // 진 무리 섬멸 대 보내주기
+  betray: true, // 배신 빈도
+  encounters: true, // 행군 사건 대처
+};

@@ -25,7 +25,7 @@
 import { RNG } from '../services/combatSystem';
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY, Nation } from './types';
 import { neighbors, stackCap, pushLog } from './rules';
-import { adjustRep, characterOf } from './reputation';
+import { adjustRep, characterOf, PATH_KNOBS } from './reputation';
 
 export interface EncounterEffect {
   gold?: number;
@@ -106,8 +106,8 @@ const EVENTS: EventKind[] = [
             options: [
               { label: `고맙게 받는다 (+${g}G)`, effect: { gold: g } },
               {
-                label: `사양하고 오히려 돕는다 (-${Math.round(g / 2)}G, 공포 -3)`,
-                effect: { gold: -Math.round(g / 2), fear: -3 },
+                label: `사양하고 오히려 돕는다 (-${Math.round(g / 2)}G, 정의 +1, 공포 -3)`,
+                effect: { gold: -Math.round(g / 2), justice: 1, fear: -3 },
               },
             ],
           };
@@ -139,7 +139,7 @@ const EVENTS: EventKind[] = [
           const g = 5 + Math.round(8 * c.F);
           const opts: EncounterOption[] = [
             { label: `공물을 받아 챙긴다 (+${g}G, 공포 +2)`, effect: { gold: g, fear: 2 } },
-            { label: '두고 간다 — 안심시킨다 (공포 -2)', effect: { fear: -2 } },
+            { label: '두고 간다 — 안심시킨다 (정의 +1, 공포 -2)', effect: { justice: 1, fear: -2 } },
           ];
           if (c.room >= 2) {
             opts.push({
@@ -195,7 +195,7 @@ const EVENTS: EventKind[] = [
           story: '길가에서 주인 잃은 보급 마차를 찾았다. 근처 마을의 것으로 보인다.',
           options: [
             { label: '챙긴다 (+5G)', effect: { gold: 5 } },
-            { label: '마을에 돌려준다 (공포 -1)', effect: { fear: -1 } },
+            { label: '마을에 돌려준다 (정의 +1, 공포 -1)', effect: { justice: 1, fear: -1 } },
           ],
         }),
         pick: (c) => (c.F >= 0.6 ? 1 : 0),
@@ -332,7 +332,18 @@ export function resolveEncounterAI(
   const re = EVENTS.find((x) => x.key === evKey)?.reactions.find((r) => r.key === reKey);
   const cell = state.cells.find((x) => x.id === e.cellId);
   const c = cell ? ctxOf(state, cell, eco) : null;
-  const choice = re && c ? re.pick(c, e) : 0;
+  let choice = re && c ? re.pick(c, e) : 0;
+  // 길이 정해진 AI 는 그 길대로 — 정의의 길은 자비·옳음을, 공포의 길은 잔혹을
+  const n = state.nations[e.nation];
+  if (n?.path && PATH_KNOBS.encounters && e.options.length > 1) {
+    const score = (o: EncounterOption) => {
+      const fx = o.effect;
+      return n.path === 'just'
+        ? (fx.justice ?? 0) - (fx.fear ?? 0) + (fx.gold ?? 0) / 50
+        : (fx.fear ?? 0) - (fx.justice ?? 0) * 0.2 + (fx.gold ?? 0) / 10 + (fx.units ?? 0);
+    };
+    choice = e.options.reduce((bi, o, i, arr) => (score(o) > score(arr[bi]) ? i : bi), 0);
+  }
   applyEncounter(state, e, choice, eco);
   return choice;
 }

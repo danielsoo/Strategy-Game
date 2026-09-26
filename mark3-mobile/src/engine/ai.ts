@@ -49,7 +49,7 @@ import {
 } from './rules';
 import { vassalize, vassalsOf } from './vassals';
 import { issueOrder, punishVassal, forgiveVassal } from './orders';
-import { characterOf } from './reputation';
+import { characterOf, PATH_KNOBS } from './reputation';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 import { FitProvenance } from './stamp';
 import { isGuestLand } from './treaty';
@@ -888,7 +888,9 @@ function governVassals(
       // 절반은 용서한다. 성향이 없으면 몰수. (난수를 한 번 더 쓰는 것은 정의의
       // 나라일 때뿐이다.)
       const c = characterOf(lord);
-      if (c === 'feared') punishVassal(state, nationId, v.id, 'strip', eco);
+      const lp = PATH_KNOBS.vassals ? lord.path : undefined;
+      if (lp === 'just') forgiveVassal(state, nationId, v.id);
+      else if (lp === 'feared' || c === 'feared') punishVassal(state, nationId, v.id, 'strip', eco);
       else if (c === 'just' && rng() < 0.5) forgiveVassal(state, nationId, v.id);
       else punishVassal(state, nationId, v.id, 'seize', eco);
     }
@@ -1008,6 +1010,10 @@ export function chooseVassalOrAnnex(
   loserId: number,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): 'annex' | 'vassalize' {
+  // 길이 정해진 나라는 그 길대로 — 살려두는 것이 자비, 지우는 것이 공포다
+  const path = PATH_KNOBS.conquest ? state.nations[winnerId]?.path : undefined;
+  if (path === 'just') return 'vassalize';
+  if (path === 'feared') return 'annex';
   const mine = computeLedger(state, winnerId, eco);
   const theirs = computeLedger(state, loserId, eco);
 
@@ -1290,7 +1296,10 @@ export function* takeAITurnGen(
       log.attacks.push(out);
       // 진 무리가 달아난다 — 공포의 나라는 쫓아 섬멸하고, 그 밖에는 보내준다
       if (out.fledBand) {
-        if (characterOf(state.nations[nationId]) === 'feared') slayBand(state, nationId, out.fledBand);
+        const me = state.nations[nationId];
+        const mp = PATH_KNOBS.bands ? me.path : undefined;
+        if (mp === 'feared' || (mp !== 'just' && characterOf(me) === 'feared'))
+          slayBand(state, nationId, out.fledBand);
         else spareBand(state, nationId);
       }
 

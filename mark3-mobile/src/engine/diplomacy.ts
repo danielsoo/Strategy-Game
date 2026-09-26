@@ -19,7 +19,7 @@
 import { RNG } from '../services/combatSystem';
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { Treaty, TreatyKind, blocOf, treatyOf, wa } from './treaty';
-import { adjustRep, characterOf, effective } from './reputation';
+import { adjustRep, characterOf, effJ, PATH_KNOBS } from './reputation';
 import { getHexNeighborOffsets } from '../utils/hexGrid';
 
 /**
@@ -579,6 +579,17 @@ export function stepDiplomacy(
     (p) => alive(p.from) && alive(p.to) && state.turn - p.turn <= 1
   );
 
+  // 동맹을 지키는 것은 옳은 일이다 — 끊지 않고 10턴마다 두 나라 모두 정의 +1.
+  // 한 턴에 한 번만(당사자 a 의 차례에) 센다.
+  for (const t of state.treaties ?? []) {
+    if (t.kind !== 'alliance' || t.a !== nationId) continue;
+    const held = state.turn - t.since;
+    if (held > 0 && held % 10 === 0) {
+      adjustRep(state, t.a, +1, 0);
+      adjustRep(state, t.b, +1, 0);
+    }
+  }
+
   const heads = state.nations.filter((n) => n.alive && n.suzerain === null).map((n) => n.id);
   if (heads.length >= 2 && (state.treaties ?? []).some((t) => t.kind === 'alliance')) {
     let anyWar = false;
@@ -635,7 +646,10 @@ function aiDiplomacy(state: GameState, me: number, rng: RNG, eco: EconomyConfig)
     if (mine <= theirs * BETRAY.edge) continue;
     const threat = commonThreat(state, b, myHead, oh);
     if (threat && threat.power > theirs) continue;
-    const p = BETRAY.chance * (1 - effective(self.justice) / 100);
+    // 정의의 길은 약속을 좀처럼 깨지 않고, 공포의 길은 쉽게 깬다
+    const sp = PATH_KNOBS.betray ? self.path : undefined;
+    const pathMul = sp === 'just' ? 0.3 : sp === 'feared' ? 1.5 : 1;
+    const p = BETRAY.chance * (1 - effJ(self.justice) / 100) * pathMul;
     if (rng() < p) {
       breakTreaty(state, me, other, eco);
       return;

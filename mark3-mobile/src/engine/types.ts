@@ -59,6 +59,8 @@ export interface Cell {
   bandIdle?: number;
   /** 무역상이 닦아놓은 길 */
   hasRoad?: boolean;
+  /** 병합으로 얻은 땅의 불안이 가라앉는 턴 — 그 전까지는 수입을 내지 않는다 */
+  unrestUntil?: number;
   /**
    * 이 땅의 원래 주인. 조약 상대의 군대가 '손님' 으로 서 있는 동안만 있다.
    *
@@ -164,6 +166,12 @@ export interface Nation {
    *   forbid     아무와도 안 된다
    */
   vassalPolicy?: 'free' | 'noEnemies' | 'forbid';
+  /**
+   * AI 가 걷는 길 — 정의의 길이면 자비와 약속을, 공포의 길이면 잔혹을 고른다.
+   * 없으면 형편대로 섞어 고른다(기본). 하네스(sim/paths.ts)가 두 길의 승률을
+   * 견주려고 준다. 사람에게는 쓰지 않는다.
+   */
+  path?: 'just' | 'feared';
   /**
    * 이 나라의 수입 배수. 난이도 핸디캡에 쓴다.
    *
@@ -304,6 +312,26 @@ export interface EconomyConfig {
   truceTurns: number;
   /** 조약을 깨면 잃는 정의 */
   betrayJustice: number;
+  /**
+   * 정의가 주는 이득 전체의 저울추(사기 버팀·항복병 편입·급여 유예·자발 복속·충성).
+   * 공포의 저울추(적 사기 꺾기·복종·도적 억지·현지 조달)와 맞춰 두 길의 승률을
+   * 반반에 두는 손잡이다(sim/paths.ts). 1 이 처음 값.
+   */
+  justiceWeight: number;
+  fearWeight: number;
+  /**
+   * 병합한 땅이 수입을 내지 않는 턴(11x11 기준, 판이 크면 boardScale 만큼).
+   * 병합이 속국보다 너무 이득이라 공포의 길이 정의의 길을 압도했다
+   * (sim/paths.ts: 병합 대 속국만 끄면 승률비 0.37 → 1.47).
+   */
+  annexUnrestTurns: number;
+  /** 정복해서 속국으로 살려둔 나라의 시작 충성 — 살려준 은혜 */
+  conquestLoyalty: number;
+  /**
+   * 병합할 때 진 나라의 군대 중 새 주인을 따르는 몫(0~1). 나머지는 도적이
+   * 되어 흩어진다. 1 이면 예전처럼 군대를 통째로 흡수한다.
+   */
+  annexArmyKeep: number;
   /** 속국도 스스로 조약을 맺나 (1/0) */
   vassalDiplomacy: number;
   /**
@@ -429,6 +457,11 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   diplomacyOn: 1,
   truceTurns: 10,
   betrayJustice: 15,
+  justiceWeight: 1.3,
+  fearWeight: 1,
+  annexUnrestTurns: 20,
+  conquestLoyalty: 70,
+  annexArmyKeep: 0,
   vassalDiplomacy: 1,
   endgameHeads: 0,
   encounterChance: 0.12,

@@ -20,7 +20,7 @@ import { vassalsOf, nationPower, breakVassalage } from './vassals';
 import { isVisible } from './vision';
 import { breakTreaty, ownTreaties } from './diplomacy';
 import { wa } from './treaty';
-import { adjustRep } from './reputation';
+import { adjustRep, wF, wJ } from './reputation';
 
 /** 속국이 저울질할 때 쓰는 값들 */
 export interface VassalAssessment {
@@ -263,7 +263,7 @@ export function decideResponse(
   // 사지 않는다. 정의가 사는 것은 마음(충성)이고, 그건 위의 loyalty 에 이미 있다.
   // (예전에는 '정의 - 50' 이 복종을 올렸다. 평판을 0 에서 시작하게 바꾸며 나눴다.)
   const willing =
-    0.35 + (vassal.loyalty / 100) * 0.6 + lord.fear / 200 + (0.5 - a.survival) * 1.2;
+    0.35 + (vassal.loyalty / 100) * 0.6 + (lord.fear * wF()) / 200 + (0.5 - a.survival) * 1.2;
   if (willing > burden + 0.15) return 'obey';
 
   // 안 따르기로 했다. 그렇다고 대놓고 말하지는 않는다 —
@@ -575,8 +575,8 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
       가망(survival)이 0.45 아래면 공포가 반란을 누르고, 위면 부추긴다.
       정의로운 주인은 흔들려도 쉽게 버림받지 않는다.
     */
-    edge += (lord.fear / 100) * (a.survival - 0.45) * 40;
-    edge -= (lord.justice / 100) * 8;
+    edge += ((lord.fear * wF()) / 100) * (a.survival - 0.45) * 40;
+    edge -= ((lord.justice * wJ()) / 100) * 8;
 
     // 불이행이 드러난 참이면 이미 돌아선 것이다
     if (v.order && v.order.revealed && v.order.response !== 'obey') edge += 15;

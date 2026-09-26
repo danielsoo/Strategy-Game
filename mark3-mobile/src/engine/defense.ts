@@ -13,7 +13,7 @@
 
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { RNG } from '../services/combatSystem';
-import { effective } from './reputation';
+import { effJ, effF } from './reputation';
 
 export type DefenseChoice = 'fight' | 'retreat' | 'surrender';
 
@@ -88,8 +88,8 @@ export function decideDefense(
   if (odds >= 0.65) return 'fight';
 
   const att = attacker.owner !== null ? state.nations[attacker.owner] : null;
-  const fear = effective(att?.fear ?? 0);
-  const justice = effective(att?.justice ?? 0);
+  const fear = effF(att?.fear ?? 0);
+  const justice = effJ(att?.justice ?? 0);
 
   // 항복해서 살아남을 확률이 곧 항복할 마음이다
   const { deaths } = surrenderOutcome(defender.units, fear, justice);
