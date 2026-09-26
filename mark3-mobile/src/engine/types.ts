@@ -132,6 +132,11 @@ export interface Nation {
    */
   vassalOrigin: 'conquest' | 'voluntary' | null;
   /**
+   * 조약을 깬 횟수. 다른 나라들이 이 나라의 제안을 믿을지 여기서 본다.
+   * 한 번 배신한 나라와 다시 손잡기는 어렵다 — 그래야 배신이 공짜가 아니다.
+   */
+  betrayals?: number;
+  /**
    * 이 나라의 수입 배수. 난이도 핸디캡에 쓴다.
    *
    * 판단 품질로 만드는 난이도에는 천장이 있다 — AI 의 최선보다 세게는 못
@@ -171,6 +176,18 @@ export interface GameState {
    * 종주국에게 드러내면 안 된다. 분석과 저장용으로만 둔다.
    */
   orderLog: OrderOutcome[];
+  /**
+   * 맺어진 조약(휴전·동맹). 옛 저장에는 없다 — 없으면 전부 전쟁 중이다.
+   * 판정은 treaty.ts, 맺고 깨는 것은 diplomacy.ts.
+   */
+  treaties?: import('./treaty').Treaty[];
+  /** 사람에게 온 제안 — 사람 차례에 화면이 묻는다 */
+  proposals?: import('./diplomacy').Proposal[];
+  /**
+   * 같은 상대에게 거듭 조르지 않게. 'a-b' → 마지막으로 제안한 턴.
+   * 이게 없으면 AI 가 매 턴 같은 제안을 보내 사람이 제안 창만 닫다 끝난다.
+   */
+  diploCooldown?: Record<string, number>;
 }
 
 export interface EconomyConfig {
@@ -239,6 +256,20 @@ export interface EconomyConfig {
    * 뿐이고, 그건 남의 본진을 털어 병합하거나 속국으로 삼는다는 뜻이다.
    */
   dominanceShare: number;
+  /**
+   * 외교를 켜나 (1/0). 끄면 조약이 하나도 안 생긴다 — 하네스에서 외교가
+   * 있을 때와 없을 때를 같은 판으로 견주는 손잡이다.
+   */
+  diplomacyOn: number;
+  /** 휴전 기한(턴). 11x11 기준이고 판이 크면 boardScale 만큼 늘린다. */
+  truceTurns: number;
+  /** 조약을 깨면 잃는 정의 */
+  betrayJustice: number;
+  /**
+   * 새 땅에 발을 들일 때 사건이 날 확률. 0 이면 사건이 없다.
+   * 정의·공포에 따라 무슨 사건인지가 달라진다(encounters.ts).
+   */
+  encounterChance: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
   /**
@@ -347,6 +378,10 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   dominanceShare: 0,
+  diplomacyOn: 1,
+  truceTurns: 10,
+  betrayJustice: 15,
+  encounterChance: 0.12,
   voluntarySubmitChance: 0.12,
   flankSupport: 0.42,
   visionRadiusUnit: 2,

@@ -168,7 +168,9 @@ function main() {
   const games = parseArg('games', 100);
   const size = parseArg('size', 11);
   const level = parseStr('log', 'off') as LogLevel;
-  const seeds = [4242, 13337, 90210];
+  // 시드를 바꿔 다시 재는 것까지가 측정이다 — 같은 시드로 세 번 재고 '진짜'
+  // 라고 할 뻔한 적이 있다.  --seeds 1,2,3
+  const seeds = parseStr('seeds', '4242,13337,90210').split(',').map(Number);
 
   const rec = new Recorder(level);
 

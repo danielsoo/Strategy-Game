@@ -52,7 +52,13 @@ export interface MatchTurn {
     orders: number;
     /** 수비 선택 — 맞섬·후퇴·항복 */
     defense: string[];
+    /** 외교 — propose:kind:상대:결과 · break:kind:상대 · accept/decline:kind:상대 */
+    diplomacy: string[];
+    /** 행군 중 사건 — 종류:고른 번호 */
+    encounters: string[];
   };
+  /** 그 턴 끝의 조약 — 'a-b:alliance' 처럼 */
+  treaties?: string[];
 }
 
 export interface MatchLog {
@@ -117,7 +123,7 @@ export function startMatch(
 
 /** 빈 '사람이 한 것' — 턴이 시작될 때 만들어 두고 채운다 */
 export function emptyHumanTurn(): MatchTurn['human'] {
-  return { attacks: 0, captured: 0, recruited: 0, orders: 0, defense: [] };
+  return { attacks: 0, captured: 0, recruited: 0, orders: 0, defense: [], diplomacy: [], encounters: [] };
 }
 
 /**
@@ -154,6 +160,7 @@ export function recordTurn(
     }),
     events,
     human,
+    treaties: (state.treaties ?? []).map((t) => `${t.a}-${t.b}:${t.kind}`),
   });
 }
 

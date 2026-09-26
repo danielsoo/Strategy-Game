@@ -12,6 +12,7 @@
 
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY, Owner, Terrain } from './types';
 import { hexDistance } from '../utils/hexGrid';
+import { allied } from './treaty';
 
 /** 마지막으로 그 칸을 봤을 때의 기억 */
 export interface CellMemory {
@@ -75,8 +76,11 @@ export function recomputeVision(
   // 눈이 되는 것들 — 내 부대, 내 본진, 내 완공 요새
   const scale = visionScale(state);
   const eyes: Array<{ cell: Cell; radius: number }> = [];
+  // 동맹은 서로의 눈을 빌려준다. 휴전 상대는 아니다 — 휴전은 믿음이 아니라 멈춤이다.
+  const friend = (owner: number | null) =>
+    owner === nationId || (owner !== null && allied(state, nationId, owner));
   for (const c of state.cells) {
-    if (c.owner !== nationId) continue;
+    if (!friend(c.owner)) continue;
     if (c.castle || c.fortStage === 4) {
       eyes.push({ cell: c, radius: Math.round(eco.visionRadiusHub * scale) });
     } else if (c.units > 0 && !c.neutral) {

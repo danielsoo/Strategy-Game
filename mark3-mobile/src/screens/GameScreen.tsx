@@ -88,6 +88,19 @@ import {
 } from '../engine';
 import type { OrderKind, Punishment } from '../engine';
 import VassalPanel from './VassalPanel';
+import DiplomacyPanel, { ProposalCard, EncounterCard } from './DiplomacyPanel';
+import {
+  mayEnter,
+  propose,
+  breakTreaty,
+  answerProposal,
+  proposalsFor,
+  rollEncounter,
+  applyEncounter,
+  relationOf,
+  treatyOf,
+} from '../engine';
+import type { Encounter, TreatyKind } from '../engine';
 import {
   takeAITurn,
   PERSONALITIES,
@@ -245,7 +258,15 @@ type Layout = NonNullable<ReturnType<typeof layout>>;
 const HELP: Array<{ title: string; body: string }> = [
   {
     title: '이기는 법',
-    body: '영향력(내 땅 + 속국의 땅)이 압도적으로 커지면 이긴다. 적의 마지막 성을 빼앗으면 그 나라를 병합할지 속국으로 둘지 고른다. 속국은 조공을 바치고, 행정비는 그쪽이 낸다 — 넓어질수록 직접 먹는 것보다 부리는 쪽이 이득이다.',
+    body: '살아남은 나라가 모두 당신 진영이 되면 이긴다. 땅만 넓혀서는 이기지 못한다 — 적의 마지막 성을 빼앗아, 그 나라를 병합하거나 속국으로 삼아야 한다. 속국은 조공을 바치고, 행정비는 그쪽이 낸다 — 넓어질수록 직접 먹는 것보다 부리는 쪽이 이득이다.',
+  },
+  {
+    title: '외교',
+    body: '"외교" 단추로 휴전이나 동맹을 청할 수 있다. 휴전은 한동안 서로 치지 않고 서로의 땅에 들어가지 않는 약속이고, 동맹은 거기에 더해 시야를 나누고 협공을 거든다. 조약은 깰 수 있지만 배신이다 — 정의가 깎이고 다른 나라들이 당신을 덜 믿는다. 동맹은 이긴 것으로 치지 않는다. 공동의 적이 사라지면 동맹도 풀린다.',
+  },
+  {
+    title: '행군 중에 만나는 일',
+    body: '새 땅에 들어서면 가끔 일이 생긴다. 정의로운 나라에는 마을이 곡식을 내놓고 용병이 합류를 청하며, 두려운 나라에는 공물이 들어오고 도적이 흩어지지만 원한을 품은 주민이 우물에 독을 풀기도 한다. 그 앞에서 무엇을 고르느냐가 다시 평판이 된다.',
   },
   {
     title: '부대는 한 턴에 한 번',
@@ -548,6 +569,14 @@ export default function GameScreen() {
   const [orderNote, setOrderNote] = useState<string | null>(null);
   /** 기록 내보내기 결과 한 줄 */
   const [logNote, setLogNote] = useState<string | null>(null);
+  const [showDiplo, setShowDiplo] = useState(false);
+  const [diploNote, setDiploNote] = useState<string | null>(null);
+  /**
+   * 행군 중에 만난 일들. 한 턴에 여럿 날 수 있다(길 따라 가는 부대들).
+   * setState 의 갱신 함수 안에서 생기므로 ref 에 쌓고, 그 갱신이 부르는
+   * 다음 그림에서 첫 것을 띄운다.
+   */
+  const encQueueRef = useRef<Encounter[]>([]);
 
   /**
    * 행군이 멈춘 부대. 다음 그림에서 골라준다 —
@@ -805,9 +834,9 @@ export default function GameScreen() {
     if (!selectedCell || !myTurn) return new Set<string>();
     const out = new Set<string>();
     for (const n of neighbors(state, selectedCell)) {
-      const ok = isHostile(selectedCell, n)
+      const ok = isHostile(selectedCell, n, state)
         ? canAttackFrom(selectedCell, n)
-        : canMoveTo(selectedCell, n);
+        : canMoveTo(selectedCell, n) && mayEnter(state, PLAYER, n.owner);
       if (ok) out.add(n.id);
     }
     return out;
@@ -846,6 +875,21 @@ export default function GameScreen() {
       setPathTo(null);
       return;
     }
+    // 조약 상대의 칸 — 막혀 있는 까닭을 말해준다. 말없이 안 움직이면 고장으로 보인다.
+    if (selectedCell && cell.owner !== null && cell.owner !== PLAYER && !movable.has(cell.id)) {
+      const t = treatyOf(state, PLAYER, cell.owner);
+      if (t) {
+        const who = state.nations[blocOf(state, cell.owner)].name;
+        setState((prev) => {
+          pushLog(
+            prev,
+            `${t.kind === 'alliance' ? '🤝' : '🕊'} ${who}와 ${t.kind === 'alliance' ? '동맹' : '휴전'} 중 — 치거나 들어가려면 외교에서 조약을 깨야 합니다`
+          );
+          return bump(prev);
+        });
+        return;
+      }
+    }
     if (!movable.has(cell.id) || !selectedCell) {
       /*
         이번 턴엔 못 닿는 곳을 찍었다. 예전에는 그냥 선택이 풀렸는데,
@@ -880,7 +924,7 @@ export default function GameScreen() {
     setState((prev) => {
       const from = prev.cells.find((c) => c.id === selectedCell.id)!;
       const to = prev.cells.find((c) => c.id === cell.id)!;
-      if (isHostile(from, to)) {
+      if (isHostile(from, to, prev)) {
         const wasCastle = to.castle;
         const victim = to.owner;
         const outcome = performAttack(prev, from, to, rng);
@@ -903,8 +947,16 @@ export default function GameScreen() {
         ) {
           setConquest({ victim, castleId: to.id });
         }
-      } else if (to.units === 0 || (to.owner === PLAYER && !to.neutral)) {
+      } else if (
+        (to.units === 0 || (to.owner === PLAYER && !to.neutral)) &&
+        mayEnter(prev, PLAYER, to.owner)
+      ) {
+        const fresh = to.owner === null || blocOf(prev, to.owner) !== blocOf(prev, PLAYER);
         moveStack(from, to);
+        if (fresh) {
+          const e = rollEncounter(prev, to, rng);
+          if (e) encQueueRef.current.push(e);
+        }
         tutRef.current.moves++;
         // 합류한 경우에도 도착 칸을 소진 처리한다.
         // 아니면 A를 B에 합친 뒤 B를 또 움직여 사실상 두 번 움직이게 된다.
@@ -985,16 +1037,26 @@ export default function GameScreen() {
       if (!next) continue; // 행군력이 모자라다. 이번 턴은 쉰다.
 
       // 가려던 칸에 뭔가 있었다 — 안개가 걷히니 드러난 것이다
-      if (isHostile(c, next, s) || next.units > 0 || !canMoveTo(c, next)) {
+      if (
+        isHostile(c, next, s) ||
+        next.units > 0 ||
+        !canMoveTo(c, next) ||
+        !mayEnter(s, PLAYER, next.owner)
+      ) {
         c.order = undefined;
         halted.push(c.id);
         pushLog(s, '가는 길에 무언가 있어 행군을 멈췄습니다');
         continue;
       }
 
+      const fresh = next.owner === null || blocOf(s, next.owner) !== blocOf(s, PLAYER);
       moveStack(c, next);
       acted.add(next.id);
       c = next;
+      if (fresh) {
+        const e = rollEncounter(s, next, rng);
+        if (e) encQueueRef.current.push(e);
+      }
       // 한 칸 갔으니 보이는 범위가 달라진다. 새로 드러난 것을 그 자리에서 본다.
       recomputeVision(s, PLAYER);
 
@@ -1339,7 +1401,7 @@ export default function GameScreen() {
   const spot: 'cell' | 'button' | 'gold' | null =
     !coachStep || coachDone || !myTurn || !coachIsReady
       ? null
-      : coachButton === 'recruit' || coachButton === 'endTurn'
+      : coachButton === 'recruit' || coachButton === 'endTurn' || coachButton === 'diplo'
       ? 'button'
       : coachStep.target === 'gold'
       ? 'gold'
@@ -1718,6 +1780,8 @@ export default function GameScreen() {
                     {n.suzerain !== null ? '└ ' : ''}
                     {discovered ? n.name : '미발견'}
                     {!n.alive && discovered ? ' ×' : ''}
+                    {n.alive && n.id !== PLAYER && relationOf(state, PLAYER, n.id) === 'alliance' ? ' 🤝' : ''}
+                    {n.alive && n.id !== PLAYER && relationOf(state, PLAYER, n.id) === 'truce' ? ' 🕊' : ''}
                   </Text>
                 </View>
                 <Text style={[styles.td, styles.influence]}>
@@ -1899,7 +1963,30 @@ export default function GameScreen() {
             <Text style={styles.btnText}>리셋</Text>
           </TouchableOpacity>
         </View>
-        {/* 단추 스포트라이트 중에는 첫 줄 아래를 통째로 어둡게 */}
+        {/* 외교 — 조약이 있으면 몇 개인지 같이 */}
+        <View style={[styles.row, spot === 'button' && coachButton !== 'diplo' && styles.dim]}>
+          <TouchableOpacity
+            style={[
+              styles.btn,
+              styles.diploBtn,
+              !myTurn && styles.btnDim,
+              coachButton === 'diplo' && styles.coachGlow,
+            ]}
+            onPress={() => {
+              setDiploNote(null);
+              setShowDiplo(true);
+            }}
+            disabled={!myTurn}
+          >
+            <Text style={styles.btnText}>
+              외교
+              {(state.treaties ?? []).some((t) => t.a === blocOf(state, PLAYER) || t.b === blocOf(state, PLAYER))
+                ? ` · 조약 ${(state.treaties ?? []).filter((t) => t.a === blocOf(state, PLAYER) || t.b === blocOf(state, PLAYER)).length}`
+                : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {/* 단추 스포트라이트 중에는 그 아래를 통째로 어둡게 */}
         <View style={[styles.footerRest, spot === 'button' && styles.dim]}>
         {myVassals.length > 0 && (
           <View style={styles.row}>
@@ -2034,6 +2121,77 @@ export default function GameScreen() {
       )}
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
+
+      <EncounterCard
+        encounter={!combat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
+        onPick={(choice) => {
+          const e = encQueueRef.current.shift();
+          if (!e) return;
+          humanRef.current.encounters.push(`${e.kind}:${choice}`);
+          setState((prev) => {
+            applyEncounter(prev, e, choice);
+            return bump(prev);
+          });
+        }}
+      />
+      <ProposalCard
+        state={state}
+        proposal={
+          myTurn &&
+          !showHelp &&
+          !combat &&
+          !defenseAsk &&
+          !conquest &&
+          !showVassals &&
+          !showDiplo &&
+          encQueueRef.current.length === 0
+            ? proposalsFor(state, PLAYER)[0] ?? null
+            : null
+        }
+        onAnswer={(accept) =>
+          setState((prev) => {
+            const p = proposalsFor(prev, PLAYER)[0];
+            if (p) {
+              answerProposal(prev, p, accept);
+              humanRef.current.diplomacy.push(`${accept ? 'accept' : 'decline'}:${p.kind}:${p.from}`);
+            }
+            return bump(prev);
+          })
+        }
+      />
+      <DiplomacyPanel
+        visible={showDiplo}
+        state={state}
+        playerId={PLAYER}
+        note={diploNote}
+        onClose={() => setShowDiplo(false)}
+        onPropose={(to, kind: TreatyKind) =>
+          setState((prev) => {
+            const r = propose(prev, PLAYER, to, kind, rng);
+            const who = prev.nations[to].name;
+            const k = kind === 'truce' ? '휴전' : '동맹';
+            setDiploNote(
+              r.result === 'accepted'
+                ? `${who}이(가) ${k}을 받아들였다.`
+                : r.result === 'declined'
+                ? `${who}이(가) 거절했다 — "${r.reason}"`
+                : r.reason
+            );
+            humanRef.current.diplomacy.push(`propose:${kind}:${to}:${r.result}`);
+            return bump(prev);
+          })
+        }
+        onBreak={(other) =>
+          setState((prev) => {
+            const t = treatyOf(prev, PLAYER, other);
+            if (breakTreaty(prev, PLAYER, other)) {
+              setDiploNote(`${prev.nations[other].name}와의 ${t?.kind === 'alliance' ? '동맹' : '휴전'}을 깼다. 이제 전쟁이다.`);
+              humanRef.current.diplomacy.push(`break:${t?.kind}:${other}`);
+            }
+            return bump(prev);
+          })
+        }
+      />
 
       {/* 본진 함락 — 병합할까 속국으로 둘까 */}
       <Modal visible={showHelp} transparent animationType="fade">
@@ -2502,6 +2660,7 @@ const styles = StyleSheet.create({
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   endBtn: { backgroundColor: '#3b82f6' },
   tutorialBtn: { backgroundColor: '#b45309' },
+  diploBtn: { backgroundColor: '#7c3aed' },
   /** 스포트라이트 밖 */
   dim: { opacity: 0.22 },
   footerRest: { gap: 6 },

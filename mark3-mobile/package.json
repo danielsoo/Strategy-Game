@@ -28,7 +28,8 @@
     "sim:levers": "tsx sim/levers.ts",
     "sim:seats": "tsx sim/seats.ts",
     "sim:planner": "tsx sim/planner.ts",
-    "sim:humans": "tsx sim/humans.ts"
+    "sim:humans": "tsx sim/humans.ts",
+    "sim:diplo": "tsx sim/diplomacy.ts"
   },
   "dependencies": {
     "@expo/webpack-config": "^19.0.0",

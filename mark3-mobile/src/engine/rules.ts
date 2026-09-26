@@ -24,6 +24,9 @@ import {
   Terrain,
 } from './types';
 import { createVision, recomputeVision } from './vision';
+import { blocOf, atPeace, allied } from './treaty';
+import { stepDiplomacy } from './diplomacy';
+export { blocOf };
 import {
   decideDefense,
   decideDefenseAt,
@@ -91,7 +94,8 @@ export function isHostile(a: Cell, b: Cell, state?: GameState): boolean {
   if (a.neutral) return true;
   if (b.owner === a.owner) return false;
   if (state && a.owner !== null && b.owner !== null) {
-    return blocOf(state, a.owner) !== blocOf(state, b.owner);
+    // 같은 진영이거나 휴전·동맹이면 치지 않는다
+    return !atPeace(state, a.owner, b.owner);
   }
   return true;
 }
@@ -106,20 +110,9 @@ export function isFoeCell(state: GameState, me: number, c: Cell): boolean {
   if (c.units <= 0) return false;
   if (c.neutral) return true;
   if (c.owner === null) return false;
-  return blocOf(state, c.owner) !== blocOf(state, me);
+  return !atPeace(state, c.owner, me);
 }
 
-/** 이 나라가 속한 진영의 우두머리 */
-export function blocOf(state: GameState, nationId: number): number {
-  let cur = nationId;
-  const seen = new Set<number>();
-  while (true) {
-    const n = state.nations[cur];
-    if (!n || n.suzerain === null || seen.has(cur)) return cur;
-    seen.add(cur);
-    cur = n.suzerain;
-  }
-}
 
 // ─────────────────────────────────────────────────────────────
 // 초기 상태
@@ -550,7 +543,12 @@ export function flankingSupport(
   let total = 0;
   for (const n of neighbors(state, around)) {
     if (n.id === side.id || n.units <= 0) continue;
-    const sameSide = side.neutral ? n.neutral === side.neutral : !n.neutral && n.owner === side.owner;
+    // 동맹군도 거든다 — 동맹이 '서로 안 친다' 에서 그치면 휴전과 다를 게 없다
+    const sameSide = side.neutral
+      ? n.neutral === side.neutral
+      : !n.neutral &&
+        (n.owner === side.owner ||
+          (n.owner !== null && side.owner !== null && allied(state, n.owner, side.owner)));
     if (!sameSide) continue;
     // 지친 부대는 거들 힘도 없다
     total += n.units * (1 - (n.exhaustion / 100) * 0.5);
@@ -1369,6 +1367,9 @@ export function beginTurn(
   progressForts(state, nationId);
   trySpawnMerchant(state, nationId, eco);
   recomputeEncirclement(state);
+  // 조약의 만료·정리, 그리고 AI 라면 외교. 턴 시작에 두는 것은 이 자리가
+  // 화면·하네스의 모든 판 루프가 거치는 유일한 곳이기 때문이다.
+  stepDiplomacy(state, nationId, rng, eco);
   recomputeVision(state, nationId, eco);
 }
 

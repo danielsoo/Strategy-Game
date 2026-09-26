@@ -46,6 +46,8 @@ import { vassalize, vassalsOf } from './vassals';
 import { issueOrder, punishVassal } from './orders';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 import { FitProvenance } from './stamp';
+import { mayEnter } from './treaty';
+import { rollEncounter, resolveEncounterAI } from './encounters';
 import { DefenseChoice } from './defense';
 
 /**
@@ -785,6 +787,8 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
 
     if (n.units === 0) {
       if (!canMoveTo(c, n, ctx.eco)) continue;
+      // 휴전·동맹 상대의 땅은 밟지 않는다 — 밟으면 그 칸을 빼앗는 것이다
+      if (!mayEnter(ctx.state, ctx.me, n.owner)) continue;
 
       // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
@@ -1281,7 +1285,14 @@ export function* takeAITurnGen(
         if (choice === 'vassalize') vassalize(state, nationId, victim, 'conquest');
       }
     } else {
+      // 새 땅에 발을 들이면 행군 중 사건이 날 수 있다 — 사람과 똑같이 겪는다
+      const fresh =
+        best.target.owner === null || blocOf(state, best.target.owner) !== blocOf(state, nationId);
       moveStack(c, best.target);
+      if (fresh) {
+        const e = rollEncounter(state, best.target, rng, eco);
+        if (e) resolveEncounterAI(state, e, eco);
+      }
     }
     moved.add(id);
     budget--;

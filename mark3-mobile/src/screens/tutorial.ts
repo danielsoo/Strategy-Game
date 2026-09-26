@@ -47,7 +47,8 @@ export type CoachTarget =
   | 'hostile' // 칠 수 있는 적 (또는 적 옆의 내 부대)
   | 'recruit' // 징병 단추
   | 'endTurn' // 턴 종료 단추
-  | 'gold'; // 머리말의 돈
+  | 'gold' // 머리말의 돈
+  | 'diplo'; // 외교 단추
 
 export interface CoachStep {
   title: string;
@@ -78,7 +79,7 @@ export const COACH_STEPS: CoachStep[] = [
     body:
       '반짝이는 칸이 당신의 성입니다. 이 색 깃발이 꽂힌 칸이 모두 당신 땅이고, ' +
       '칸 위의 병사 인형과 숫자가 부대(병력 수)입니다.\n' +
-      '이기는 법: 영향력(내 땅 + 속국의 땅)을 압도적으로 키우면 이깁니다.',
+      '이기는 법: 살아남은 나라를 모두 당신 진영으로 만들면 이깁니다 — 적의 마지막 성을 빼앗아 병합하거나 속국으로 삼으세요. 땅만 넓혀서는 이기지 못합니다.',
   },
   {
     title: '1. 부대 고르기',
@@ -158,7 +159,15 @@ export const COACH_STEPS: CoachStep[] = [
       '적자가 몇 턴 이어지면 병사들이 떠납니다.',
   },
   {
-    title: '8. 속국',
+    title: '8. 외교와 평판',
+    target: 'diplo',
+    body:
+      '아래 "외교" 단추로 다른 나라에 휴전이나 동맹을 청할 수 있습니다. 상대가 먼저 사신을 보내오기도 합니다.\n' +
+      '조약을 깨면 배신입니다 — 정의가 깎이고, 다른 나라들이 당신의 말을 덜 믿습니다.\n' +
+      '새 땅에 들어서면 가끔 마을·용병·도적을 만납니다. 정의로우면 환대를, 두려우면 공물과 원한을 삽니다.',
+  },
+  {
+    title: '9. 속국',
     body:
       '적의 마지막 성을 빼앗으면 그 나라를 합칠지 속국으로 둘지 고릅니다.\n' +
       '속국은 조공을 바치고 행정비는 스스로 냅니다 — 넓어질수록 직접 먹는 것보다 부리는 쪽이 이득입니다. ' +
@@ -293,6 +302,7 @@ export function coachReady(
       return recruitableCastles(state, player).length > 0;
     case 'endTurn':
     case 'gold':
+    case 'diplo':
     case 'castle':
     case undefined:
       return true;
