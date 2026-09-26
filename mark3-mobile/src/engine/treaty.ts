@@ -37,15 +37,31 @@ export function blocOf(state: GameState, nationId: number): number {
   }
 }
 
-/** 두 진영 우두머리 사이의 조약. 없으면 null. */
+/**
+ * a 와 b 사이에 걸린 조약. 없으면 null.
+ *
+ * 조약의 당사자는 나라 그 자체다 — 속국도 스스로 맺는다. 다만 우두머리가
+ * 맺은 조약은 그 진영 전체를 묶는다. 그래서 네 쌍을 본다:
+ *   a–b 직접 · a–b의 우두머리 · a의 우두머리–b · 우두머리끼리
+ * 속국이 맺은 조약은 그 속국만 묶는다 — 종주국은 여전히 그 나라와 싸울 수
+ * 있다. 그게 '속국이 마음대로 동맹을 맺었다' 가 문제가 되는 까닭이다.
+ */
 export function treatyOf(state: GameState, a: number, b: number): Treaty | null {
   const list = state.treaties;
   if (!list || list.length === 0) return null;
   const ha = blocOf(state, a);
   const hb = blocOf(state, b);
   if (ha === hb) return null;
-  for (const t of list) {
-    if ((t.a === ha && t.b === hb) || (t.a === hb && t.b === ha)) return t;
+  const pairs: Array<[number, number]> = [
+    [a, b],
+    [a, hb],
+    [ha, b],
+    [ha, hb],
+  ];
+  for (const [x, y] of pairs) {
+    for (const t of list) {
+      if ((t.a === x && t.b === y) || (t.a === y && t.b === x)) return t;
+    }
   }
   return null;
 }
@@ -62,14 +78,25 @@ export function allied(state: GameState, a: number, b: number): boolean {
 }
 
 /**
- * 이 나라가 이 칸에 발을 들일 수 있나.
+ * 이 칸이 조약 상대의 땅인가 — 들어가면 '손님' 이 된다.
  *
- * 조약 상대의 땅에는 못 들어간다. 빈 칸에 들어가면 그 칸이 내 것이 되므로,
- * 들어가게 두면 휴전 중에 땅을 한 칸씩 훔칠 수 있다.
- * 같은 진영(속국)의 땅은 원래대로 둔다.
+ * 막지는 않는다. 동맹이어도 남의 나라에 군대를 보내는 건 무례한 일이고,
+ * 그걸 싫어하는 것은 규칙이 아니라 상대의 몫이다(diplomacy 의 철수 요구).
+ * AI 는 먼저 들어가지 않는다 — 이 판정은 그 예의에 쓴다.
  */
-export function mayEnter(state: GameState, mover: number, owner: number | null): boolean {
-  if (owner === null || owner === mover) return true;
-  if (blocOf(state, owner) === blocOf(state, mover)) return true;
-  return treatyOf(state, mover, owner) === null;
+export function isGuestLand(state: GameState, mover: number, owner: number | null): boolean {
+  if (owner === null || owner === mover) return false;
+  if (blocOf(state, owner) === blocOf(state, mover)) return false;
+  return treatyOf(state, mover, owner) !== null;
+}
+
+
+/**
+ * 이름 뒤의 '와/과'. 받침이 있으면 '과' — "당신와의 동맹" 이 찍혀 나왔다.
+ * 한글이 아니면(숫자 등) '와' 로 둔다.
+ */
+export function wa(name: string): string {
+  const last = name.charCodeAt(name.length - 1);
+  if (last >= 0xac00 && last <= 0xd7a3 && (last - 0xac00) % 28 !== 0) return `${name}과`;
+  return `${name}와`;
 }

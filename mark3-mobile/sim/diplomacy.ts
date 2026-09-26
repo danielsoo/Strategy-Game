@@ -25,10 +25,15 @@ for (let g = 0; g < games; g++) {
     const push = s.log.push.bind(s.log);
     s.log.push = (...xs: string[]) => {
       for (const x of xs) {
+        // 순서가 중요하다 — 거절 사유 '배신한 나라는 믿을 수 없다' 에도 '배신' 이
+        // 들어 있어서, 배신을 먼저 보면 거절이 배신으로 잡힌다(첫 측정이 그랬다).
         if (x.includes('휴전 체결')) c['휴전']=(c['휴전']??0)+1;
         else if (x.includes('동맹 체결')) c['동맹']=(c['동맹']??0)+1;
-        else if (x.includes('배신')) c['배신']=(c['배신']??0)+1;
         else if (x.includes('제안 거절')) c['거절']=(c['거절']??0)+1;
+        else if (x.includes('— 배신')) c['배신']=(c['배신']??0)+1;
+        else if (x.includes('종주국의 명으로')) c['명령파기']=(c['명령파기']??0)+1;
+        else if (x.includes('영토 침범')) c['침범파기']=(c['침범파기']??0)+1;
+        else if (x.includes('허락 밖')) c['허락밖']=(c['허락밖']??0)+1;
         else if (x.includes('기한이 끝')) c['휴전만료']=(c['휴전만료']??0)+1;
         else if (x.includes('동맹이 풀렸다')) c['동맹해제']=(c['동맹해제']??0)+1;
       }

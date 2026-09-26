@@ -41,6 +41,8 @@ const KEYS: Array<keyof EconomyConfig> = [
   'diplomacyOn',
   'truceTurns',
   'betrayJustice',
+  'vassalDiplomacy',
+  'endgameHeads',
   'encounterChance',
   'plunderCellShare',
   'plunderFortShare',

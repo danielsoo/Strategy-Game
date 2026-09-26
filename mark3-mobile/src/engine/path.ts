@@ -13,7 +13,7 @@
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { neighbors, marchCost, stackCap, isFoeCell, blocOf, terrainMarch } from './rules';
 import { isExplored, isVisible, memoryOf } from './vision';
-import { mayEnter } from './treaty';
+import { isGuestLand } from './treaty';
 
 export interface PathStep {
   cell: Cell;
@@ -79,8 +79,9 @@ function passable(
   const mem = seen ? null : memoryOf(state, mover, c);
   const owner = seen ? c.owner : mem?.owner ?? null;
   const troops = seen ? c.units : mem?.units ?? 0;
-  // 조약 상대의 땅은 지나갈 수 없다(목적지여도)
-  if (!mayEnter(state, mover, owner)) return false;
+  // 조약 상대의 땅은 길로 삼지 않는다 — 지나가는 것만으로 손님이 되어 철수
+  // 요구를 받는다. 목적지로 직접 찍은 곳이면 사람이 알고 고른 것이다(위 isGoal).
+  if (isGuestLand(state, mover, owner)) return false;
   if (troops <= 0) return true;
 
   // 적이 선 칸은 비켜 간다. 길목의 싸움까지 미리 셈할 수는 없다.

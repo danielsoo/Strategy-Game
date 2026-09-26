@@ -51,6 +51,15 @@ export interface Cell {
   /** 무역상이 닦아놓은 길 */
   hasRoad?: boolean;
   /**
+   * 이 땅의 원래 주인. 조약 상대의 군대가 '손님' 으로 서 있는 동안만 있다.
+   *
+   * 칸에는 주인이 하나뿐이라(owner 가 곧 부대의 나라) 남의 땅에 선 부대를
+   * 그대로 두면 그 칸을 빼앗은 것이 된다. 그래서 원래 주인을 따로 적어두고,
+   * 부대가 떠나면 돌려준다. 조약이 깨지면 그 자리를 쥔 쪽이 갖는다 — 동맹을
+   * 깨고 치는 쪽이 얻는 기습의 이점이 이것이다.
+   */
+  landlord?: number;
+  /**
    * 이 부대가 직전에 떠나온 칸.
    *
    * AI 에 기억이 없으면 두 칸의 점수가 비슷할 때 끝없이 오간다. 실제로
@@ -137,6 +146,13 @@ export interface Nation {
    */
   betrayals?: number;
   /**
+   * 속국의 외교를 어디까지 허락하나. 없으면 성향으로 정한다(diplomacy.policyOf).
+   *   free       무엇이든
+   *   noEnemies  내 적과는 안 된다
+   *   forbid     아무와도 안 된다
+   */
+  vassalPolicy?: 'free' | 'noEnemies' | 'forbid';
+  /**
    * 이 나라의 수입 배수. 난이도 핸디캡에 쓴다.
    *
    * 판단 품질로 만드는 난이도에는 천장이 있다 — AI 의 최선보다 세게는 못
@@ -188,6 +204,13 @@ export interface GameState {
    * 이게 없으면 AI 가 매 턴 같은 제안을 보내 사람이 제안 창만 닫다 끝난다.
    */
   diploCooldown?: Record<string, number>;
+  /**
+   * '손님이 주인 땅에 머문 턴 수'. '손님>주인' → 턴.
+   * 참을성이 다하면 주인이 조약을 깬다.
+   */
+  intrusions?: Record<string, number>;
+  /** 동맹의 명분이 사라진 채 지난 턴 수. 'a-b' → 턴. */
+  allianceDoubt?: Record<string, number>;
 }
 
 export interface EconomyConfig {
@@ -265,6 +288,15 @@ export interface EconomyConfig {
   truceTurns: number;
   /** 조약을 깨면 잃는 정의 */
   betrayJustice: number;
+  /** 속국도 스스로 조약을 맺나 (1/0) */
+  vassalDiplomacy: number;
+  /**
+   * 살아남은 우두머리가 이 수 이하면 새 휴전을 받지 않는다. 0 이면 끈다.
+   * 21x21 턴제한을 줄이려고 넣었다가 껐다: 시드 4242 에서 22.2 → 16.7% 로
+   * 보였는데 시드 13337 에서는 23.3 → 24.2%(≤3), 30.0%(≤2). 잡음이었다.
+   * 늘어짐의 진짜 원인은 행군 사건 앞의 AI 선택(징발 악순환)이었다.
+   */
+  endgameHeads: number;
   /**
    * 새 땅에 발을 들일 때 사건이 날 확률. 0 이면 사건이 없다.
    * 정의·공포에 따라 무슨 사건인지가 달라진다(encounters.ts).
@@ -381,6 +413,8 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   diplomacyOn: 1,
   truceTurns: 10,
   betrayJustice: 15,
+  vassalDiplomacy: 1,
+  endgameHeads: 0,
   encounterChance: 0.12,
   voluntarySubmitChance: 0.12,
   flankSupport: 0.42,

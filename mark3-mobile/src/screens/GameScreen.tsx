@@ -90,7 +90,6 @@ import type { OrderKind, Punishment } from '../engine';
 import VassalPanel from './VassalPanel';
 import DiplomacyPanel, { ProposalCard, EncounterCard } from './DiplomacyPanel';
 import {
-  mayEnter,
   propose,
   breakTreaty,
   answerProposal,
@@ -99,6 +98,12 @@ import {
   applyEncounter,
   relationOf,
   treatyOf,
+  isGuestLand,
+  enterAsGuest,
+  settleGuests,
+  answerBreakOrder,
+  dissolveAlliance,
+  wa,
 } from '../engine';
 import type { Encounter, TreatyKind } from '../engine';
 import {
@@ -262,7 +267,7 @@ const HELP: Array<{ title: string; body: string }> = [
   },
   {
     title: '외교',
-    body: '"외교" 단추로 휴전이나 동맹을 청할 수 있다. 휴전은 한동안 서로 치지 않고 서로의 땅에 들어가지 않는 약속이고, 동맹은 거기에 더해 시야를 나누고 협공을 거든다. 조약은 깰 수 있지만 배신이다 — 정의가 깎이고 다른 나라들이 당신을 덜 믿는다. 동맹은 이긴 것으로 치지 않는다. 공동의 적이 사라지면 동맹도 풀린다.',
+    body: '"외교" 단추로 휴전이나 동맹을 청할 수 있다. 휴전은 한동안, 동맹은 기한 없이 서로 치지 않는 약속이고, 동맹군은 붙어 있으면 협공을 거든다. 동맹이어도 속사정은 보이지 않는다 — 내 부대가 가서 봐야 안다. 조약 상대의 땅에 군대를 들일 수는 있지만 무례한 일이라, 상대가 철수를 요구하고 버티면 조약을 깬다. 조약을 스스로 깨면 배신이다 — 정의가 깎이고 다른 나라들이 당신을 덜 믿는다. 속국도 따로 조약을 맺을 수 있고, 종주국은 허락 밖의 조약을 끊으라 명할 수 있다. 동맹은 이긴 것으로 치지 않는다 — 공동의 적이 사라지면 풀린다.',
   },
   {
     title: '행군 중에 만나는 일',
@@ -836,7 +841,7 @@ export default function GameScreen() {
     for (const n of neighbors(state, selectedCell)) {
       const ok = isHostile(selectedCell, n, state)
         ? canAttackFrom(selectedCell, n)
-        : canMoveTo(selectedCell, n) && mayEnter(state, PLAYER, n.owner);
+        : canMoveTo(selectedCell, n);
       if (ok) out.add(n.id);
     }
     return out;
@@ -883,7 +888,7 @@ export default function GameScreen() {
         setState((prev) => {
           pushLog(
             prev,
-            `${t.kind === 'alliance' ? '🤝' : '🕊'} ${who}와 ${t.kind === 'alliance' ? '동맹' : '휴전'} 중 — 치거나 들어가려면 외교에서 조약을 깨야 합니다`
+            `${t.kind === 'alliance' ? '🤝' : '🕊'} ${wa(who)} ${t.kind === 'alliance' ? '동맹' : '휴전'} 중 — 치려면 외교에서 조약을 깨야 합니다`
           );
           return bump(prev);
         });
@@ -948,15 +953,22 @@ export default function GameScreen() {
           setConquest({ victim, castleId: to.id });
         }
       } else if (
-        (to.units === 0 || (to.owner === PLAYER && !to.neutral)) &&
-        mayEnter(prev, PLAYER, to.owner)
+        to.units === 0 ||
+        (to.owner === PLAYER && !to.neutral)
       ) {
-        const fresh = to.owner === null || blocOf(prev, to.owner) !== blocOf(prev, PLAYER);
+        const prevOwner = to.owner;
+        const guest = isGuestLand(prev, PLAYER, prevOwner);
+        const fresh = prevOwner === null || blocOf(prev, prevOwner) !== blocOf(prev, PLAYER);
         moveStack(from, to);
-        if (fresh) {
+        if (guest && prevOwner !== null) {
+          // 조약 상대의 땅 — 빼앗지 않고 손님으로 선다. 상대는 안다.
+          enterAsGuest(prev, to, prevOwner);
+        } else if (fresh) {
           const e = rollEncounter(prev, to, rng);
           if (e) encQueueRef.current.push(e);
         }
+        // 손님으로 서 있던 칸을 떠났으면 그 자리에서 주인에게 돌려준다
+        settleGuests(prev);
         tutRef.current.moves++;
         // 합류한 경우에도 도착 칸을 소진 처리한다.
         // 아니면 A를 B에 합친 뒤 B를 또 움직여 사실상 두 번 움직이게 된다.
@@ -1040,8 +1052,7 @@ export default function GameScreen() {
       if (
         isHostile(c, next, s) ||
         next.units > 0 ||
-        !canMoveTo(c, next) ||
-        !mayEnter(s, PLAYER, next.owner)
+        !canMoveTo(c, next)
       ) {
         c.order = undefined;
         halted.push(c.id);
@@ -1049,14 +1060,18 @@ export default function GameScreen() {
         continue;
       }
 
-      const fresh = next.owner === null || blocOf(s, next.owner) !== blocOf(s, PLAYER);
+      const prevOwner = next.owner;
+      const guest = isGuestLand(s, PLAYER, prevOwner);
+      const fresh = prevOwner === null || blocOf(s, prevOwner) !== blocOf(s, PLAYER);
       moveStack(c, next);
       acted.add(next.id);
       c = next;
-      if (fresh) {
+      if (guest && prevOwner !== null) enterAsGuest(s, next, prevOwner);
+      else if (fresh) {
         const e = rollEncounter(s, next, rng);
         if (e) encQueueRef.current.push(e);
       }
+      settleGuests(s);
       // 한 칸 갔으니 보이는 범위가 달라진다. 새로 드러난 것을 그 자리에서 본다.
       recomputeVision(s, PLAYER);
 
@@ -1120,7 +1135,8 @@ export default function GameScreen() {
       const out = issueOrder(prev, PLAYER, vassalId, kind, rng, {
         target,
         amount: kind === 'tax' ? 0.15 : 3,
-        turns: 12,
+        // 조약을 끊는 데는 행군이 필요 없다 — 오래 기다려줄 까닭이 없다
+        turns: kind === 'breakTreaty' ? 3 : 12,
       });
       issued = out !== null;
       if (issued) humanRef.current.orders++;
@@ -1132,7 +1148,9 @@ export default function GameScreen() {
         ? v.name + '에게 지금 내릴 수 있는 명령이 아니다.'
         : kind === 'attack'
           ? v.name + '에게 ' + foeName + ' 공격을 명했다. 정말 치는지는 전장을 봐야 안다.'
-          : v.name + '에게 조공을 더 걷기로 했다.'
+          : kind === 'breakTreaty'
+            ? v.name + '에게 ' + foeName + '와의 조약을 끊으라 했다. 조약은 숨길 수 없으니 곧 안다.'
+            : v.name + '에게 조공을 더 걷기로 했다.'
     );
   };
 
@@ -2099,6 +2117,12 @@ export default function GameScreen() {
         }}
         onOrder={issuePlain}
         onPunish={doPunish}
+        onPolicy={(p) =>
+          setState((prev) => {
+            prev.nations[PLAYER].vassalPolicy = p;
+            return bump(prev);
+          })
+        }
       />
 
       {/* 자리를 고르는 동안은 지도가 주인공이다. 무엇을 고르는 중인지만 띄운다. */}
@@ -2152,7 +2176,8 @@ export default function GameScreen() {
           setState((prev) => {
             const p = proposalsFor(prev, PLAYER)[0];
             if (p) {
-              answerProposal(prev, p, accept);
+              if (p.kind === 'breakOrder') answerBreakOrder(prev, PLAYER, accept);
+              else answerProposal(prev, p, accept);
               humanRef.current.diplomacy.push(`${accept ? 'accept' : 'decline'}:${p.kind}:${p.from}`);
             }
             return bump(prev);
@@ -2181,11 +2206,20 @@ export default function GameScreen() {
             return bump(prev);
           })
         }
+        onDissolve={(other) =>
+          setState((prev) => {
+            if (dissolveAlliance(prev, PLAYER, other)) {
+              setDiploNote(`${wa(prev.nations[other].name)}의 동맹을 풀고 휴전으로 돌렸다. 휴전이 끝나면 다시 전쟁이다.`);
+              humanRef.current.diplomacy.push(`dissolve:${other}`);
+            }
+            return bump(prev);
+          })
+        }
         onBreak={(other) =>
           setState((prev) => {
             const t = treatyOf(prev, PLAYER, other);
             if (breakTreaty(prev, PLAYER, other)) {
-              setDiploNote(`${prev.nations[other].name}와의 ${t?.kind === 'alliance' ? '동맹' : '휴전'}을 깼다. 이제 전쟁이다.`);
+              setDiploNote(`${wa(prev.nations[other].name)}의 ${t?.kind === 'alliance' ? '동맹' : '휴전'}을 깼다. 이제 전쟁이다.`);
               humanRef.current.diplomacy.push(`break:${t?.kind}:${other}`);
             }
             return bump(prev);

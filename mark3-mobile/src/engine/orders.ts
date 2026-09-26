@@ -18,6 +18,8 @@ import { pushLog, nationStats, computeLedger, cellPower, neighbors, isFoeCell, b
 import { hexDistance } from '../utils/hexGrid';
 import { vassalsOf, nationPower, breakVassalage } from './vassals';
 import { isVisible } from './vision';
+import { breakTreaty, ownTreaties } from './diplomacy';
+import { wa } from './treaty';
 
 /** 속국이 저울질할 때 쓰는 값들 */
 export interface VassalAssessment {
@@ -119,7 +121,12 @@ export function assessVassal(
   };
 }
 
-export type OrderKind = 'garrison' | 'march' | 'attack' | 'tax';
+/**
+ * breakTreaty — '그 나라와의 조약을 끊어라'. 속국이 종주국의 허락 밖에서
+ * 맺은 조약을 두고 내린다. 조약은 공개된 것이라 종주국은 끊었는지 늘 안다 —
+ * 듣는 척(태업)은 기한이 되면 반드시 드러난다.
+ */
+export type OrderKind = 'garrison' | 'march' | 'attack' | 'tax' | 'breakTreaty';
 export type OrderResponse = 'obey' | 'feign' | 'refuse';
 
 export interface VassalOrder {
@@ -196,6 +203,15 @@ export interface OrderCost {
 }
 
 export function orderCost(state: GameState, vassal: Nation, order: VassalOrder): OrderCost {
+  if (order.kind === 'breakTreaty') {
+    const t = ownTreaties(state, vassal.id).find((x) => x.other === order.target);
+    const name = order.target !== undefined ? state.nations[order.target]?.name ?? '' : '';
+    // 동맹을 끊는 것은 뒷배를 버리는 일이다 — 휴전보다 무겁다
+    return {
+      burden: t?.kind === 'alliance' ? 0.45 : 0.25,
+      label: `${wa(name)}의 ${t?.kind === 'alliance' ? '동맹' : '조약'} 파기`,
+    };
+  }
   if (order.kind === 'tax') {
     return { burden: Math.min(1, order.amount * 2.5), label: `조공 +${(order.amount * 100).toFixed(0)}%` };
   }
@@ -287,6 +303,26 @@ export function issueOrder(
    */
   if (measureProgress(state, vassal, order) >= 0.5) return null;
 
+  /*
+    사람이 속국이면 조약을 끊을지는 사람이 고른다 — 사신으로 묻는다.
+    답하기 전까지는 '안 끊은 채' 다(태업과 같은 자리). 답이 없으면 기한에 드러난다.
+  */
+  if (vassal.isHuman && kind === 'breakTreaty') {
+    order.response = 'feign';
+    vassal.order = order;
+    const list = (state.proposals = state.proposals ?? []);
+    list.push({
+      from: lordId,
+      to: vassalId,
+      kind: 'breakOrder',
+      turn: state.turn,
+      target: opts.target,
+      reason: `${wa(state.nations[opts.target ?? -1]?.name ?? '')}의 조약은 내 허락 밖이다. 끊어라.`,
+    });
+    pushLog(state, `${lord.name} → ${vassal.name}: ${orderCost(state, vassal, order).label}`);
+    return order;
+  }
+
   order.response = decideResponse(state, lord, vassal, order, rng);
 
   vassal.order = order;
@@ -310,6 +346,9 @@ export function issueOrder(
 export function measureProgress(state: GameState, vassal: Nation, order: VassalOrder): number {
   // 조공은 지도가 아니라 국고에 남는다 — stepOrders 가 실제로 옮긴 만큼 올린다
   if (order.kind === 'tax') return order.progress;
+  if (order.kind === 'breakTreaty') {
+    return ownTreaties(state, vassal.id).some((t) => t.other === order.target) ? 0 : 1;
+  }
 
   // 공격은 지도에 자취가 남지 않는다 — 친 순간에만 안다.
   // 그래서 ai.ts 의 전투 처리가 progress 를 올려준다.
@@ -343,6 +382,8 @@ export function observeOrder(
 ): number | null {
   // 조공은 내 국고로 들어온다. 이것만은 확실히 안다.
   if (order.kind === 'tax') return order.progress;
+  // 조약은 온 세상이 안다
+  if (order.kind === 'breakTreaty') return measureProgress(state, vassal, order);
   // 공격은 전투가 벌어진 자리에서만 안다 — ai.ts 가 그때 올려준다
   if (order.kind === 'attack') return null;
 
@@ -378,6 +419,13 @@ export function stepOrders(state: GameState, rng: RNG, eco: EconomyConfig = DEFA
       continue;
     }
     const o = v.order;
+
+    // 순종하는 속국은 조약을 실제로 끊는다. 명을 따른 것이라 배신의 벌은 절반.
+    if (o.kind === 'breakTreaty' && o.response === 'obey' && o.target !== undefined) {
+      if (ownTreaties(state, v.id).some((t) => t.other === o.target)) {
+        breakTreaty(state, v.id, o.target, eco, { ordered: true });
+      }
+    }
 
     // 지도에서 실제로 벌어진 일. 조공처럼 진짜 효과가 걸린 데에만 쓴다.
     o.progress = Math.max(o.progress, measureProgress(state, v, o));
@@ -531,4 +579,34 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
     for (const o of vassalsOf(state, lord.id)) o.loyalty = Math.max(0, o.loyalty - 10);
     pushLog(state, `${v.name}이(가) ${lord.name}에게 반기를 들었습니다`);
   }
+}
+
+/**
+ * 사람 속국이 '조약을 끊어라' 에 답한다.
+ *   따른다   그 자리에서 끊는다 (배신 벌 절반) — 다음 판정에서 이행으로 잡힌다
+ *   거부한다 대놓고 거부 — 충성이 깎이고, 종주국은 벌할 수 있다
+ */
+export function answerBreakOrder(
+  state: GameState,
+  vassalId: number,
+  accept: boolean,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): void {
+  const v = state.nations[vassalId];
+  const p = (state.proposals ?? []).find((x) => x.kind === 'breakOrder' && x.to === vassalId);
+  state.proposals = (state.proposals ?? []).filter((x) => x !== p);
+  if (!v || !p || p.target === undefined) return;
+  const o = v.order;
+  if (accept) {
+    breakTreaty(state, vassalId, p.target, eco, { ordered: true });
+    if (o && o.kind === 'breakTreaty') o.response = 'obey';
+    return;
+  }
+  if (o && o.kind === 'breakTreaty') {
+    o.response = 'refuse';
+    o.revealed = true;
+  }
+  v.loyalty = Math.max(0, v.loyalty - 4);
+  const lord = v.suzerain !== null ? state.nations[v.suzerain] : null;
+  pushLog(state, `${v.name}이(가) ${lord?.name ?? '종주국'}의 명령을 거부했습니다 (조약 파기)`);
 }

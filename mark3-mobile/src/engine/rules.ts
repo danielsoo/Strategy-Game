@@ -25,7 +25,7 @@ import {
 } from './types';
 import { createVision, recomputeVision } from './vision';
 import { blocOf, atPeace, allied } from './treaty';
-import { stepDiplomacy } from './diplomacy';
+import { stepDiplomacy, settleGuests } from './diplomacy';
 export { blocOf };
 import {
   decideDefense,
@@ -363,6 +363,9 @@ export function computeLedger(
     if (c.owner !== nationId) continue;
     cells++;
     units += c.units;
+    // 손님으로 선 남의 땅은 아무에게도 거두지 못한다 — 주인은 군대가 서 있어
+    // 못 걷고, 손님은 제 땅이 아니라 못 걷는다
+    if (c.landlord !== undefined) continue;
     if (c.castle) income += eco.castleIncome;
     else if (c.fortStage === 4) income += eco.fortIncome;
     else income += eco.cellIncome * cellEfficiency(c, hubs, eco);
@@ -1358,6 +1361,9 @@ export function beginTurn(
   rng: RNG,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): void {
+  // 손님 부대가 떠난 칸은 원래 주인에게, 전쟁이 된 칸은 쥔 쪽에게.
+  // 수입을 셈하기 전에 해야 떠난 칸의 수입이 제 주인에게 간다.
+  settleGuests(state);
   promoteCapitalIfNeeded(state, nationId);
   // 행군력을 되채운다. 쉰 부대가 다시 걸을 힘을 얻는 자리다.
   for (const c of state.cells) {

@@ -46,8 +46,9 @@ import { vassalize, vassalsOf } from './vassals';
 import { issueOrder, punishVassal } from './orders';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 import { FitProvenance } from './stamp';
-import { mayEnter } from './treaty';
+import { isGuestLand } from './treaty';
 import { rollEncounter, resolveEncounterAI } from './encounters';
+import { ownTreaties } from './diplomacy';
 import { DefenseChoice } from './defense';
 
 /**
@@ -787,8 +788,9 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
 
     if (n.units === 0) {
       if (!canMoveTo(c, n, ctx.eco)) continue;
-      // 휴전·동맹 상대의 땅은 밟지 않는다 — 밟으면 그 칸을 빼앗는 것이다
-      if (!mayEnter(ctx.state, ctx.me, n.owner)) continue;
+      // 휴전·동맹 상대의 땅에는 먼저 들어가지 않는다. 막혀 있어서가 아니라
+      // 무례해서다 — 들어가면 철수 요구를 받고, 버티면 조약이 깨진다.
+      if (isGuestLand(ctx.state, ctx.me, n.owner)) continue;
 
       // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
@@ -885,6 +887,16 @@ function governVassals(
   // 한 턴에 하나만 새로 내린다
   const idle = mine.filter((v) => !v.order);
   if (idle.length === 0) return;
+
+  // 허락 밖의 조약을 맺은 속국이 있으면 그것부터 — 끊으라 한다
+  for (const v of idle) {
+    const bad = ownTreaties(state, v.id).find((t) => t.violates);
+    if (bad) {
+      issueOrder(state, nationId, v.id, 'breakTreaty', rng, { target: bad.other, turns: 3 });
+      return;
+    }
+  }
+
   const v = idle[Math.floor(rng() * idle.length)];
 
   // 돈이 급하면 조공, 적이 뚜렷하면 진격, 아니면 파병

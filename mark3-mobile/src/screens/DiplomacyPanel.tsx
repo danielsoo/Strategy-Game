@@ -20,6 +20,10 @@ import {
   knows,
   nationStats,
   DEFAULT_ECONOMY,
+  policyOf,
+  violatesPolicy,
+  guestsIn,
+  wa,
 } from '../engine';
 
 const KIND: Record<TreatyKind, string> = { truce: '휴전', alliance: '동맹' };
@@ -38,6 +42,8 @@ interface PanelProps {
   note: string | null;
   onPropose: (to: number, kind: TreatyKind) => void;
   onBreak: (other: number) => void;
+  /** 동맹을 휴전으로 돌린다 — 배신이 아니다 */
+  onDissolve: (other: number) => void;
   onClose: () => void;
 }
 
@@ -48,16 +54,20 @@ export default function DiplomacyPanel({
   note,
   onPropose,
   onBreak,
+  onDissolve,
   onClose,
 }: PanelProps) {
   /** 깨기는 두 번 누르게 한다 — 되돌릴 수 없고 정의가 깎인다 */
   const [confirmBreak, setConfirmBreak] = useState<number | null>(null);
   const me = state.nations[playerId];
   const lord = me.suzerain !== null ? state.nations[me.suzerain] : null;
-  // 같은 진영(종주국·속국)은 외교 상대가 아니다
+  const policy = lord ? policyOf(state, lord.id) : null;
+  // 같은 진영(종주국·속국)이 아닌 모든 나라 — 남의 속국과도 따로 손잡을 수 있다
   const others = state.nations.filter(
-    (n) => n.id !== playerId && n.alive && n.suzerain === null && relationOf(state, playerId, n.id) !== 'bloc'
+    (n) => n.id !== playerId && n.alive && relationOf(state, playerId, n.id) !== 'bloc'
   );
+  const myGuests = (host: number) => guestsIn(state, host).get(playerId) ?? 0;
+  const theirGuests = (guest: number) => guestsIn(state, playerId).get(guest) ?? 0;
 
   return (
     <Modal visible={visible} transparent animationType="fade">
@@ -65,9 +75,12 @@ export default function DiplomacyPanel({
         <View style={s.modal}>
           <Text style={s.title}>외교</Text>
           <Text style={s.hint}>
-            휴전은 {truceLength(state)}턴 동안 서로 치지 않고 서로의 땅에 들어가지 않는 약속입니다.
-            동맹은 거기에 더해 시야를 나누고, 붙어 있으면 협공을 거듭니다.{'\n'}
-            조약을 깨면 정의가 깎이고, 다른 나라들이 당신의 제안을 덜 믿습니다.
+            휴전은 {truceLength(state)}턴 동안 서로 치지 않는 약속입니다. 동맹은 기한 없이 서로 치지
+            않고, 붙어 있으면 협공을 거듭니다. 동맹이어도 그 나라 속사정은 내 부대가 가서 봐야 압니다.
+            {'\n'}명분이 다한 동맹은 풀어 휴전으로 돌릴 수 있습니다 — 배신이 아닙니다.
+            {'\n'}조약 상대의 땅에 군대를 들이는 것은 막혀 있지 않지만 무례한 일입니다 — 상대는 철수를
+            요구하고, 버티면 조약을 깹니다.{'\n'}조약을 깨면 정의가 깎이고, 다른 나라들이 당신을 덜
+            믿습니다.
           </Text>
           <Text style={s.meta}>
             나의 정의 {Math.round(me.justice)} · 공포 {Math.round(me.fear)}
@@ -75,7 +88,10 @@ export default function DiplomacyPanel({
           </Text>
           {lord && (
             <Text style={s.warnLine}>
-              당신은 {lord.name}의 속국입니다 — 조약은 종주국이 맺고, 당신은 그 조약을 따릅니다.
+              당신은 {lord.name}의 속국입니다. 종주국이 맺은 조약은 당신도 따르고, 당신도 따로 조약을
+              맺을 수 있습니다 — 종주국의 허락은 &quot;
+              {policy === 'free' ? '자유' : policy === 'forbid' ? '모두 금지' : '적국과는 안 됨'}
+              &quot;. 허락 밖이면 끊으라는 명이 올 수 있고, 따를지는 당신의 몫입니다.
             </Text>
           )}
           <ScrollView style={{ maxHeight: 400, marginTop: 8 }}>
@@ -83,12 +99,19 @@ export default function DiplomacyPanel({
               const met = knows(state, playerId, n.id);
               const rel = relationOf(state, playerId, n.id);
               const t = treatyOf(state, playerId, n.id);
+              const mineToBreak = !!t && (t.a === playerId || t.b === playerId);
               const st = nationStats(state, n.id);
+              const outside = lord ? violatesPolicy(state, playerId, n.id) : false;
+              const guestsThere = myGuests(n.id);
+              const guestsHere = theirGuests(n.id);
               return (
                 <View key={n.id} style={s.card}>
                   <View style={s.head}>
                     <View style={[s.swatch, { backgroundColor: n.color }]} />
-                    <Text style={s.name}>{met ? n.name : '아직 만나지 못한 나라'}</Text>
+                    <Text style={s.name}>
+                      {met ? n.name : '아직 만나지 못한 나라'}
+                      {met && n.suzerain !== null ? ` (${state.nations[n.suzerain].name}의 속국)` : ''}
+                    </Text>
                     <Text style={[s.rel, rel === 'war' ? s.relWar : rel === 'alliance' ? s.relAlly : s.relTruce]}>
                       {rel === 'war'
                         ? '전쟁'
@@ -103,7 +126,20 @@ export default function DiplomacyPanel({
                       {(n.betrayals ?? 0) > 0 ? ` · 배신 ${n.betrayals}번` : ''}
                     </Text>
                   )}
-                  {lord ? null : !met ? (
+                  {t && !mineToBreak && (
+                    <Text style={s.meta}>이 조약은 종주국들이 맺은 것입니다.</Text>
+                  )}
+                  {guestsThere > 0 && (
+                    <Text style={s.warnLine}>
+                      ⚠ 당신 군대 {guestsThere}부대가 그 나라 땅에 서 있습니다 — 불쾌해합니다.
+                    </Text>
+                  )}
+                  {guestsHere > 0 && (
+                    <Text style={s.warnLine}>
+                      ⚠ 그 나라 군대 {guestsHere}부대가 당신 땅에 서 있습니다.
+                    </Text>
+                  )}
+                  {!met ? (
                     <Text style={s.meta}>땅을 한 칸이라도 봐야 사신을 보낼 수 있습니다.</Text>
                   ) : confirmBreak === n.id ? (
                     <View style={s.row}>
@@ -121,23 +157,33 @@ export default function DiplomacyPanel({
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    <View style={s.row}>
-                      {rel === 'war' && (
-                        <TouchableOpacity style={[s.btn, s.truce]} onPress={() => onPropose(n.id, 'truce')}>
-                          <Text style={s.btnText}>휴전 제안</Text>
-                        </TouchableOpacity>
+                    <>
+                      <View style={s.row}>
+                        {rel === 'war' && (
+                          <TouchableOpacity style={[s.btn, s.truce]} onPress={() => onPropose(n.id, 'truce')}>
+                            <Text style={s.btnText}>휴전 제안</Text>
+                          </TouchableOpacity>
+                        )}
+                        {rel !== 'alliance' && (
+                          <TouchableOpacity style={[s.btn, s.ally]} onPress={() => onPropose(n.id, 'alliance')}>
+                            <Text style={s.btnText}>동맹 제안</Text>
+                          </TouchableOpacity>
+                        )}
+                        {mineToBreak && t!.kind === 'alliance' && (
+                          <TouchableOpacity style={[s.btn, s.truce]} onPress={() => onDissolve(n.id)}>
+                            <Text style={s.btnText}>동맹 풀기 (휴전으로)</Text>
+                          </TouchableOpacity>
+                        )}
+                        {mineToBreak && (
+                          <TouchableOpacity style={[s.btn, s.war]} onPress={() => setConfirmBreak(n.id)}>
+                            <Text style={s.btnText}>{KIND[t!.kind]} 깨기</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                      {outside && rel !== 'alliance' && (
+                        <Text style={s.warnLine}>이 나라와의 조약은 종주국의 허락 밖입니다.</Text>
                       )}
-                      {rel !== 'alliance' && (
-                        <TouchableOpacity style={[s.btn, s.ally]} onPress={() => onPropose(n.id, 'alliance')}>
-                          <Text style={s.btnText}>동맹 제안</Text>
-                        </TouchableOpacity>
-                      )}
-                      {rel !== 'war' && (
-                        <TouchableOpacity style={[s.btn, s.war]} onPress={() => setConfirmBreak(n.id)}>
-                          <Text style={s.btnText}>{KIND[t?.kind ?? 'truce']} 깨기</Text>
-                        </TouchableOpacity>
-                      )}
-                    </View>
+                    </>
                   )}
                 </View>
               );
@@ -175,7 +221,11 @@ export function ProposalCard({
             <Text style={s.title}>{from.name}의 사신</Text>
           </View>
           <Text style={s.story}>
-            {from.name}이(가) {KIND[proposal.kind]}을 청합니다.
+            {proposal.kind === 'withdraw'
+              ? `${from.name}이(가) 당신 군대에게 자기 땅에서 물러나라고 요구합니다.`
+              : proposal.kind === 'breakOrder'
+              ? `종주국 ${from.name}이(가) ${wa(state.nations[proposal.target ?? -1]?.name ?? '')}의 조약을 끊으라 명합니다.`
+              : `${from.name}이(가) ${KIND[proposal.kind]}을 청합니다.`}
             {proposal.reason ? `\n"${proposal.reason}"` : ''}
           </Text>
           <Text style={s.meta}>
@@ -184,15 +234,21 @@ export function ProposalCard({
           </Text>
           <Text style={s.hint}>
             {proposal.kind === 'truce'
-              ? '받으면 한동안 서로 치지 않고 서로의 땅에 들어가지 않습니다.'
-              : '받으면 서로 치지 않고, 시야를 나누고, 붙어 있으면 협공을 거듭니다.'}
+              ? '받으면 한동안 서로 치지 않습니다.'
+              : proposal.kind === 'alliance'
+              ? '받으면 기한 없이 서로 치지 않고, 붙어 있으면 협공을 거듭니다. 시야는 나누지 않습니다.'
+              : proposal.kind === 'withdraw'
+              ? '거절하면 그 자리에서 조약이 깨집니다. 물러나겠다고 하고 버텨도 곧 깨집니다.'
+              : '따르면 그 조약을 끊습니다(배신의 벌은 절반). 거부하면 충성이 깎이고, 종주국이 벌할 수 있습니다.'}
           </Text>
           <View style={s.row}>
             <TouchableOpacity style={[s.btn, s.ally]} onPress={() => onAnswer(true)}>
-              <Text style={s.btnText}>받아들인다</Text>
+              <Text style={s.btnText}>
+                {proposal.kind === 'withdraw' ? '물러나겠다' : proposal.kind === 'breakOrder' ? '따른다' : '받아들인다'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity style={[s.btn, s.plain]} onPress={() => onAnswer(false)}>
-              <Text style={s.btnText}>거절한다</Text>
+              <Text style={s.btnText}>{proposal.kind === 'breakOrder' ? '거부한다' : '거절한다'}</Text>
             </TouchableOpacity>
           </View>
         </View>
