@@ -851,14 +851,17 @@ export function performAttack(
     captured = true;
 
     // 약탈 — 전쟁이 돈이 되어야 부유한 나라가 표적이 된다.
-    // 약탈은 공포를 키우고 정의를 깎는다.
+    //
+    // 평판은 건드리지 않는다. 적국과 싸우며 전리품을 챙기는 것은 전쟁의
+    // 기본이다. 평판에 걸리는 것은 싸움과 무관한 마을을 터는 일이고, 그건
+    // 행군 사건(encounters.ts)의 대처가 맡는다. (처음엔 여기서 공포 +2 · 정의 -1
+    // 을 붙였더니, 이긴 전투마다 따라붙어 거의 모든 나라가 공포의 나라가 됐다.)
     const loot = plunderValue(state, to, eco);
     if (loot > 0 && to.owner !== null && from.owner !== null) {
       const victim = state.nations[to.owner];
       const raider = state.nations[from.owner];
       victim.gold = Math.max(0, victim.gold - loot);
       raider.gold += loot;
-      adjustRep(state, raider.id, -1, +2);
       pushLog(state, `${raider.name}: ${victim.name}에게서 ${loot}G를 약탈했습니다`);
     }
     // 수비측 생존자는 인접 빈 칸으로 후퇴, 없으면 흩어진다
