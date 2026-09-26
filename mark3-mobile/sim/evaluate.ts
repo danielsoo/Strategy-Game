@@ -172,9 +172,21 @@ function main() {
   // 라고 할 뻔한 적이 있다.  --seeds 1,2,3
   const seeds = parseStr('seeds', '4242,13337,90210').split(',').map(Number);
 
+  // --weights 'territory=2.1,units=1.6,...' — 학습 후보를 ai.ts 를 고치기 전에
+  // 같은 판정에 올려본다. LEARNED_WEIGHTS 객체를 그대로 덮으므로 '학습형' 자리도
+  // 함께 바뀐다(PERSONALITIES['학습형'] 이 같은 객체를 가리킨다).
+  const wArg = parseStr('weights', '');
+  if (wArg) {
+    for (const kv of wArg.split(',')) {
+      const [k, v] = kv.split('=');
+      if (!(k in LEARNED_WEIGHTS)) throw new Error(`모르는 가중치 ${k}`);
+      (LEARNED_WEIGHTS as unknown as Record<string, number>)[k] = Number(v);
+    }
+  }
+
   const rec = new Recorder(level);
 
-  console.log(`본 평가 — ${size}x${size} · 시드 ${seeds.join(', ')}`);
+  console.log(`본 평가 — ${size}x${size} · 시드 ${seeds.join(', ')}` + (wArg ? ' · 후보 가중치' : ''));
 
   /*
     이 가중치가 지금 규칙에서 나온 것인가.
