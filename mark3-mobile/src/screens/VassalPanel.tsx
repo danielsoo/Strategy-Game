@@ -220,6 +220,9 @@ function VassalRow({
         <Text style={s.warn}>마음이 떠나 있다. 명령을 내려도 따르지 않을 수 있다.</Text>
       )}
       {/* 속국이 스스로 맺은 조약. 조약은 숨길 수 없으니 종주국도 다 안다. */}
+      {o && ownTreaties(state, v.id).some((t) => t.violates) && (
+        <Text style={s.hint}>내린 명령이 끝나야 조약을 끊으라 할 수 있다 — 명령은 한 번에 하나다.</Text>
+      )}
       {ownTreaties(state, v.id).map((t) => (
         <View key={t.other} style={s.treatyRow}>
           <Text style={[s.meta, t.violates && s.warnInline]}>
@@ -355,7 +358,8 @@ const s = StyleSheet.create({
   seize: { backgroundColor: '#a16207' },
   strip: { backgroundColor: '#b45309' },
   war: { backgroundColor: '#ef4444' },
-  close: { backgroundColor: '#3b82f6', marginTop: 10 },
+  // 세로로 혼자 놓인 단추 — btn 의 flex:1 이 높이를 0 부터 나눠 가져 납작해졌다
+  close: { backgroundColor: '#3b82f6', marginTop: 10, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   treatyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   warnInline: { color: '#fca5a5' },
   forgive: { backgroundColor: '#0d9488' },

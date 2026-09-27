@@ -862,6 +862,10 @@ export default function GameScreen() {
     // 표시를 안 해두면 다음 턴에 40줄이 통째로 다시 실린다.
     const log = file.state.log;
     lastLineRef.current = log.length > 0 ? log[log.length - 1] : null;
+    // 연대기도 마찬가지다. 켤 때 표시해 둔 것은 기본 판의 것이라, 이걸 안 하면
+    // 이어하자마자 몇 턴 전 남의 나라 줄이 방금 일처럼 뜬다(브라우저로 눌러보다 봤다).
+    const chron = file.state.chronicle ?? [];
+    lastChronRef.current = chron.length > 0 ? chron[chron.length - 1] : null;
   };
 
   const movable = useMemo(() => {
@@ -2293,7 +2297,7 @@ export default function GameScreen() {
                 <Text style={styles.helpBody}>{temper}</Text>
                 <Text style={[styles.helpBody, { fontStyle: 'italic', marginTop: 4 }]}>{mood}</Text>
                 <TouchableOpacity
-                  style={[styles.btn, styles.recruitBtn, { marginTop: 12, flex: 0 }, me.gold < cost && styles.btnDim]}
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }, styles.soloBtn, me.gold < cost && styles.btnDim]}
                   disabled={me.gold < cost}
                   onPress={() => act((s) => contractBand(s, from.id, band.id, rng), 'contract')}
                 >
@@ -2302,13 +2306,13 @@ export default function GameScreen() {
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.btn, styles.endBtn, { marginTop: 6, flex: 0 }]}
+                  style={[styles.btn, styles.endBtn, { marginTop: 6 }, styles.soloBtn]}
                   onPress={() => act((s) => demandLeave(s, from.id, band.id, rng), 'leave')}
                 >
                   <Text style={styles.btnText}>물러나라고 한다 — {word(lOdds)}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.btn, styles.resetBtn, { marginTop: 6, flex: 0 }, !movable.has(band.id) && styles.btnDim]}
+                  style={[styles.btn, styles.resetBtn, { marginTop: 6 }, styles.soloBtn, !movable.has(band.id) && styles.btnDim]}
                   disabled={!movable.has(band.id)}
                   onPress={() => {
                     setContact(null);
@@ -2320,7 +2324,7 @@ export default function GameScreen() {
                   <Text style={styles.btnText}>공격한다{movable.has(band.id) ? '' : ' (행군력이 모자라다)'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.btn, styles.modeBtn, { marginTop: 6, flex: 0 }]}
+                  style={[styles.btn, styles.modeBtn, { marginTop: 6 }, styles.soloBtn]}
                   onPress={() => setContact(null)}
                 >
                   <Text style={styles.btnText}>그냥 둔다</Text>
@@ -2450,7 +2454,7 @@ export default function GameScreen() {
               이름을 받는다. 그게 곧 내 나라 이름이 되고, 남는 기록에도 실린다.
               가족들이 각자 두고 기록을 보내주면 그게 누구 판인지 알아야 한다.
             */}
-            <Text style={styles.helpTitle}>이름</Text>
+            <Text style={[styles.helpTitle, { marginTop: 12 }]}>이름</Text>
             <TextInput
               value={playerName}
               onChangeText={(t) => {
@@ -2769,7 +2773,7 @@ function CombatModal({
               : '양측 모두 버텼다'}
             {' · '}생존 {result.attackerSurvivors} vs {result.defenderSurvivors}
           </Text>
-          <TouchableOpacity style={[styles.btn, styles.endBtn]} onPress={onClose}>
+          <TouchableOpacity style={[styles.btn, styles.endBtn, styles.soloBtn]} onPress={onClose}>
             <Text style={styles.btnText}>확인</Text>
           </TouchableOpacity>
         </View>
@@ -2897,6 +2901,13 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 6 },
   btn: { flex: 1, paddingVertical: 11, borderRadius: 8, alignItems: 'center' },
   btnDim: { opacity: 0.4 },
+  /**
+   * 세로로 혼자 놓인 단추. btn 의 flex:1 은 가로줄에서 칸을 나누려는 것인데, 세로 창
+   * 안에서는 높이를 0 부터 나눠 가져 단추가 납작해지고 글자가 아래로 삐져나왔다
+   * (조우 창·전투 결과 창·속국 창 — 브라우저로 눌러보다 봤다). flex:0 도 웹에서는
+   * 기준 크기 0 이라 같은 꼴이 된다. 기준을 내용 크기로 둔다.
+   */
+  soloBtn: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   endBtn: { backgroundColor: '#3b82f6' },
   tutorialBtn: { backgroundColor: '#b45309' },
