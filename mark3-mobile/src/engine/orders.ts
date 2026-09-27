@@ -18,6 +18,9 @@ import { pushLog, nationStats, computeLedger, cellPower, neighbors, isFoeCell, b
 import { hexDistance } from '../utils/hexGrid';
 import { vassalsOf, nationPower, breakVassalage } from './vassals';
 import { isVisible } from './vision';
+import { breakTreaty, ownTreaties } from './diplomacy';
+import { wa } from './treaty';
+import { adjustRep, wF, wJ } from './reputation';
 
 /** 속국이 저울질할 때 쓰는 값들 */
 export interface VassalAssessment {
@@ -119,7 +122,12 @@ export function assessVassal(
   };
 }
 
-export type OrderKind = 'garrison' | 'march' | 'attack' | 'tax';
+/**
+ * breakTreaty — '그 나라와의 조약을 끊어라'. 속국이 종주국의 허락 밖에서
+ * 맺은 조약을 두고 내린다. 조약은 공개된 것이라 종주국은 끊었는지 늘 안다 —
+ * 듣는 척(태업)은 기한이 되면 반드시 드러난다.
+ */
+export type OrderKind = 'garrison' | 'march' | 'attack' | 'tax' | 'breakTreaty';
 export type OrderResponse = 'obey' | 'feign' | 'refuse';
 
 export interface VassalOrder {
@@ -196,6 +204,15 @@ export interface OrderCost {
 }
 
 export function orderCost(state: GameState, vassal: Nation, order: VassalOrder): OrderCost {
+  if (order.kind === 'breakTreaty') {
+    const t = ownTreaties(state, vassal.id).find((x) => x.other === order.target);
+    const name = order.target !== undefined ? state.nations[order.target]?.name ?? '' : '';
+    // 동맹을 끊는 것은 뒷배를 버리는 일이다 — 휴전보다 무겁다
+    return {
+      burden: t?.kind === 'alliance' ? 0.45 : 0.25,
+      label: `${wa(name)}의 ${t?.kind === 'alliance' ? '동맹' : '조약'} 파기`,
+    };
+  }
   if (order.kind === 'tax') {
     return { burden: Math.min(1, order.amount * 2.5), label: `조공 +${(order.amount * 100).toFixed(0)}%` };
   }
@@ -241,14 +258,22 @@ export function decideResponse(
   // 힘의 격차가 가장 크게 말한다. 혼자서는 못 버티는 속국은 마음이 떠나 있어도
   // 일단 따른다 — 안 따를 수가 없으니까. 반대로 살아남을 자신이 서면
   // 충성이 남아 있어도 명령은 흘려듣기 시작한다.
+  //
+  // 종주국의 공포는 복종을 산다 — 속으로 싫어도 따른다. 정의는 여기서 아무것도
+  // 사지 않는다. 정의가 사는 것은 마음(충성)이고, 그건 위의 loyalty 에 이미 있다.
+  // (예전에는 '정의 - 50' 이 복종을 올렸다. 평판을 0 에서 시작하게 바꾸며 나눴다.)
   const willing =
-    0.35 + (vassal.loyalty / 100) * 0.6 + (lord.justice - 50) / 200 + (0.5 - a.survival) * 1.2;
+    0.35 + (vassal.loyalty / 100) * 0.6 + (lord.fear * wF()) / 200 + (0.5 - a.survival) * 1.2;
   if (willing > burden + 0.15) return 'obey';
 
   // 안 따르기로 했다. 그렇다고 대놓고 말하지는 않는다 —
   // 거부는 그 자리에서 드러나고 응징을 부른다. 토벌을 견딜 자신이 설 때만
   // 그 값을 치른다. 그래서 불복의 기본형은 '듣는 척'이다.
-  return rng() < Math.max(0, a.survival - 0.35) * 1.2 ? 'refuse' : 'feign';
+  //
+  // 대놓고 거부할지 듣는 척할지는 주인의 성격도 본다. 정의로운 주인에게는
+  // 대놓고 말한다(벌하지 않을 걸 안다). 두려운 주인에게는 못 한다.
+  const openly = Math.max(0, a.survival - 0.35) * 1.2 + (lord.justice - lord.fear) / 250;
+  return rng() < openly ? 'refuse' : 'feign';
 }
 
 /** 종주국이 명령을 내린다 */
@@ -287,6 +312,26 @@ export function issueOrder(
    */
   if (measureProgress(state, vassal, order) >= 0.5) return null;
 
+  /*
+    사람이 속국이면 조약을 끊을지는 사람이 고른다 — 사신으로 묻는다.
+    답하기 전까지는 '안 끊은 채' 다(태업과 같은 자리). 답이 없으면 기한에 드러난다.
+  */
+  if (vassal.isHuman && kind === 'breakTreaty') {
+    order.response = 'feign';
+    vassal.order = order;
+    const list = (state.proposals = state.proposals ?? []);
+    list.push({
+      from: lordId,
+      to: vassalId,
+      kind: 'breakOrder',
+      turn: state.turn,
+      target: opts.target,
+      reason: `${wa(state.nations[opts.target ?? -1]?.name ?? '')}의 조약은 내 허락 밖이다. 끊어라.`,
+    });
+    pushLog(state, `${lord.name} → ${vassal.name}: ${orderCost(state, vassal, order).label}`);
+    return order;
+  }
+
   order.response = decideResponse(state, lord, vassal, order, rng);
 
   vassal.order = order;
@@ -310,6 +355,9 @@ export function issueOrder(
 export function measureProgress(state: GameState, vassal: Nation, order: VassalOrder): number {
   // 조공은 지도가 아니라 국고에 남는다 — stepOrders 가 실제로 옮긴 만큼 올린다
   if (order.kind === 'tax') return order.progress;
+  if (order.kind === 'breakTreaty') {
+    return ownTreaties(state, vassal.id).some((t) => t.other === order.target) ? 0 : 1;
+  }
 
   // 공격은 지도에 자취가 남지 않는다 — 친 순간에만 안다.
   // 그래서 ai.ts 의 전투 처리가 progress 를 올려준다.
@@ -343,6 +391,8 @@ export function observeOrder(
 ): number | null {
   // 조공은 내 국고로 들어온다. 이것만은 확실히 안다.
   if (order.kind === 'tax') return order.progress;
+  // 조약은 온 세상이 안다
+  if (order.kind === 'breakTreaty') return measureProgress(state, vassal, order);
   // 공격은 전투가 벌어진 자리에서만 안다 — ai.ts 가 그때 올려준다
   if (order.kind === 'attack') return null;
 
@@ -378,6 +428,13 @@ export function stepOrders(state: GameState, rng: RNG, eco: EconomyConfig = DEFA
       continue;
     }
     const o = v.order;
+
+    // 순종하는 속국은 조약을 실제로 끊는다. 명을 따른 것이라 배신의 벌은 절반.
+    if (o.kind === 'breakTreaty' && o.response === 'obey' && o.target !== undefined) {
+      if (ownTreaties(state, v.id).some((t) => t.other === o.target)) {
+        breakTreaty(state, v.id, o.target, eco, { ordered: true });
+      }
+    }
 
     // 지도에서 실제로 벌어진 일. 조공처럼 진짜 효과가 걸린 데에만 쓴다.
     o.progress = Math.max(o.progress, measureProgress(state, v, o));
@@ -458,21 +515,24 @@ export function punishVassal(
 
   const others = vassalsOf(state, lordId).filter((x) => x.id !== vassalId);
 
+  /*
+    벌은 드러난 불이행에만 내릴 수 있다(화면도 AI 도 그렇다). 그래서 법대로 한
+    벌이다 — 몰수는 옳은 일로 친다(정의 +1). 다만 벌은 자비가 아니다(공포 +).
+    토벌은 제 백성을 치는 일이라 법의 테두리를 넘는다(정의 -5).
+  */
   if (kind === 'seize') {
     const take = Math.floor(v.gold * 0.4);
     v.gold -= take;
     lord.gold += take;
     v.loyalty = Math.max(0, v.loyalty - 10);
-    lord.justice = Math.max(0, lord.justice - 3);
+    adjustRep(state, lord.id, +1, +2);
     pushLog(state, `${lord.name}이(가) ${v.name}의 국고를 걷어갔습니다 (${take}G)`);
   } else if (kind === 'strip') {
     v.loyalty = Math.max(0, v.loyalty - 16);
-    lord.fear = Math.min(100, lord.fear + 4);
-    lord.justice = Math.max(0, lord.justice - 5);
+    adjustRep(state, lord.id, 0, +4);
     pushLog(state, `${lord.name}이(가) ${v.name}을(를) 문책했습니다`);
   } else {
-    lord.fear = Math.min(100, lord.fear + 8);
-    lord.justice = Math.max(0, lord.justice - 10);
+    adjustRep(state, lord.id, -5, +8);
     breakVassalage(state, vassalId, '종주국의 토벌');
     v.loyalty = 0;
     pushLog(state, `${lord.name}이(가) ${v.name}을(를) 토벌합니다`);
@@ -510,6 +570,13 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
      */
     const grievance = Math.pow(1 - v.loyalty / 100, 2) * a.keptPerTurn * HORIZON * 2.5;
     let edge = a.rebelValue - a.stayValue + grievance;
+    /*
+      공포는 주인이 강할 때 누르고, 흔들릴 때 한꺼번에 터뜨린다. 살아남을
+      가망(survival)이 0.45 아래면 공포가 반란을 누르고, 위면 부추긴다.
+      정의로운 주인은 흔들려도 쉽게 버림받지 않는다.
+    */
+    edge += ((lord.fear * wF()) / 100) * (a.survival - 0.45) * 40;
+    edge -= ((lord.justice * wJ()) / 100) * 8;
 
     // 불이행이 드러난 참이면 이미 돌아선 것이다
     if (v.order && v.order.revealed && v.order.response !== 'obey') edge += 15;
@@ -531,4 +598,49 @@ export function stepRebellion(state: GameState, rng: RNG, eco: EconomyConfig = D
     for (const o of vassalsOf(state, lord.id)) o.loyalty = Math.max(0, o.loyalty - 10);
     pushLog(state, `${v.name}이(가) ${lord.name}에게 반기를 들었습니다`);
   }
+}
+
+/**
+ * 사람 속국이 '조약을 끊어라' 에 답한다.
+ *   따른다   그 자리에서 끊는다 (배신 벌 절반) — 다음 판정에서 이행으로 잡힌다
+ *   거부한다 대놓고 거부 — 충성이 깎이고, 종주국은 벌할 수 있다
+ */
+export function answerBreakOrder(
+  state: GameState,
+  vassalId: number,
+  accept: boolean,
+  eco: EconomyConfig = DEFAULT_ECONOMY
+): void {
+  const v = state.nations[vassalId];
+  const p = (state.proposals ?? []).find((x) => x.kind === 'breakOrder' && x.to === vassalId);
+  state.proposals = (state.proposals ?? []).filter((x) => x !== p);
+  if (!v || !p || p.target === undefined) return;
+  const o = v.order;
+  if (accept) {
+    breakTreaty(state, vassalId, p.target, eco, { ordered: true });
+    if (o && o.kind === 'breakTreaty') o.response = 'obey';
+    return;
+  }
+  if (o && o.kind === 'breakTreaty') {
+    o.response = 'refuse';
+    o.revealed = true;
+  }
+  v.loyalty = Math.max(0, v.loyalty - 4);
+  const lord = v.suzerain !== null ? state.nations[v.suzerain] : null;
+  pushLog(state, `${v.name}이(가) ${lord?.name ?? '종주국'}의 명령을 거부했습니다 (조약 파기)`);
+}
+
+/**
+ * 용서한다 — 드러난 불이행을 벌하지 않고 넘어간다.
+ * 자비다(공포 -2). 속국은 고마워하고(충성 +3), 명령은 불이행으로 끝난다.
+ * 다른 속국들도 본다 — 주인이 무섭지 않으면 명령도 덜 먹힌다(복종은 공포가 산다).
+ */
+export function forgiveVassal(state: GameState, lordId: number, vassalId: number): void {
+  const lord = state.nations[lordId];
+  const v = state.nations[vassalId];
+  if (!lord || !v || v.suzerain !== lordId || !v.order?.revealed) return;
+  v.loyalty = Math.min(100, v.loyalty + 3);
+  adjustRep(state, lordId, 0, -2);
+  pushLog(state, `${lord.name}이(가) ${v.name}의 불이행을 용서했습니다`);
+  endOrder(state, lord, v, v.order, false);
 }

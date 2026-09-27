@@ -88,6 +88,35 @@ import {
 } from '../engine';
 import type { OrderKind, Punishment } from '../engine';
 import VassalPanel from './VassalPanel';
+import DiplomacyPanel, { ProposalCard, EncounterCard } from './DiplomacyPanel';
+import {
+  propose,
+  breakTreaty,
+  answerProposal,
+  proposalsFor,
+  rollEncounter,
+  applyEncounter,
+  relationOf,
+  treatyOf,
+  isGuestLand,
+  enterAsGuest,
+  settleGuests,
+  answerBreakOrder,
+  dissolveAlliance,
+  wa,
+  characterOf,
+  CHARACTER_NAME,
+  forgiveVassal,
+  knows,
+  hireCost,
+  contractBand,
+  demandLeave,
+  contractOdds,
+  leaveOdds,
+  inContact,
+} from '../engine';
+import type { Chronicle } from '../engine';
+import type { Encounter, TreatyKind } from '../engine';
 import {
   takeAITurn,
   PERSONALITIES,
@@ -245,7 +274,23 @@ type Layout = NonNullable<ReturnType<typeof layout>>;
 const HELP: Array<{ title: string; body: string }> = [
   {
     title: '이기는 법',
-    body: '영향력(내 땅 + 속국의 땅)이 압도적으로 커지면 이긴다. 적의 마지막 성을 빼앗으면 그 나라를 병합할지 속국으로 둘지 고른다. 속국은 조공을 바치고, 행정비는 그쪽이 낸다 — 넓어질수록 직접 먹는 것보다 부리는 쪽이 이득이다.',
+    body: '살아남은 나라가 모두 당신 진영이 되면 이긴다. 땅만 넓혀서는 이기지 못한다 — 적의 마지막 성을 빼앗아, 그 나라를 병합하거나 속국으로 삼아야 한다. 속국은 조공을 바치고, 행정비는 그쪽이 낸다 — 넓어질수록 직접 먹는 것보다 부리는 쪽이 이득이다.',
+  },
+  {
+    title: '외교',
+    body: '"외교" 단추로 휴전이나 동맹을 청할 수 있다. 휴전은 한동안, 동맹은 기한 없이 서로 치지 않는 약속이고, 동맹군은 붙어 있으면 협공을 거든다. 동맹이어도 속사정은 보이지 않는다 — 내 부대가 가서 봐야 안다. 조약 상대의 땅에 군대를 들일 수는 있지만 무례한 일이라, 상대가 철수를 요구하고 버티면 조약을 깬다. 조약을 스스로 깨면 배신이다 — 정의가 깎이고 다른 나라들이 당신을 덜 믿는다. 속국도 따로 조약을 맺을 수 있고, 종주국은 허락 밖의 조약을 끊으라 명할 수 있다. 동맹은 이긴 것으로 치지 않는다 — 공동의 적이 사라지면 풀린다.',
+  },
+  {
+    title: '정의와 공포',
+    body: '모든 나라는 아무 성향 없이 시작한다. 옳은 일(약속을 끝까지 지킴, 청해 온 약자를 받아줌, 법대로 벌함, 동맹의 적과 함께 싸움)이 정의를 쌓고, 잔혹한 일(병합, 약탈, 징발, 토벌, 배신)이 공포를 쌓는다. 공포는 자비(병합 대신 속국으로 살려둠, 용서, 공물을 돌려줌, 마을을 도움)로만 누그러진다. 저절로 돌아오지는 않는다. 한쪽이 다른 쪽을 15 넘게 앞서면 나라의 성격이 바뀐다. 정의의 나라에는 마음(충성)이 붙고 약소국이 기대 오며, 공포의 나라는 명령이 잘 먹히고 적의 사기를 꺾지만 속국의 마음이 떠나고, 흔들리는 순간 한꺼번에 등을 돌린다.',
+  },
+  {
+    title: '도적과 용병',
+    body: '도적(🦹)과 용병(⚔️) 무리는 저마다 움직이고, 저마다 선악이 있다. 도적은 털 만한 나라 땅을 찾아 떠돌다 옆에서 금을 털고, 센 군대가 오면 달아난다. 두려운 나라는 털지 못한다 — 공포의 이득이다. 털 수 있었는데 지나간 무리는 선해지고, 턴 무리는 악해진다. 선해진 도적은 칼을 내려놓고 용병이 되거나 정의로운 군대에 투항하고, 일거리를 잃은 악한 용병은 도적이 된다. 용병 무리는 돈 많은 나라 쪽으로 떠돈다. 무리와의 일은 부대로 직접 찾아가 마주쳐서 한다 — 부대를 고르고 옆의 무리를 누르면 조우 창이 뜬다. 계약하거나(무리가 받아들이면 그 자리에서 내 부대가 된다), 물러나라 하거나, 친다. 받아들일지는 무리가 정한다 — 선한 무리와 정의로운 나라 사이는 쉽고, 두려운 군대 앞에서는 잘 물러난다. 무리를 쳐서 이기면 달아나는 자들을 보내줄지(자비) 쫓을지(잔혹) 고른다.',
+  },
+  {
+    title: '행군 중에 만나는 일',
+    body: '새 땅에 들어서면 가끔 마을·용병·도적·보급 마차·돌림병을 만난다. 무엇을 만나는지는 누구나 같지만, 상대의 반응은 평판을 따라 기운다 — 정의로운 군대에게 마을은 곡식을 들고 나오기 쉽고, 두려운 군대에게는 곡식을 숨기고 엎드리기 쉽다. 반드시 그런 것은 아니다. 그리고 그 앞에서 무엇을 고르느냐가 다시 평판이 된다.',
   },
   {
     title: '부대는 한 턴에 한 번',
@@ -548,6 +593,24 @@ export default function GameScreen() {
   const [orderNote, setOrderNote] = useState<string | null>(null);
   /** 기록 내보내기 결과 한 줄 */
   const [logNote, setLogNote] = useState<string | null>(null);
+  const [showDiplo, setShowDiplo] = useState(false);
+  const [diploNote, setDiploNote] = useState<string | null>(null);
+  /**
+   * 행군 중에 만난 일들. 한 턴에 여럿 날 수 있다(길 따라 가는 부대들).
+   * setState 의 갱신 함수 안에서 생기므로 ref 에 쌓고, 그 갱신이 부르는
+   * 다음 그림에서 첫 것을 띄운다.
+   */
+  const encQueueRef = useRef<Encounter[]>([]);
+  /**
+   * 연대기 — 나라의 성격이 바뀐 순간. 내 나라이거나 내가 아는 나라면 크게 띄운다.
+   * 마지막으로 본 줄을 붙들고 있다가 그 뒤에 새로 적힌 것만 본다(목록은 30줄에서 밀린다).
+   */
+  /** 조우 중인 무리 — 내 부대(from)와 무리(band) */
+  const [contact, setContact] = useState<{ from: string; band: string } | null>(null);
+  /** 조우 창에서 '공격한다' 를 골랐다 — 이번 한 번은 조우를 건너뛰고 친다 */
+  const forceAttackRef = useRef(false);
+  const lastChronRef = useRef<Chronicle | null>(null);
+  const [chron, setChron] = useState<Chronicle | null>(null);
 
   /**
    * 행군이 멈춘 부대. 다음 그림에서 골라준다 —
@@ -799,13 +862,17 @@ export default function GameScreen() {
     // 표시를 안 해두면 다음 턴에 40줄이 통째로 다시 실린다.
     const log = file.state.log;
     lastLineRef.current = log.length > 0 ? log[log.length - 1] : null;
+    // 연대기도 마찬가지다. 켤 때 표시해 둔 것은 기본 판의 것이라, 이걸 안 하면
+    // 이어하자마자 몇 턴 전 남의 나라 줄이 방금 일처럼 뜬다(브라우저로 눌러보다 봤다).
+    const chron = file.state.chronicle ?? [];
+    lastChronRef.current = chron.length > 0 ? chron[chron.length - 1] : null;
   };
 
   const movable = useMemo(() => {
     if (!selectedCell || !myTurn) return new Set<string>();
     const out = new Set<string>();
     for (const n of neighbors(state, selectedCell)) {
-      const ok = isHostile(selectedCell, n)
+      const ok = isHostile(selectedCell, n, state)
         ? canAttackFrom(selectedCell, n)
         : canMoveTo(selectedCell, n);
       if (ok) out.add(n.id);
@@ -831,6 +898,18 @@ export default function GameScreen() {
       setMerchantPick(merchantHere);
       return;
     }
+    // 고른 부대 옆의 무리를 누르면 바로 치지 않고 조우한다
+    if (
+      selected &&
+      selectedCell &&
+      !forceAttackRef.current &&
+      cell.neutral &&
+      cell.units > 0 &&
+      inContact(state, selectedCell, cell)
+    ) {
+      setContact({ from: selectedCell.id, band: cell.id });
+      return;
+    }
 
     if (!selected) {
       if (cell.owner === PLAYER && cell.units > 0 && !cell.neutral) {
@@ -845,6 +924,21 @@ export default function GameScreen() {
       setSelected(null);
       setPathTo(null);
       return;
+    }
+    // 조약 상대의 칸 — 막혀 있는 까닭을 말해준다. 말없이 안 움직이면 고장으로 보인다.
+    if (selectedCell && cell.owner !== null && cell.owner !== PLAYER && !movable.has(cell.id)) {
+      const t = treatyOf(state, PLAYER, cell.owner);
+      if (t) {
+        const who = state.nations[blocOf(state, cell.owner)].name;
+        setState((prev) => {
+          pushLog(
+            prev,
+            `${t.kind === 'alliance' ? '🤝' : '🕊'} ${wa(who)} ${t.kind === 'alliance' ? '동맹' : '휴전'} 중 — 치려면 외교에서 조약을 깨야 합니다`
+          );
+          return bump(prev);
+        });
+        return;
+      }
     }
     if (!movable.has(cell.id) || !selectedCell) {
       /*
@@ -880,13 +974,29 @@ export default function GameScreen() {
     setState((prev) => {
       const from = prev.cells.find((c) => c.id === selectedCell.id)!;
       const to = prev.cells.find((c) => c.id === cell.id)!;
-      if (isHostile(from, to)) {
+      if (isHostile(from, to, prev)) {
         const wasCastle = to.castle;
         const victim = to.owner;
+        const wasNeutral = to.neutral;
         const outcome = performAttack(prev, from, to, rng);
         setCombat(outcome.result);
         humanRef.current.attacks++;
         tutRef.current.attacks++;
+        // 진 무리가 달아난다 — 보내줄지 쫓을지 묻는다 (나라의 자비·잔혹)
+        if (outcome.fledBand) {
+          const kind = wasNeutral === 'mercenary' ? '용병' : '도적';
+          encQueueRef.current.push({
+            kind: 'band:fled',
+            title: `달아나는 ${kind} 무리`,
+            story: `싸움에서 진 ${kind} 무리가 무기를 끌며 달아난다. 등을 보인 자들이다.`,
+            options: [
+              { label: '보내준다 (공포 -1)', effect: { fear: -1 } },
+              { label: '쫓아 섬멸한다 (공포 +1)', effect: { fear: 1, slay: outcome.fledBand } },
+            ],
+            nation: PLAYER,
+            cellId: outcome.fledBand,
+          });
+        }
         tutRef.current.moves++;
         if (outcome.capturedCell) humanRef.current.captured++;
         // 이겨서 밀고 들어갔으면 목표 칸에, 아니면 제자리에 남는다
@@ -903,8 +1013,23 @@ export default function GameScreen() {
         ) {
           setConquest({ victim, castleId: to.id });
         }
-      } else if (to.units === 0 || (to.owner === PLAYER && !to.neutral)) {
+      } else if (
+        to.units === 0 ||
+        (to.owner === PLAYER && !to.neutral)
+      ) {
+        const prevOwner = to.owner;
+        const guest = isGuestLand(prev, PLAYER, prevOwner);
+        const fresh = prevOwner === null || blocOf(prev, prevOwner) !== blocOf(prev, PLAYER);
         moveStack(from, to);
+        if (guest && prevOwner !== null) {
+          // 조약 상대의 땅 — 빼앗지 않고 손님으로 선다. 상대는 안다.
+          enterAsGuest(prev, to, prevOwner);
+        } else if (fresh) {
+          const e = rollEncounter(prev, to, rng);
+          if (e) encQueueRef.current.push(e);
+        }
+        // 손님으로 서 있던 칸을 떠났으면 그 자리에서 주인에게 돌려준다
+        settleGuests(prev);
         tutRef.current.moves++;
         // 합류한 경우에도 도착 칸을 소진 처리한다.
         // 아니면 A를 B에 합친 뒤 B를 또 움직여 사실상 두 번 움직이게 된다.
@@ -985,16 +1110,29 @@ export default function GameScreen() {
       if (!next) continue; // 행군력이 모자라다. 이번 턴은 쉰다.
 
       // 가려던 칸에 뭔가 있었다 — 안개가 걷히니 드러난 것이다
-      if (isHostile(c, next, s) || next.units > 0 || !canMoveTo(c, next)) {
+      if (
+        isHostile(c, next, s) ||
+        next.units > 0 ||
+        !canMoveTo(c, next)
+      ) {
         c.order = undefined;
         halted.push(c.id);
         pushLog(s, '가는 길에 무언가 있어 행군을 멈췄습니다');
         continue;
       }
 
+      const prevOwner = next.owner;
+      const guest = isGuestLand(s, PLAYER, prevOwner);
+      const fresh = prevOwner === null || blocOf(s, prevOwner) !== blocOf(s, PLAYER);
       moveStack(c, next);
       acted.add(next.id);
       c = next;
+      if (guest && prevOwner !== null) enterAsGuest(s, next, prevOwner);
+      else if (fresh) {
+        const e = rollEncounter(s, next, rng);
+        if (e) encQueueRef.current.push(e);
+      }
+      settleGuests(s);
       // 한 칸 갔으니 보이는 범위가 달라진다. 새로 드러난 것을 그 자리에서 본다.
       recomputeVision(s, PLAYER);
 
@@ -1058,7 +1196,8 @@ export default function GameScreen() {
       const out = issueOrder(prev, PLAYER, vassalId, kind, rng, {
         target,
         amount: kind === 'tax' ? 0.15 : 3,
-        turns: 12,
+        // 조약을 끊는 데는 행군이 필요 없다 — 오래 기다려줄 까닭이 없다
+        turns: kind === 'breakTreaty' ? 3 : 12,
       });
       issued = out !== null;
       if (issued) humanRef.current.orders++;
@@ -1070,8 +1209,19 @@ export default function GameScreen() {
         ? v.name + '에게 지금 내릴 수 있는 명령이 아니다.'
         : kind === 'attack'
           ? v.name + '에게 ' + foeName + ' 공격을 명했다. 정말 치는지는 전장을 봐야 안다.'
-          : v.name + '에게 조공을 더 걷기로 했다.'
+          : kind === 'breakTreaty'
+            ? v.name + '에게 ' + foeName + '와의 조약을 끊으라 했다. 조약은 숨길 수 없으니 곧 안다.'
+            : v.name + '에게 조공을 더 걷기로 했다.'
     );
+  };
+
+  const doForgive = (vassalId: number) => {
+    const v = state.nations[vassalId];
+    setState((prev) => {
+      forgiveVassal(prev, PLAYER, vassalId);
+      return bump(prev);
+    });
+    setOrderNote((v?.name ?? '') + '의 불이행을 용서했다. 마음은 붙지만, 명령은 덜 먹힐 것이다.');
   };
 
   const doPunish = (vassalId: number, kind: Punishment) => {
@@ -1301,6 +1451,23 @@ export default function GameScreen() {
   /** 기록이 열린 채 두는 중인가. 도움말 창의 '시작' 이 새 판인지 계속인지 가른다. */
   const inMatch = matchRef.current !== null && state.winner === null;
 
+  useEffect(() => {
+    const list = state.chronicle ?? [];
+    if (list.length === 0) return;
+    const last = list[list.length - 1];
+    if (last === lastChronRef.current) return;
+    // 켜자마자(시작·이어하기) 옛 줄을 띄우지 않는다
+    if (showHelp) {
+      lastChronRef.current = last;
+      return;
+    }
+    let i = list.length - 1;
+    while (i >= 0 && list[i] !== lastChronRef.current) i--;
+    const fresh = list.slice(i + 1).filter((c) => c.nation === PLAYER || knows(state, PLAYER, c.nation));
+    lastChronRef.current = last;
+    if (fresh.length > 0) setChron(fresh[fresh.length - 1]);
+  });
+
   // ── 길잡이 ──────────────────────────────────────────────
   const coachNow: CoachProgress = {
     selected: selected !== null,
@@ -1339,7 +1506,7 @@ export default function GameScreen() {
   const spot: 'cell' | 'button' | 'gold' | null =
     !coachStep || coachDone || !myTurn || !coachIsReady
       ? null
-      : coachButton === 'recruit' || coachButton === 'endTurn'
+      : coachButton === 'recruit' || coachButton === 'endTurn' || coachButton === 'diplo'
       ? 'button'
       : coachStep.target === 'gold'
       ? 'gold'
@@ -1624,6 +1791,21 @@ export default function GameScreen() {
                 {ledger.net.toFixed(1)}/턴
               </Text>
             </Text>
+            {/* 나라의 성격 — 한 일이 쌓여 이름이 된다 */}
+            <Text style={styles.repLine}>
+              ⚖ 정의 {Math.round(me.justice)} · 🩸 공포 {Math.round(me.fear)} —{' '}
+              <Text
+                style={
+                  characterOf(me) === 'just'
+                    ? styles.repJust
+                    : characterOf(me) === 'feared'
+                    ? styles.repFear
+                    : styles.breakdownDim
+                }
+              >
+                {CHARACTER_NAME[characterOf(me)]}
+              </Text>
+            </Text>
             <Text style={styles.breakdown}>
               수입 <Text style={styles.plus}>+{ledger.income.toFixed(1)}</Text>
               {'   '}지출{' '}
@@ -1638,7 +1820,7 @@ export default function GameScreen() {
             {me.unpaidTurns > 0 && (
               <Text style={styles.arrears}>
                 ⚠ 급여 체납 {me.unpaidTurns}/{desertionGrace(me)}턴 — 넘기면 병력이 이탈합니다
-                {me.justice > 50 ? ` (정의 ${me.justice}로 유예 연장됨)` : ''}
+                {me.justice > 0 ? ` (정의 ${Math.round(me.justice)}로 유예 연장됨)` : ''}
               </Text>
             )}
           </>
@@ -1718,6 +1900,10 @@ export default function GameScreen() {
                     {n.suzerain !== null ? '└ ' : ''}
                     {discovered ? n.name : '미발견'}
                     {!n.alive && discovered ? ' ×' : ''}
+                    {n.alive && n.id !== PLAYER && relationOf(state, PLAYER, n.id) === 'alliance' ? ' 🤝' : ''}
+                    {n.alive && n.id !== PLAYER && relationOf(state, PLAYER, n.id) === 'truce' ? ' 🕊' : ''}
+                    {discovered && characterOf(n) === 'just' ? ' ⚖' : ''}
+                    {discovered && characterOf(n) === 'feared' ? ' 🩸' : ''}
                   </Text>
                 </View>
                 <Text style={[styles.td, styles.influence]}>
@@ -1899,7 +2085,30 @@ export default function GameScreen() {
             <Text style={styles.btnText}>리셋</Text>
           </TouchableOpacity>
         </View>
-        {/* 단추 스포트라이트 중에는 첫 줄 아래를 통째로 어둡게 */}
+        {/* 외교 — 조약이 있으면 몇 개인지 같이 */}
+        <View style={[styles.row, spot === 'button' && coachButton !== 'diplo' && styles.dim]}>
+          <TouchableOpacity
+            style={[
+              styles.btn,
+              styles.diploBtn,
+              !myTurn && styles.btnDim,
+              coachButton === 'diplo' && styles.coachGlow,
+            ]}
+            onPress={() => {
+              setDiploNote(null);
+              setShowDiplo(true);
+            }}
+            disabled={!myTurn}
+          >
+            <Text style={styles.btnText}>
+              외교
+              {(state.treaties ?? []).some((t) => t.a === blocOf(state, PLAYER) || t.b === blocOf(state, PLAYER))
+                ? ` · 조약 ${(state.treaties ?? []).filter((t) => t.a === blocOf(state, PLAYER) || t.b === blocOf(state, PLAYER)).length}`
+                : ''}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {/* 단추 스포트라이트 중에는 그 아래를 통째로 어둡게 */}
         <View style={[styles.footerRest, spot === 'button' && styles.dim]}>
         {myVassals.length > 0 && (
           <View style={styles.row}>
@@ -2012,6 +2221,13 @@ export default function GameScreen() {
         }}
         onOrder={issuePlain}
         onPunish={doPunish}
+        onForgive={doForgive}
+        onPolicy={(p) =>
+          setState((prev) => {
+            prev.nations[PLAYER].vassalPolicy = p;
+            return bump(prev);
+          })
+        }
       />
 
       {/* 자리를 고르는 동안은 지도가 주인공이다. 무엇을 고르는 중인지만 띄운다. */}
@@ -2035,6 +2251,192 @@ export default function GameScreen() {
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
 
+      {/*
+        조우 — 무리와 맞닿았다. 계약하거나, 물러나라 하거나, 치거나, 그냥 둔다.
+        무리가 받아들일지는 무리가 정한다(선악 · 내 평판 · 내 힘).
+      */}
+      <Modal visible={!!contact} transparent animationType="fade">
+        <View style={styles.overlay}>
+          {(() => {
+            const from = contact ? state.cells.find((x) => x.id === contact.from) : null;
+            const band = contact ? state.cells.find((x) => x.id === contact.band) : null;
+            if (!from || !band || !band.neutral) return null;
+            const merc = band.neutral === 'mercenary';
+            const what = merc ? '용병' : '도적';
+            const g = band.bandGood ?? 0;
+            const temper = g >= 30 ? '이름난 무리다 — 약속을 지킨다는 소문이 있다' : g <= -30 ? '악명 높은 무리다' : '그저 먹고살려는 무리다';
+            const cost = hireCost(band);
+            const cOdds = contractOdds(state, PLAYER, band);
+            const lOdds = leaveOdds(state, from, band);
+            const word = (p: number) => (p >= 0.7 ? '받아들일 것 같다' : p >= 0.4 ? '반반이다' : '어려워 보인다');
+            const mood =
+              characterOf(me) === 'feared'
+                ? '무리가 당신의 깃발을 알아보고 움찔한다.'
+                : characterOf(me) === 'just' && g > -30
+                ? '무리의 우두머리가 무기를 내리고 말을 건다.'
+                : g <= -30
+                ? '무리가 칼을 뽑아 들고 노려본다.'
+                : '무리가 경계하며 거리를 둔다.';
+            const act = (fn: (s: GameState) => { ok: boolean; reason: string }, label: string) => {
+              setContact(null);
+              setState((prev) => {
+                const r = fn(prev);
+                actedRef.current.add(from.id);
+                setOrderNote(r.ok ? null : `${what} 무리: ${r.reason}`);
+                humanRef.current.encounters.push(`contact:${label}:${r.ok ? 'ok' : 'no'}`);
+                return bump(prev);
+              });
+              setSelected(null);
+            };
+            return (
+              <View style={styles.modal}>
+                <Text style={styles.chronEyebrow}>조 우</Text>
+                <Text style={styles.modalTitle}>
+                  {merc ? '⚔️' : '🦹'} {what} 무리 {band.units}명
+                </Text>
+                <Text style={styles.helpBody}>{temper}</Text>
+                <Text style={[styles.helpBody, { fontStyle: 'italic', marginTop: 4 }]}>{mood}</Text>
+                <TouchableOpacity
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }, styles.soloBtn, me.gold < cost && styles.btnDim]}
+                  disabled={me.gold < cost}
+                  onPress={() => act((s) => contractBand(s, from.id, band.id, rng), 'contract')}
+                >
+                  <Text style={styles.btnText}>
+                    계약한다 ({cost}G) — {word(cOdds)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.endBtn, { marginTop: 6 }, styles.soloBtn]}
+                  onPress={() => act((s) => demandLeave(s, from.id, band.id, rng), 'leave')}
+                >
+                  <Text style={styles.btnText}>물러나라고 한다 — {word(lOdds)}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.resetBtn, { marginTop: 6 }, styles.soloBtn, !movable.has(band.id) && styles.btnDim]}
+                  disabled={!movable.has(band.id)}
+                  onPress={() => {
+                    setContact(null);
+                    forceAttackRef.current = true;
+                    onCellPress(band);
+                    forceAttackRef.current = false;
+                  }}
+                >
+                  <Text style={styles.btnText}>공격한다{movable.has(band.id) ? '' : ' (행군력이 모자라다)'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btn, styles.modeBtn, { marginTop: 6 }, styles.soloBtn]}
+                  onPress={() => setContact(null)}
+                >
+                  <Text style={styles.btnText}>그냥 둔다</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })()}
+        </View>
+      </Modal>
+
+      {/* 연대기 — 나라의 성격이 바뀌었다 */}
+      <Modal visible={!!chron} transparent animationType="fade">
+        <View style={styles.chronOverlay}>
+          {chron && (
+            <TouchableOpacity activeOpacity={0.9} style={styles.chronCard} onPress={() => setChron(null)}>
+              <Text style={styles.chronEyebrow}>연 대 기 · {chron.turn}턴</Text>
+              <Text
+                style={[
+                  styles.chronTitle,
+                  { color: state.nations[chron.nation]?.color ?? '#fff' },
+                ]}
+              >
+                {state.nations[chron.nation]?.name} — {CHARACTER_NAME[chron.to]}
+              </Text>
+              <Text style={styles.chronLine}>{chron.line}</Text>
+              <Text style={[styles.hint, { marginTop: 14 }]}>눌러서 닫기</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Modal>
+
+      <EncounterCard
+        encounter={!combat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
+        onPick={(choice) => {
+          const e = encQueueRef.current.shift();
+          if (!e) return;
+          humanRef.current.encounters.push(`${e.kind}:${choice}`);
+          setState((prev) => {
+            applyEncounter(prev, e, choice);
+            return bump(prev);
+          });
+        }}
+      />
+      <ProposalCard
+        state={state}
+        proposal={
+          myTurn &&
+          !showHelp &&
+          !combat &&
+          !defenseAsk &&
+          !conquest &&
+          !showVassals &&
+          !showDiplo &&
+          encQueueRef.current.length === 0
+            ? proposalsFor(state, PLAYER)[0] ?? null
+            : null
+        }
+        onAnswer={(accept) =>
+          setState((prev) => {
+            const p = proposalsFor(prev, PLAYER)[0];
+            if (p) {
+              if (p.kind === 'breakOrder') answerBreakOrder(prev, PLAYER, accept);
+              else answerProposal(prev, p, accept);
+              humanRef.current.diplomacy.push(`${accept ? 'accept' : 'decline'}:${p.kind}:${p.from}`);
+            }
+            return bump(prev);
+          })
+        }
+      />
+      <DiplomacyPanel
+        visible={showDiplo}
+        state={state}
+        playerId={PLAYER}
+        note={diploNote}
+        onClose={() => setShowDiplo(false)}
+        onPropose={(to, kind: TreatyKind) =>
+          setState((prev) => {
+            const r = propose(prev, PLAYER, to, kind, rng);
+            const who = prev.nations[to].name;
+            const k = kind === 'truce' ? '휴전' : '동맹';
+            setDiploNote(
+              r.result === 'accepted'
+                ? `${who}이(가) ${k}을 받아들였다.`
+                : r.result === 'declined'
+                ? `${who}이(가) 거절했다 — "${r.reason}"`
+                : r.reason
+            );
+            humanRef.current.diplomacy.push(`propose:${kind}:${to}:${r.result}`);
+            return bump(prev);
+          })
+        }
+        onDissolve={(other) =>
+          setState((prev) => {
+            if (dissolveAlliance(prev, PLAYER, other)) {
+              setDiploNote(`${wa(prev.nations[other].name)}의 동맹을 풀고 휴전으로 돌렸다. 휴전이 끝나면 다시 전쟁이다.`);
+              humanRef.current.diplomacy.push(`dissolve:${other}`);
+            }
+            return bump(prev);
+          })
+        }
+        onBreak={(other) =>
+          setState((prev) => {
+            const t = treatyOf(prev, PLAYER, other);
+            if (breakTreaty(prev, PLAYER, other)) {
+              setDiploNote(`${wa(prev.nations[other].name)}의 ${t?.kind === 'alliance' ? '동맹' : '휴전'}을 깼다. 이제 전쟁이다.`);
+              humanRef.current.diplomacy.push(`break:${t?.kind}:${other}`);
+            }
+            return bump(prev);
+          })
+        }
+      />
+
       {/* 본진 함락 — 병합할까 속국으로 둘까 */}
       <Modal visible={showHelp} transparent animationType="fade">
         <View style={styles.overlay}>
@@ -2052,7 +2454,7 @@ export default function GameScreen() {
               이름을 받는다. 그게 곧 내 나라 이름이 되고, 남는 기록에도 실린다.
               가족들이 각자 두고 기록을 보내주면 그게 누구 판인지 알아야 한다.
             */}
-            <Text style={styles.helpTitle}>이름</Text>
+            <Text style={[styles.helpTitle, { marginTop: 12 }]}>이름</Text>
             <TextInput
               value={playerName}
               onChangeText={(t) => {
@@ -2371,7 +2773,7 @@ function CombatModal({
               : '양측 모두 버텼다'}
             {' · '}생존 {result.attackerSurvivors} vs {result.defenderSurvivors}
           </Text>
-          <TouchableOpacity style={[styles.btn, styles.endBtn]} onPress={onClose}>
+          <TouchableOpacity style={[styles.btn, styles.endBtn, styles.soloBtn]} onPress={onClose}>
             <Text style={styles.btnText}>확인</Text>
           </TouchableOpacity>
         </View>
@@ -2499,9 +2901,17 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: 6 },
   btn: { flex: 1, paddingVertical: 11, borderRadius: 8, alignItems: 'center' },
   btnDim: { opacity: 0.4 },
+  /**
+   * 세로로 혼자 놓인 단추. btn 의 flex:1 은 가로줄에서 칸을 나누려는 것인데, 세로 창
+   * 안에서는 높이를 0 부터 나눠 가져 단추가 납작해지고 글자가 아래로 삐져나왔다
+   * (조우 창·전투 결과 창·속국 창 — 브라우저로 눌러보다 봤다). flex:0 도 웹에서는
+   * 기준 크기 0 이라 같은 꼴이 된다. 기준을 내용 크기로 둔다.
+   */
+  soloBtn: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
   endBtn: { backgroundColor: '#3b82f6' },
   tutorialBtn: { backgroundColor: '#b45309' },
+  diploBtn: { backgroundColor: '#7c3aed' },
   /** 스포트라이트 밖 */
   dim: { opacity: 0.22 },
   footerRest: { gap: 6 },
@@ -2521,6 +2931,23 @@ const styles = StyleSheet.create({
   fortBtn: { backgroundColor: '#a16207' },
   toggle: { color: '#6b7280', fontSize: 11, textAlign: 'center' },
 
+  repLine: { color: '#d1d5db', fontSize: 11, marginTop: 2 },
+  repJust: { color: '#93c5fd', fontWeight: 'bold' },
+  repFear: { color: '#fca5a5', fontWeight: 'bold' },
+  chronOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'center', alignItems: 'center' },
+  chronCard: {
+    width: '86%',
+    maxWidth: 560,
+    backgroundColor: '#161311',
+    borderColor: '#a16207',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 22,
+    alignItems: 'center',
+  },
+  chronEyebrow: { color: '#a16207', fontSize: 11, letterSpacing: 4, marginBottom: 8 },
+  chronTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
+  chronLine: { color: '#f5f0e6', fontSize: 16, lineHeight: 26, textAlign: 'center', fontStyle: 'italic' },
   banner: {
     position: 'absolute',
     top: '42%',

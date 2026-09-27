@@ -23,7 +23,17 @@ import {
   orderCost,
   vassalsOf,
   blocOf,
+  ownTreaties,
+  policyOf,
+  wa,
 } from '../engine';
+import type { VassalPolicy } from '../engine';
+
+const POLICY: Array<{ key: VassalPolicy; label: string; hint: string }> = [
+  { key: 'free', label: '자유', hint: '누구와 손잡든 두고 본다' },
+  { key: 'noEnemies', label: '적국과는 안 됨', hint: '내가 싸우는 나라와는 조약을 맺지 마라' },
+  { key: 'forbid', label: '모두 금지', hint: '외교는 내가 한다' },
+];
 
 interface Props {
   visible: boolean;
@@ -34,6 +44,10 @@ interface Props {
   onPickPlace: (vassalId: number, kind: 'garrison' | 'march') => void;
   onOrder: (vassalId: number, kind: OrderKind, target?: number) => void;
   onPunish: (vassalId: number, kind: Punishment) => void;
+  /** 드러난 불이행을 벌하지 않고 넘어간다 — 자비(공포 -2) */
+  onForgive: (vassalId: number) => void;
+  /** 속국의 외교를 어디까지 허락하나 */
+  onPolicy: (p: VassalPolicy) => void;
   /** 방금 무슨 일이 있었는지 한 줄 */
   note: string | null;
 }
@@ -67,8 +81,11 @@ export default function VassalPanel({
   onPickPlace,
   onOrder,
   onPunish,
+  onForgive,
+  onPolicy,
   note,
 }: Props) {
+  const policy = policyOf(state, playerId);
   const mine = vassalsOf(state, playerId);
   const foes = state.nations.filter(
     (n) => n.alive && blocOf(state, n.id) !== blocOf(state, playerId)
@@ -86,6 +103,24 @@ export default function VassalPanel({
           </Text>
           {note && <Text style={s.note}>{note}</Text>}
 
+          {/*
+            속국도 스스로 조약을 맺는다. 어디까지 허락할지는 종주국이 정한다 —
+            허락 밖의 조약을 맺으면 끊으라 명할 수 있고, 따를지는 속국의 몫이다.
+          */}
+          <Text style={[s.orderLine, { marginTop: 10 }]}>속국의 외교를 어디까지 허락하나</Text>
+          <View style={s.row}>
+            {POLICY.map((p) => (
+              <TouchableOpacity
+                key={p.key}
+                style={[s.btn, s.order, policy !== p.key && s.dim]}
+                onPress={() => onPolicy(p.key)}
+              >
+                <Text style={s.btnText}>{p.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={s.hint}>{POLICY.find((p) => p.key === policy)?.hint}</Text>
+
           <ScrollView style={{ maxHeight: 420, marginTop: 10 }}>
             {mine.length === 0 && (
               <Text style={s.hint}>아직 속국이 없다. 본진을 빼앗은 뒤 속국으로 두면 생긴다.</Text>
@@ -100,6 +135,7 @@ export default function VassalPanel({
                 onPickPlace={onPickPlace}
                 onOrder={onOrder}
                 onPunish={onPunish}
+                onForgive={onForgive}
               />
             ))}
 
@@ -139,6 +175,7 @@ const KIND_LABEL: Record<OrderKind, string> = {
   march: '군대를 옮겨라',
   attack: '같이 공격해라',
   tax: '조공을 더 내라',
+  breakTreaty: '조약을 끊어라',
 };
 
 function VassalRow({
@@ -148,6 +185,7 @@ function VassalRow({
   onPickPlace,
   onOrder,
   onPunish,
+  onForgive,
 }: {
   state: GameState;
   v: Nation;
@@ -155,6 +193,7 @@ function VassalRow({
   onPickPlace: Props['onPickPlace'];
   onOrder: Props['onOrder'];
   onPunish: Props['onPunish'];
+  onForgive: Props['onForgive'];
 }) {
   const [pickFoe, setPickFoe] = React.useState(false);
   const stats = nationStats(state, v.id);
@@ -180,6 +219,27 @@ function VassalRow({
       {v.loyalty < 35 && (
         <Text style={s.warn}>마음이 떠나 있다. 명령을 내려도 따르지 않을 수 있다.</Text>
       )}
+      {/* 속국이 스스로 맺은 조약. 조약은 숨길 수 없으니 종주국도 다 안다. */}
+      {o && ownTreaties(state, v.id).some((t) => t.violates) && (
+        <Text style={s.hint}>내린 명령이 끝나야 조약을 끊으라 할 수 있다 — 명령은 한 번에 하나다.</Text>
+      )}
+      {ownTreaties(state, v.id).map((t) => (
+        <View key={t.other} style={s.treatyRow}>
+          <Text style={[s.meta, t.violates && s.warnInline]}>
+            {t.kind === 'alliance' ? '🤝' : '🕊'} {wa(state.nations[t.other]?.name ?? '')}{' '}
+            {t.kind === 'alliance' ? '동맹' : '휴전'}
+            {t.violates ? ' — 허락 밖' : ''}
+          </Text>
+          {!o && (
+            <TouchableOpacity
+              style={[s.smallBtn, t.violates ? s.war : s.order]}
+              onPress={() => onOrder(v.id, 'breakTreaty', t.other)}
+            >
+              <Text style={s.btnText}>끊어라</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ))}
 
       {o ? (
         <>
@@ -198,11 +258,16 @@ function VassalRow({
               <TouchableOpacity style={[s.btn, s.war]} onPress={() => onPunish(v.id, 'war')}>
                 <Text style={s.btnText}>토벌</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={[s.btn, s.forgive]} onPress={() => onForgive(v.id)}>
+                <Text style={s.btnText}>용서한다</Text>
+              </TouchableOpacity>
             </View>
           )}
           {o.revealed && (
             <Text style={s.hint}>
-              벌하면 당장은 말을 듣지만 다른 속국들도 지켜본다. 마음은 더 멀어진다.
+              벌하면 당장은 말을 듣지만 마음은 멀어진다. 몰수는 법대로 한 벌이라 정의가
+              조금 오르고, 문책·토벌은 공포를 키운다. 용서하면 공포가 누그러지고 마음이
+              붙지만, 무섭지 않은 주인의 명령은 덜 먹힌다.
             </Text>
           )}
         </>
@@ -293,5 +358,10 @@ const s = StyleSheet.create({
   seize: { backgroundColor: '#a16207' },
   strip: { backgroundColor: '#b45309' },
   war: { backgroundColor: '#ef4444' },
-  close: { backgroundColor: '#3b82f6', marginTop: 10 },
+  // 세로로 혼자 놓인 단추 — btn 의 flex:1 이 높이를 0 부터 나눠 가져 납작해졌다
+  close: { backgroundColor: '#3b82f6', marginTop: 10, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
+  treatyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  warnInline: { color: '#fca5a5' },
+  forgive: { backgroundColor: '#0d9488' },
+  smallBtn: { paddingVertical: 5, paddingHorizontal: 10, borderRadius: 6 },
 });

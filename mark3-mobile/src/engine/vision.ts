@@ -75,6 +75,9 @@ export function recomputeVision(
   // 눈이 되는 것들 — 내 부대, 내 본진, 내 완공 요새
   const scale = visionScale(state);
   const eyes: Array<{ cell: Cell; radius: number }> = [];
+  // 동맹이어도 눈을 빌려주지 않는다. 동맹국의 형편은 내 부대가 가서 봐야
+  // 안다 — 언제든 등을 돌릴 수 있는 사이에 속을 다 보여주는 나라는 없다.
+  // (처음엔 동맹이 시야를 나눴다. 그러면 동맹이 곧 정찰이 되어 버린다.)
   for (const c of state.cells) {
     if (c.owner !== nationId) continue;
     if (c.castle || c.fortStage === 4) {

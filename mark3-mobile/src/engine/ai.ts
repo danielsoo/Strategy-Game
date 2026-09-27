@@ -22,6 +22,11 @@ import {
   adminHubs,
   estimateWinProb,
   performAttack,
+  spareBand,
+  slayBand,
+  hireCost,
+  contractBand,
+  demandLeave,
   moveStack,
   AttackOutcome,
   isHostile,
@@ -43,9 +48,13 @@ import {
   flankingSupport,
 } from './rules';
 import { vassalize, vassalsOf } from './vassals';
-import { issueOrder, punishVassal } from './orders';
+import { issueOrder, punishVassal, forgiveVassal } from './orders';
+import { characterOf, PATH_KNOBS } from './reputation';
 import { isExplored, isVisible, knownCell, unexploredCount } from './vision';
 import { FitProvenance } from './stamp';
+import { isGuestLand } from './treaty';
+import { rollEncounter, resolveEncounterAI } from './encounters';
+import { ownTreaties } from './diplomacy';
 import { DefenseChoice } from './defense';
 
 /**
@@ -258,6 +267,24 @@ export const LEARNED_PROVENANCE: FitProvenance = {
   sizes: [11],
   note: '약탈·속국·초선형 행정비까지 반영한 자가대전. 그 뒤 거리 환산·승리 문턱·행정비 식이 바뀌었다.',
 };
+
+/**
+ * 외교·평판·중립 무리 규칙(도장 94ee042c)에서 다시 학습했고, 그 결과를 버렸다.
+ * 도장이 어긋난 채로 두는 이유다 — 기록해 둔다, 안 그러면 또 한다.
+ *
+ * 2026-09-26  sim:learn --sizes 11,21 --pop 14 --gens 8 --games 350
+ *   후보  territory 2.16 units 1.60 castleAssault 15.31 fort 0.80 aggression 0.61
+ *         massing 0.12 homeDefense 0.34 advance 0.29 expansion 2.42 terrain 0.63
+ *         wealth 0.92 support 0.42 explore 0.58 targetArmy 18.15
+ *   판정  11x11 6/6 (시드 두 묶음), 21x21 6/6 (시드 여섯 개를 셋씩 합쳐서)
+ *   그러나 옛 값과 맞대결(자리 번갈아 3:2/2:3, 나라당 승률):
+ *     11x11  옛 25.2% 새 14.8% (200판, 시드 4242) · 옛 24.4% 새 15.6% (777)
+ *     21x21  옛 21.0% 새 19.0% (120판, 4242)      · 옛 20.3% 새 19.7% (13337)
+ *   손으로 만든 성격 넷 상대로도(sim:eval 학습형 기준점) 옛 값 25~36%, 새 값 18~27%.
+ *   거울 자가대전에서만 이기는 값이었다. 사람은 거울이 아니다 — 옛 값을 둔다.
+ *   같은 학습을 --games 60 으로 돌린 것(1인당 4.3판)은 fort 3.33 같은 값이 나왔고
+ *   5인 검증 15% 로 운이었다.
+ */
 
 
 /**
@@ -785,6 +812,9 @@ function scoreActions(ctx: Ctx, c: Cell): Action[] {
 
     if (n.units === 0) {
       if (!canMoveTo(c, n, ctx.eco)) continue;
+      // 휴전·동맹 상대의 땅에는 먼저 들어가지 않는다. 막혀 있어서가 아니라
+      // 무례해서다 — 들어가면 철수 요구를 받고, 버티면 조약이 깨진다.
+      if (isGuestLand(ctx.state, ctx.me, n.owner)) continue;
 
       // 거점에서 먼 땅은 행정 비용만 나가는 순손실이다. 효율을 반영하지 않으면
       // AI 가 돈도 안 되는 변두리를 끝없이 칠한다.
@@ -872,15 +902,31 @@ function governVassals(
 
   for (const v of mine) {
     if (v.order?.revealed && v.order.response !== 'obey') {
-      // 공포를 쓰는 나라는 세게, 정의를 쓰는 나라는 국고만 건드린다
-      const harsh = lord.fear > 60 && v.loyalty < 25;
-      punishVassal(state, nationId, v.id, harsh ? 'strip' : 'seize', eco);
+      // 나라의 성격대로 — 공포의 나라는 문책하고, 정의의 나라는 법대로 몰수하거나
+      // 절반은 용서한다. 성향이 없으면 몰수. (난수를 한 번 더 쓰는 것은 정의의
+      // 나라일 때뿐이다.)
+      const c = characterOf(lord);
+      const lp = PATH_KNOBS.vassals ? lord.path : undefined;
+      if (lp === 'just') forgiveVassal(state, nationId, v.id);
+      else if (lp === 'feared' || c === 'feared') punishVassal(state, nationId, v.id, 'strip', eco);
+      else if (c === 'just' && rng() < 0.5) forgiveVassal(state, nationId, v.id);
+      else punishVassal(state, nationId, v.id, 'seize', eco);
     }
   }
 
   // 한 턴에 하나만 새로 내린다
   const idle = mine.filter((v) => !v.order);
   if (idle.length === 0) return;
+
+  // 허락 밖의 조약을 맺은 속국이 있으면 그것부터 — 끊으라 한다
+  for (const v of idle) {
+    const bad = ownTreaties(state, v.id).find((t) => t.violates);
+    if (bad) {
+      issueOrder(state, nationId, v.id, 'breakTreaty', rng, { target: bad.other, turns: 3 });
+      return;
+    }
+  }
+
   const v = idle[Math.floor(rng() * idle.length)];
 
   // 돈이 급하면 조공, 적이 뚜렷하면 진격, 아니면 파병
@@ -982,6 +1028,10 @@ export function chooseVassalOrAnnex(
   loserId: number,
   eco: EconomyConfig = DEFAULT_ECONOMY
 ): 'annex' | 'vassalize' {
+  // 길이 정해진 나라는 그 길대로 — 살려두는 것이 자비, 지우는 것이 공포다
+  const path = PATH_KNOBS.conquest ? state.nations[winnerId]?.path : undefined;
+  if (path === 'just') return 'vassalize';
+  if (path === 'feared') return 'annex';
   const mine = computeLedger(state, winnerId, eco);
   const theirs = computeLedger(state, loserId, eco);
 
@@ -1215,6 +1265,28 @@ export function* takeAITurnGen(
     policy?.onChoose?.(ctx, c, best, actions);
     if (best.kind === 'stay') continue;
 
+    /*
+      무리와 맞닿았다 — 사람처럼 조우한다. 돈에 여유가 있고 상대가 용병이면
+      먼저 계약을 청하고, 훨씬 세면 물러나라 한다. 둘 다 안 되면 친다.
+      계약·물러나라가 통하면 그 부대는 이번 턴에 할 일을 한 것이다.
+    */
+    if (best.kind === 'attack' && best.target.neutral) {
+      const band = best.target;
+      const me = state.nations[nationId];
+      let settled = false;
+      if (band.neutral === 'mercenary' && me.gold >= hireCost(band, eco) * 2.5) {
+        settled = contractBand(state, c.id, band.id, rng, eco).ok;
+      }
+      if (!settled && cellPower(c, false) >= cellPower(band, false) * 2) {
+        settled = demandLeave(state, c.id, band.id, rng).ok;
+      }
+      if (settled) {
+        moved.add(id);
+        budget--;
+        continue;
+      }
+    }
+
     if (best.kind === 'attack') {
       const wasCastle = best.target.castle;
       const victim = best.target.owner;
@@ -1240,6 +1312,14 @@ export function* takeAITurnGen(
       }
       const out = performAttack(state, c, best.target, rng, eco, forced, defenseNoise);
       log.attacks.push(out);
+      // 진 무리가 달아난다 — 공포의 나라는 쫓아 섬멸하고, 그 밖에는 보내준다
+      if (out.fledBand) {
+        const me = state.nations[nationId];
+        const mp = PATH_KNOBS.bands ? me.path : undefined;
+        if (mp === 'feared' || (mp !== 'just' && characterOf(me) === 'feared'))
+          slayBand(state, nationId, out.fledBand);
+        else spareBand(state, nationId);
+      }
 
       /**
        * 진격 명령 — 친 것만 셈에 넣되, 진실과 목격을 따로 적는다.
@@ -1281,7 +1361,14 @@ export function* takeAITurnGen(
         if (choice === 'vassalize') vassalize(state, nationId, victim, 'conquest');
       }
     } else {
+      // 새 땅에 발을 들이면 행군 중 사건이 날 수 있다 — 사람과 똑같이 겪는다
+      const fresh =
+        best.target.owner === null || blocOf(state, best.target.owner) !== blocOf(state, nationId);
       moveStack(c, best.target);
+      if (fresh) {
+        const e = rollEncounter(state, best.target, rng, eco);
+        if (e) resolveEncounterAI(state, e, eco);
+      }
     }
     moved.add(id);
     budget--;

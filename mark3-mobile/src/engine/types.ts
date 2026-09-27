@@ -48,8 +48,28 @@ export interface Cell {
   encircled: boolean;
   /** owner 가 null 이면서 units > 0 일 때의 세력 종류 */
   neutral?: NeutralKind;
+  /**
+   * 중립 무리의 선·악 -100~100. 나라의 정의·공포와 달리 한 축이다.
+   * 도적은 악 쪽(-40 안팎), 용병은 가운데에서 시작한다. 무리 자신이 한 일로
+   * 바뀐다 — 털 수 있었는데 지나가면 선, 털면 악. 무리가 움직이면 같이
+   * 옮겨간다(moveStack).
+   */
+  bandGood?: number;
+  /** 무리가 털지도, 고용되지도 못한 채 보낸 턴 — 오래 굶은 무리는 흩어지거나 타락한다 */
+  bandIdle?: number;
   /** 무역상이 닦아놓은 길 */
   hasRoad?: boolean;
+  /** 병합으로 얻은 땅의 불안이 가라앉는 턴 — 그 전까지는 수입을 내지 않는다 */
+  unrestUntil?: number;
+  /**
+   * 이 땅의 원래 주인. 조약 상대의 군대가 '손님' 으로 서 있는 동안만 있다.
+   *
+   * 칸에는 주인이 하나뿐이라(owner 가 곧 부대의 나라) 남의 땅에 선 부대를
+   * 그대로 두면 그 칸을 빼앗은 것이 된다. 그래서 원래 주인을 따로 적어두고,
+   * 부대가 떠나면 돌려준다. 조약이 깨지면 그 자리를 쥔 쪽이 갖는다 — 동맹을
+   * 깨고 치는 쪽이 얻는 기습의 이점이 이것이다.
+   */
+  landlord?: number;
   /**
    * 이 부대가 직전에 떠나온 칸.
    *
@@ -107,9 +127,12 @@ export interface Nation {
   name: string;
   color: string;
   gold: number;
-  /** 공포 0~100 */
+  /**
+   * 공포 0~100. 0 에서 시작하고 저절로 줄지 않는다 — 자비로만 누그러진다.
+   * 정의와 함께 나라의 성격을 정한다(reputation.ts). 바꿀 때는 adjustRep 으로.
+   */
   fear: number;
-  /** 정의 0~100 */
+  /** 정의 0~100. 0 에서 시작한다 — 옳은 일로만 쌓인다. */
   justice: number;
   /** 자국에 도착한 무역에 매기는 세율 */
   taxRate: number;
@@ -131,6 +154,24 @@ export interface Nation {
    * voluntary 위협에 시달리다 정의로운 나라에 보호를 청함 — 조공은 적지만 안정적
    */
   vassalOrigin: 'conquest' | 'voluntary' | null;
+  /**
+   * 조약을 깬 횟수. 다른 나라들이 이 나라의 제안을 믿을지 여기서 본다.
+   * 한 번 배신한 나라와 다시 손잡기는 어렵다 — 그래야 배신이 공짜가 아니다.
+   */
+  betrayals?: number;
+  /**
+   * 속국의 외교를 어디까지 허락하나. 없으면 성향으로 정한다(diplomacy.policyOf).
+   *   free       무엇이든
+   *   noEnemies  내 적과는 안 된다
+   *   forbid     아무와도 안 된다
+   */
+  vassalPolicy?: 'free' | 'noEnemies' | 'forbid';
+  /**
+   * AI 가 걷는 길 — 정의의 길이면 자비와 약속을, 공포의 길이면 잔혹을 고른다.
+   * 없으면 형편대로 섞어 고른다(기본). 하네스(sim/paths.ts)가 두 길의 승률을
+   * 견주려고 준다. 사람에게는 쓰지 않는다.
+   */
+  path?: 'just' | 'feared';
   /**
    * 이 나라의 수입 배수. 난이도 핸디캡에 쓴다.
    *
@@ -171,6 +212,29 @@ export interface GameState {
    * 종주국에게 드러내면 안 된다. 분석과 저장용으로만 둔다.
    */
   orderLog: OrderOutcome[];
+  /**
+   * 맺어진 조약(휴전·동맹). 옛 저장에는 없다 — 없으면 전부 전쟁 중이다.
+   * 판정은 treaty.ts, 맺고 깨는 것은 diplomacy.ts.
+   */
+  treaties?: import('./treaty').Treaty[];
+  /** 사람에게 온 제안 — 사람 차례에 화면이 묻는다 */
+  proposals?: import('./diplomacy').Proposal[];
+  /**
+   * 같은 상대에게 거듭 조르지 않게. 'a-b' → 마지막으로 제안한 턴.
+   * 이게 없으면 AI 가 매 턴 같은 제안을 보내 사람이 제안 창만 닫다 끝난다.
+   */
+  diploCooldown?: Record<string, number>;
+  /**
+   * '손님이 주인 땅에 머문 턴 수'. '손님>주인' → 턴.
+   * 참을성이 다하면 주인이 조약을 깬다.
+   */
+  intrusions?: Record<string, number>;
+  /** 중립 무리가 마지막으로 움직인 턴 — 한 턴에 한 번만 움직이게 */
+  neutralTurn?: number;
+  /** 나라의 성격이 바뀐 순간들 — 화면이 연대기처럼 띄운다 */
+  chronicle?: import('./reputation').Chronicle[];
+  /** 동맹의 명분이 사라진 채 지난 턴 수. 'a-b' → 턴. */
+  allianceDoubt?: Record<string, number>;
 }
 
 export interface EconomyConfig {
@@ -239,6 +303,49 @@ export interface EconomyConfig {
    * 뿐이고, 그건 남의 본진을 털어 병합하거나 속국으로 삼는다는 뜻이다.
    */
   dominanceShare: number;
+  /**
+   * 외교를 켜나 (1/0). 끄면 조약이 하나도 안 생긴다 — 하네스에서 외교가
+   * 있을 때와 없을 때를 같은 판으로 견주는 손잡이다.
+   */
+  diplomacyOn: number;
+  /** 휴전 기한(턴). 11x11 기준이고 판이 크면 boardScale 만큼 늘린다. */
+  truceTurns: number;
+  /** 조약을 깨면 잃는 정의 */
+  betrayJustice: number;
+  /**
+   * 정의가 주는 이득 전체의 저울추(사기 버팀·항복병 편입·급여 유예·자발 복속·충성).
+   * 공포의 저울추(적 사기 꺾기·복종·도적 억지·현지 조달)와 맞춰 두 길의 승률을
+   * 반반에 두는 손잡이다(sim/paths.ts). 1 이 처음 값.
+   */
+  justiceWeight: number;
+  fearWeight: number;
+  /**
+   * 병합한 땅이 수입을 내지 않는 턴(11x11 기준, 판이 크면 boardScale 만큼).
+   * 병합이 속국보다 너무 이득이라 공포의 길이 정의의 길을 압도했다
+   * (sim/paths.ts: 병합 대 속국만 끄면 승률비 0.37 → 1.47).
+   */
+  annexUnrestTurns: number;
+  /** 정복해서 속국으로 살려둔 나라의 시작 충성 — 살려준 은혜 */
+  conquestLoyalty: number;
+  /**
+   * 병합할 때 진 나라의 군대 중 새 주인을 따르는 몫(0~1). 나머지는 도적이
+   * 되어 흩어진다. 1 이면 예전처럼 군대를 통째로 흡수한다.
+   */
+  annexArmyKeep: number;
+  /** 속국도 스스로 조약을 맺나 (1/0) */
+  vassalDiplomacy: number;
+  /**
+   * 살아남은 우두머리가 이 수 이하면 새 휴전을 받지 않는다. 0 이면 끈다.
+   * 21x21 턴제한을 줄이려고 넣었다가 껐다: 시드 4242 에서 22.2 → 16.7% 로
+   * 보였는데 시드 13337 에서는 23.3 → 24.2%(≤3), 30.0%(≤2). 잡음이었다.
+   * 늘어짐의 진짜 원인은 행군 사건 앞의 AI 선택(징발 악순환)이었다.
+   */
+  endgameHeads: number;
+  /**
+   * 새 땅에 발을 들일 때 사건이 날 확률. 0 이면 사건이 없다.
+   * 정의·공포에 따라 무슨 사건인지가 달라진다(encounters.ts).
+   */
+  encounterChance: number;
   /** 약소국이 정의로운 나라에 자발적으로 복속할 기본 확률 */
   voluntarySubmitChance: number;
   /**
@@ -347,6 +454,17 @@ export const DEFAULT_ECONOMY: EconomyConfig = {
   loyaltyPowerBonus: 2.5,
   vassalInfluenceWeight: 0.5,
   dominanceShare: 0,
+  diplomacyOn: 1,
+  truceTurns: 10,
+  betrayJustice: 15,
+  justiceWeight: 1.3,
+  fearWeight: 1,
+  annexUnrestTurns: 20,
+  conquestLoyalty: 70,
+  annexArmyKeep: 0,
+  vassalDiplomacy: 1,
+  endgameHeads: 0,
+  encounterChance: 0.12,
   voluntarySubmitChance: 0.12,
   flankSupport: 0.42,
   visionRadiusUnit: 2,
