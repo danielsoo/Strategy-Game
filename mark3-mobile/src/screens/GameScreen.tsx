@@ -686,6 +686,8 @@ export default function GameScreen() {
    * 창 높이가 바뀌어도 그대로다.
    */
   const [chromeH, setChromeH] = useState(CHROME_H);
+  /** 판이 화면 어디에 있나 — 길잡이 카드를 판 위 구석에 띄우려고 */
+  const [gridBox, setGridBox] = useState({ y: 0, h: 0 });
 
   const wide = useMemo(
     () => preferSide(state.cells, winW, winH, chromeH),
@@ -1911,18 +1913,6 @@ export default function GameScreen() {
         )}
       </View>
 
-      {coach !== null && !watching && (
-        <View style={wide ? { width: paneW } : undefined}>
-          <Coach
-            step={coach}
-            done={coachDone}
-            ready={coachIsReady}
-            color={state.nations[PLAYER].color}
-            onNext={advanceCoach}
-            onQuit={quitCoach}
-          />
-        </View>
-      )}
 
       {/* 관전 조작 — 길잡이 중에는 숨긴다(처음 하는 사람에게는 소음이고, 자리를 먹어
           부대 정보가 아래 단추에 가려졌다) */}
@@ -2028,8 +2018,10 @@ export default function GameScreen() {
           (spot === 'button' || spot === 'gold') && styles.dim,
         ]}
         onLayout={(e) => {
+          const L = e.nativeEvent.layout;
+          setGridBox({ y: L.y, h: L.height });
           // 옆에 둘 때는 판이 절대 위치라 이 값이 위아래 높이를 말해주지 않는다
-          if (!wide) setChromeH(Math.max(0, winH - e.nativeEvent.layout.height));
+          if (!wide) setChromeH(Math.max(0, winH - L.height));
         }}
       >
         {use3D && can3D ? (
@@ -2314,6 +2306,35 @@ export default function GameScreen() {
         판의 끝. 연대기를 닫고 지도를 보는 동안에는 작은 띠만 남기고, 누르면 다시 연다.
         내 나라가 무너졌으면 판이 끝나지 않았어도 한 번 띄운다 — 지켜볼지 새로 할지.
       */}
+      {/*
+        길잡이 카드. 전에는 왼쪽 칸 맨 위에 있어서 눈이 지도에 가 있는 동안 보이지
+        않았다. 이제 판 위 구석에 띄운다 — 짚는 칸이 판의 왼쪽이면 오른쪽 구석에,
+        오른쪽이면 왼쪽 구석에. 판 한가운데는 비워 둔다. 폰 세로에서는 판 위쪽(제목이 있던
+        빈자리)에 — 아래쪽에 두었더니 짚는 칸을 덮었다.
+        판(gridWrap)이 어두워지는 단계가 있어서 그 안에 넣지 않고 같은 자리에 겹쳐 둔다.
+      */}
+      {coach !== null && !watching && (() => {
+        const target = coachCell ? state.cells.find((c) => c.id === coachCell) : null;
+        const onLeft = target ? target.col / Math.max(1, state.cols - 1) < 0.5 : false;
+        const cardW = Math.min(340, Math.max(240, boardBox.width * 0.36));
+        const pos = wide
+          ? { top: 20, width: cardW, ...(onLeft ? { right: 20 } : { left: paneW + 20 }) }
+          : phone
+          ? { left: 8, right: 8, top: gridBox.y + 6 }
+          : { top: gridBox.y + 10, width: cardW, ...(onLeft ? { right: 10 } : { left: 10 }) };
+        return (
+          <View style={[styles.coachFloat, pos]} pointerEvents="box-none">
+            <Coach
+              step={coach}
+              done={coachDone}
+              ready={coachIsReady}
+              color={state.nations[PLAYER].color}
+              onNext={advanceCoach}
+              onQuit={quitCoach}
+            />
+          </View>
+        );
+      })()}
       <SettingsPanel
         visible={showSettings}
         onClose={() => setShowSettings(false)}
@@ -3136,6 +3157,8 @@ const styles = StyleSheet.create({
   diploBtn: { backgroundColor: '#7c3aed' },
   /** 스포트라이트 밖 */
   dim: { opacity: 0.22 },
+  // 그림자는 카드(Coach)에 — 감싸는 칸에 두면 웹에서 카드 뒤로 검은 네모가 떴다
+  coachFloat: { position: 'absolute', zIndex: 20 },
   footerRest: { gap: 6 },
   /** 길잡이가 '이걸 누르세요' 하고 짚는 단추 */
   coachGlow: {

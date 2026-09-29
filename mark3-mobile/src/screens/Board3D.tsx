@@ -238,20 +238,22 @@ function CoachMarker({ tile }: { tile: Ground }) {
 }
 
 /**
- * 스포트라이트의 어둠. 밝힐 칸을 뺀 모든 칸 위에 검은 반투명 기둥을 씌운다.
- * 바닥만 덮으면 병사·나무·성이 그대로 밝아서 어두워진 느낌이 안 난다 —
- * 그래서 납작한 판이 아니라 조각들을 감쌀 만큼 높은 기둥이다.
- * 누르는 것은 막지 않는다(raycast 없음).
- * 모르는 칸(안개)은 뺀다 — 이미 가려져 있고, 씌우면 안개 위로 검은 기둥이 선다.
+ * 스포트라이트의 어둠. 밝힐 칸을 뺀 칸 위에 검은 반투명 판을 얇게 덮는다.
+ *
+ * 처음에는 병사·나무·성까지 감싸려고 높이 1.8 짜리 기둥을 씌웠다. 그랬더니 판 전체가
+ * 검은 기둥 숲이 되어 '입체로 솟은 이상한 것' 으로 보였다(사람이 직접 보고 지적).
+ * 이제 칸 윗면 바로 위의 얇은 판(0.12)이다. 조각들은 조금 덜 어두워지지만, 밝힌 칸의
+ * 분홍 테두리와 대비만으로 어디를 봐야 하는지는 충분히 드러난다.
+ * 누르는 것은 막지 않는다(raycast 없음). 모르는 칸(안개)은 뺀다.
  */
 function DimVeil({ tiles, lit }: { tiles: Ground[]; lit: string[] }) {
   const keep = new Set(lit);
   return <group>
     {tiles.filter((t) => t.known && !keep.has(t.cell.id)).map((t) =>
-      <mesh key={t.cell.id} position={[t.position[0], t.height + 0.9, t.position[2]]}
+      <mesh key={t.cell.id} position={[t.position[0], t.height + 0.08, t.position[2]]}
         raycast={NO_RAYCAST} renderOrder={10}>
-        <cylinderGeometry args={[1.0, 1.0, 1.8, 6]} />
-        <meshBasicMaterial color="#000" transparent opacity={0.62} depthWrite={false} />
+        <cylinderGeometry args={[1.0, 1.0, 0.12, 6]} />
+        <meshBasicMaterial color="#000" transparent opacity={0.6} depthWrite={false} />
       </mesh>)}
   </group>;
 }
