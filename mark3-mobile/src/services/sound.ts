@@ -11,6 +11,7 @@
 // 드문드문 뜯는다. 매번 조금씩 달라서 한 시간을 틀어놔도 덜 지친다.
 
 import { getSettings, onSettings } from './settings';
+import { startOrchestra, stopOrchestra } from './orchestra';
 
 type AC = AudioContext;
 let ctx: AC | null = null;
@@ -42,7 +43,7 @@ function applyVolumes() {
   const now = ctx.currentTime;
   sfxBus.gain.setTargetAtTime(s.muted ? 0 : s.sfx, now, 0.05);
   // 배경음은 효과음보다 한참 뒤에 깔린다
-  musicBus.gain.setTargetAtTime(s.muted ? 0 : s.music * 0.5, now, 0.3);
+  musicBus.gain.setTargetAtTime(s.muted ? 0 : s.music * 0.6, now, 0.3);
 }
 
 onSettings(() => {
@@ -245,42 +246,22 @@ export function sfx(name: Sfx): void {
 }
 
 // ── 배경음 ───────────────────────────────────────────
+// 곡은 orchestra.ts. 여기서는 켜고 끄기만 한다.
+// (처음의 '낮은 지속음 + 도리안 몇 음' 은 사람이 들어보고 안 어울린다고 해서 버렸다.)
 
 let musicWanted = false;
-let timer: ReturnType<typeof setInterval> | null = null;
-let bar = 0;
-// D 도리안 — 옛 느낌이 나면서 너무 슬프지 않다
-const DORIAN = [0, 2, 3, 5, 7, 9, 10, 12, 14, 15];
-
-function playBar() {
-  const c = audio();
-  if (!c) return;
-  // 네 마디마다 낮은 지속음 (D 와 A)
-  if (bar % 4 === 0) {
-    const root = bar % 16 < 8 ? -24 : -19; // D2 ↔ G2 를 오가며 조금 움직인다
-    tone({ freq: NOTE(root), type: 'sine', dur: 9.5, vol: 0.22, attack: 2.2, bus: 'music' });
-    tone({ freq: NOTE(root + 7), type: 'sine', dur: 9.0, vol: 0.12, attack: 2.6, bus: 'music' });
-  }
-  // 한 마디에 0~3음을 드문드문 뜯는다
-  const notes = Math.random() < 0.25 ? 0 : 1 + Math.floor(Math.random() * 3);
-  let t = Math.random() * 0.4;
-  for (let i = 0; i < notes; i++) {
-    const deg = DORIAN[Math.floor(Math.random() * DORIAN.length)];
-    tone({ freq: NOTE(deg), type: 'triangle', dur: 1.6, vol: 0.09, lowpass: 1800, at: t, bus: 'music' });
-    t += 0.5 + Math.random() * 0.8;
-  }
-  bar++;
-}
+let playing = false;
 
 function syncMusic() {
   const s = getSettings();
   const on = musicWanted && unlocked && !s.muted && s.music > 0;
-  if (on && !timer) {
-    playBar();
-    timer = setInterval(playBar, 2400);
-  } else if (!on && timer) {
-    clearInterval(timer);
-    timer = null;
+  const c = audio();
+  if (on && !playing && c && musicBus) {
+    startOrchestra(c, musicBus);
+    playing = true;
+  } else if (!on && playing) {
+    stopOrchestra();
+    playing = false;
   }
 }
 
