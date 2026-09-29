@@ -493,7 +493,16 @@ export default function GameScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
-  const [showStats, setShowStats] = useState(true);
+  // 폰(좁은 화면)에서는 나라 표를 접은 채 시작한다 — 판이 먼저 보여야 한다
+  const [showStats, setShowStats] = useState(
+    () =>
+      !(
+        Platform.OS === 'web' &&
+        typeof window !== 'undefined' &&
+        (window.innerWidth < 600 || window.innerHeight < 600)
+      )
+  );
+  const [moreOpen, setMoreOpen] = useState(false);
   // 처음 켜면 한 번 띄운다. 규칙을 모르고 만나면 "왜 안 움직이지?" 가 된다.
   const [showHelp, setShowHelp] = useState(true);
   /**
@@ -677,6 +686,11 @@ export default function GameScreen() {
   );
 
   const paneW = paneWidth(winW);
+  /**
+   * 폰 — 좁거나(세로) 낮은(가로로 눕힘, 높이 390) 화면. 판 짜기 줄을 접고 나라 표를
+   * 접은 채 시작한다. 눕힌 폰에서 다 펼치면 왼쪽 단추 칸이 머리말(턴·금)을 덮었다.
+   */
+  const phone = winW < 600 || winH < 600;
   const boardBox = wide
     ? { width: Math.max(0, winW - paneW - 16), height: Math.max(0, winH - 16) }
     : { width: winW, height: Math.max(0, winH - chromeH) };
@@ -1820,7 +1834,13 @@ export default function GameScreen() {
   const current = state.nations[state.current];
 
   return (
-    <View style={styles.container}>
+    /*
+      웹에서는 바깥 높이를 창 높이로 못박는다. 안 그러면 판(3D 는 높이를 숫자로 받는다)이
+      처음 어림값(CHROME_H) 그대로 페이지를 밀어 늘리고, onLayout 이 그 늘어난 높이를
+      다시 재서 어림값이 영영 고쳐지지 않았다 — 폰 세로에서 페이지가 창보다 100~390px
+      길어져 턴 종료가 화면 밖에 있었다.
+    */
+    <View style={[styles.container, Platform.OS === 'web' && !wide && { height: winH }]}>
       <View
         style={[
           styles.header,
@@ -2188,6 +2208,17 @@ export default function GameScreen() {
             </TouchableOpacity>
           </View>
         )}
+        {/*
+          폰 세로 화면에서는 아래 판 짜기·도움말 줄을 '더 보기' 로 접는다. 다 펼쳐 두면
+          턴 종료가 화면 밖(844 높이에 920)으로 밀려 매 턴 스크롤해야 했다.
+        */}
+        {phone && (
+          <TouchableOpacity onPress={() => setMoreOpen((v) => !v)} style={{ paddingVertical: 4 }}>
+            <Text style={styles.toggle}>{moreOpen ? '▴ 접기' : '▾ 더 보기 — 판 짜기 · 설정 · 도움말'}</Text>
+          </TouchableOpacity>
+        )}
+        {(!phone || moreOpen) && (
+        <>
         {/* 판 짜기를 바꾸면 새 판으로 시작한다 */}
         <View style={styles.row}>
           {MODES.map((m, i) => (
@@ -2258,6 +2289,8 @@ export default function GameScreen() {
           <Text style={[styles.toggle, { color: '#fca5a5' }]}>
             저장할 수 없는 창입니다 — 닫으면 판이 사라집니다
           </Text>
+        )}
+        </>
         )}
         </View>
       </View>
@@ -2535,9 +2568,17 @@ export default function GameScreen() {
       {/* 본진 함락 — 병합할까 속국으로 둘까 */}
       <Modal visible={showHelp} transparent animationType="fade">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
+          {/*
+            폰을 눕히면 창 높이가 390 이다. 도움말(380)만으로 꽉 차서 이어하기·시작 단추가
+            화면 밖에 있었고 누를 방법이 없었다. 창 전체를 스크롤되게 하고, 도움말 칸은
+            남는 높이만큼만 쓴다.
+          */}
+          <ScrollView
+            style={[styles.modal, { maxHeight: winH * 0.94, flexGrow: 0 }]}
+            contentContainerStyle={{ flexGrow: 0 }}
+          >
             <Text style={styles.modalTitle}>어떻게 하는 게임인가</Text>
-            <ScrollView style={{ maxHeight: 380 }}>
+            <ScrollView style={{ maxHeight: Math.max(120, Math.min(380, winH - 470)) }} nestedScrollEnabled>
               {HELP.map((h) => (
                 <View key={h.title} style={styles.helpItem}>
                   <Text style={styles.helpTitle}>{h.title}</Text>
@@ -2639,7 +2680,7 @@ export default function GameScreen() {
                 {inMatch ? '계속하기' : resumable ? '새로 시작' : '시작'}
               </Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 

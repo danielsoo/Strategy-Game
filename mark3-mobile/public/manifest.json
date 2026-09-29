@@ -1,0 +1,18 @@
+{
+  "name": "왕국의 전장",
+  "short_name": "왕국의 전장",
+  "description": "정의로 다스릴까, 공포로 다스릴까 — 육각 전략 게임",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#141414",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
