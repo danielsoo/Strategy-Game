@@ -233,6 +233,10 @@ export interface GameState {
   neutralTurn?: number;
   /** 나라의 성격이 바뀐 순간들 — 화면이 연대기처럼 띄운다 */
   chronicle?: import('./reputation').Chronicle[];
+  /** 판 전체의 굵직한 일 — 자르지 않는다. 끝 화면이 돌아본다 (history.ts) */
+  history?: import('./history').HistoryEvent[];
+  /** 턴마다 나라별 영토 — 끝 화면의 그래프 */
+  timeline?: import('./history').TimelinePoint[];
   /** 동맹의 명분이 사라진 채 지난 턴 수. 'a-b' → 턴. */
   allianceDoubt?: Record<string, number>;
 }

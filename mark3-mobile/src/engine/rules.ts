@@ -27,6 +27,7 @@ import { createVision, recomputeVision } from './vision';
 import { blocOf, atPeace, allied } from './treaty';
 import { adjustRep, effF, effJ, wF, wJ } from './reputation';
 import { stepDiplomacy, settleGuests } from './diplomacy';
+import { recordHistory, recordTimeline } from './history';
 export { blocOf };
 import {
   decideDefense,
@@ -1729,6 +1730,7 @@ export function updateAliveFlags(state: GameState): void {
         }
       }
       pushLog(state, `${n.name}이(가) 멸망했습니다`);
+      recordHistory(state, { kind: 'fall', a: n.id });
     }
   }
   const alive = state.nations.filter((n) => n.alive);
@@ -1758,6 +1760,7 @@ export function beginTurn(
   // 화면·하네스의 모든 판 루프가 거치는 유일한 곳이기 때문이다.
   stepDiplomacy(state, nationId, rng, eco);
   recomputeVision(state, nationId, eco);
+  recordTimeline(state);
 }
 
 /**
@@ -1864,6 +1867,7 @@ export function resolveCastleLoss(
   }
   state.merchants = state.merchants.filter((m) => m.nation !== loserId);
   loser.alive = false;
+  recordHistory(state, { kind: 'annex', a: winnerId, b: loserId });
   pushLog(state, `${loser.name}이(가) ${winner.name}에 병합되었습니다`);
 }
 

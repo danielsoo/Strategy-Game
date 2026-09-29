@@ -88,6 +88,7 @@ import {
 } from '../engine';
 import type { OrderKind, Punishment } from '../engine';
 import VassalPanel from './VassalPanel';
+import EndScreen, { endingOf } from './EndScreen';
 import DiplomacyPanel, { ProposalCard, EncounterCard } from './DiplomacyPanel';
 import {
   propose,
@@ -610,6 +611,12 @@ export default function GameScreen() {
   /** 조우 창에서 '공격한다' 를 골랐다 — 이번 한 번은 조우를 건너뛰고 친다 */
   const forceAttackRef = useRef(false);
   const lastChronRef = useRef<Chronicle | null>(null);
+  /**
+   * 끝 화면을 이미 본 끝. '이겼다' 와 '무너졌다(판은 계속)' 는 다른 끝이라 따로 센다 —
+   * 무너진 뒤 지켜보다 누가 이기면 그때 한 번 더 띄운다.
+   */
+  const endSeenRef = useRef<string | null>(null);
+  const [, setEndTick] = useState(0);
   const [chron, setChron] = useState<Chronicle | null>(null);
 
   /**
@@ -1450,6 +1457,8 @@ export default function GameScreen() {
 
   /** 기록이 열린 채 두는 중인가. 도움말 창의 '시작' 이 새 판인지 계속인지 가른다. */
   const inMatch = matchRef.current !== null && state.winner === null;
+  /** 이 판의 이 끝 — 판 id 를 넣어야 새 판에서 같은 끝(내가 이김)을 '이미 봤다' 고 치지 않는다 */
+  const endKey = `${matchRef.current?.id ?? ''}:${endingOf(state, PLAYER)}:${state.winner}`;
 
   useEffect(() => {
     const list = state.chronicle ?? [];
@@ -2198,13 +2207,38 @@ export default function GameScreen() {
         </View>
       </View>
 
-      {state.winner !== null && (
-        <View style={styles.banner} pointerEvents="none">
-          <Text style={styles.bannerText}>{state.nations[state.winner].name} 승리</Text>
-          <Text style={styles.bannerSub}>
-            {state.turn}턴 · {state.winReason ?? '승리 조건 달성'}
+      {/*
+        판의 끝. 연대기를 닫고 지도를 보는 동안에는 작은 띠만 남기고, 누르면 다시 연다.
+        내 나라가 무너졌으면 판이 끝나지 않았어도 한 번 띄운다 — 지켜볼지 새로 할지.
+      */}
+      <EndScreen
+        state={state}
+        playerId={PLAYER}
+        visible={!showHelp && endingOf(state, PLAYER) !== null && endSeenRef.current !== endKey}
+        onNewGame={() => {
+          endSeenRef.current = endKey;
+          setShowHelp(true);
+        }}
+        onClose={() => {
+          endSeenRef.current = endKey;
+          setEndTick((t) => t + 1);
+        }}
+      />
+      {endingOf(state, PLAYER) !== null && endSeenRef.current === endKey && (
+        <TouchableOpacity
+          style={styles.banner}
+          onPress={() => {
+            endSeenRef.current = null;
+            setEndTick((t) => t + 1);
+          }}
+        >
+          <Text style={styles.bannerText}>
+            {state.winner !== null ? `${state.nations[state.winner].name} 승리` : '당신의 나라는 무너졌다'}
           </Text>
-        </View>
+          <Text style={styles.bannerSub}>
+            {state.turn}턴{state.winner !== null ? ` · ${state.winReason ?? '승리 조건 달성'}` : ''} · 눌러서 연대기 보기
+          </Text>
+        </TouchableOpacity>
       )}
 
       <VassalPanel

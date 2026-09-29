@@ -11,3 +11,4 @@ export * from './treaty';
 export * from './diplomacy';
 export * from './encounters';
 export * from './reputation';
+export * from './history';

@@ -17,6 +17,7 @@
 // vassals·encounters 가 모두 이걸 부른다.
 
 import { GameState, Nation, DEFAULT_ECONOMY } from './types';
+import { recordHistory } from './history';
 
 export type Character = 'just' | 'feared' | 'none';
 
@@ -104,6 +105,7 @@ export function adjustRep(state: GameState, nationId: number, dJustice: number, 
   if (state.log.length > 40) state.log.shift();
   const list = (state.chronicle = state.chronicle ?? []);
   list.push({ turn: state.turn, nation: n.id, from: before, to: after, line });
+  recordHistory(state, { kind: 'character', a: n.id, to: after, line });
   if (list.length > 30) list.shift();
 }
 
