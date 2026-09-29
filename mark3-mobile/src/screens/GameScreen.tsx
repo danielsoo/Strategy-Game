@@ -17,6 +17,9 @@ import {
   readSave, writeSave, clearSave, tutorialSeen, markTutorialSeen,
 } from '../services/saveStore';
 import Coach from './Coach';
+import { sfx, setMusic, installUnlock } from '../services/sound';
+import { getSettings, updateSettings } from '../services/settings';
+import SettingsPanel from './SettingsPanel';
 import { COACH_STEPS, CoachProgress, coachTarget, coachReady } from './tutorial';
 import {
   MatchLog, startMatch, recordTurn, finishMatch, emptyHumanTurn,
@@ -485,7 +488,8 @@ export default function GameScreen() {
     return s;
   });
   const [watching, setWatching] = useState(false);
-  const [speedIdx, setSpeedIdx] = useState(1);
+  const [speedIdx, setSpeedIdx] = useState(() => Math.min(SPEEDS.length - 1, getSettings().aiSpeed));
+  const [showSettings, setShowSettings] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
@@ -781,6 +785,7 @@ export default function GameScreen() {
         if (readyCastles > 0) {
           setState((prev) => {
             const got = recruit(prev, PLAYER);
+            if (got > 0) sfx('recruit');
             humanRef.current.recruited += got;
             tutRef.current.recruits += got;
             return bump(prev);
@@ -922,6 +927,7 @@ export default function GameScreen() {
       if (cell.owner === PLAYER && cell.units > 0 && !cell.neutral) {
         if (cell.fortStage > 0 && cell.fortStage < 4) return;
         if (actedRef.current.has(cell.id)) return; // 이번 턴엔 이미 움직였다
+        sfx('select');
         setSelected(cell.id);
       }
       return;
@@ -986,7 +992,16 @@ export default function GameScreen() {
         const victim = to.owner;
         const wasNeutral = to.neutral;
         const outcome = performAttack(prev, from, to, rng);
-        setCombat(outcome.result);
+        // 빠른 전투면 결과 창 없이 기록 한 줄로만 (설정)
+        if (!getSettings().quickCombat) setCombat(outcome.result);
+        else
+          pushLog(
+            prev,
+            `⚔️ ${outcome.result.outcome === 'attacker-win' ? '승리' : '패배'} — 생존 ${outcome.result.attackerSurvivors} : ${outcome.result.defenderSurvivors}`
+          );
+        sfx('attack');
+        const won = outcome.result.outcome === 'attacker-win';
+        setTimeout(() => sfx(won ? 'win' : 'lose'), 420);
         humanRef.current.attacks++;
         tutRef.current.attacks++;
         // 진 무리가 달아난다 — 보내줄지 쫓을지 묻는다 (나라의 자비·잔혹)
@@ -1028,6 +1043,7 @@ export default function GameScreen() {
         const guest = isGuestLand(prev, PLAYER, prevOwner);
         const fresh = prevOwner === null || blocOf(prev, prevOwner) !== blocOf(prev, PLAYER);
         moveStack(from, to);
+        sfx('move');
         if (guest && prevOwner !== null) {
           // 조약 상대의 땅 — 빼앗지 않고 손님으로 선다. 상대는 안다.
           enterAsGuest(prev, to, prevOwner);
@@ -1341,6 +1357,7 @@ export default function GameScreen() {
       answer = undefined;
       if (isAsk(step)) {
         pendingRef.current = { gen, idx: i };
+        sfx('alert');
         setDefenseAsk(step.value);
         return false;
       }
@@ -1474,8 +1491,39 @@ export default function GameScreen() {
     while (i >= 0 && list[i] !== lastChronRef.current) i--;
     const fresh = list.slice(i + 1).filter((c) => c.nation === PLAYER || knows(state, PLAYER, c.nation));
     lastChronRef.current = last;
-    if (fresh.length > 0) setChron(fresh[fresh.length - 1]);
+    if (fresh.length > 0) {
+      setChron(fresh[fresh.length - 1]);
+      sfx('chronicle');
+    }
   });
+
+  // ── 소리 ──────────────────────────────────────────────
+  // 브라우저는 첫 누름 전에는 소리를 막는다. 깨울 준비만 하고 배경음을 청해 둔다.
+  useEffect(() => {
+    installUnlock();
+    setMusic(true);
+    return () => setMusic(false);
+  }, []);
+  // 내 차례가 돌아오면 망루의 종
+  useEffect(() => {
+    if (myTurn && !showHelp) sfx('turn');
+  }, [state.turn, myTurn, showHelp]);
+  // 행군 사건·사신이 오면 하프
+  const encHead = encQueueRef.current[0];
+  useEffect(() => {
+    if (encHead) sfx('event');
+  }, [encHead]);
+  const propHead = myTurn ? proposalsFor(state, PLAYER)[0] : undefined;
+  const propKey = propHead ? `${propHead.from}-${propHead.kind}-${propHead.turn}` : '';
+  useEffect(() => {
+    if (propKey) sfx('event');
+  }, [propKey]);
+  // 판의 끝
+  useEffect(() => {
+    const e = endingOf(state, PLAYER);
+    if (!e) return;
+    sfx(e === 'won' ? 'victory' : e === 'survived' ? 'chronicle' : 'defeat');
+  }, [endKey]);
 
   // ── 길잡이 ──────────────────────────────────────────────
   const coachNow: CoachProgress = {
@@ -1866,7 +1914,10 @@ export default function GameScreen() {
           <TouchableOpacity
             key={s.label}
             style={[styles.chip, i === speedIdx ? styles.chipOn : styles.chipOff]}
-            onPress={() => setSpeedIdx(i)}
+            onPress={() => {
+              setSpeedIdx(i);
+              updateSettings({ aiSpeed: i });
+            }}
           >
             <Text style={styles.chipText}>{s.label}</Text>
           </TouchableOpacity>
@@ -2061,6 +2112,7 @@ export default function GameScreen() {
             onPress={() =>
               setState((prev) => {
                 const got = recruit(prev, PLAYER);
+                if (got > 0) sfx('recruit');
                 humanRef.current.recruited += got;
                 tutRef.current.recruits += got;
                 return bump(prev);
@@ -2181,6 +2233,9 @@ export default function GameScreen() {
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowHelp(true)}>
             <Text style={styles.toggle}>도움말</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowSettings(true)}>
+            <Text style={styles.toggle}>⚙ 설정</Text>
+          </TouchableOpacity>
           {can3D && (
             <TouchableOpacity style={{ flex: 1 }} onPress={() => setUse3D((v) => !v)}>
               <Text style={styles.toggle}>{use3D ? '2D 지도' : '중세 3D'}</Text>
@@ -2211,6 +2266,12 @@ export default function GameScreen() {
         판의 끝. 연대기를 닫고 지도를 보는 동안에는 작은 띠만 남기고, 누르면 다시 연다.
         내 나라가 무너졌으면 판이 끝나지 않았어도 한 번 띄운다 — 지켜볼지 새로 할지.
       */}
+      <SettingsPanel
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSpeed={(i) => setSpeedIdx(i)}
+        speedLabels={SPEEDS.map((x) => x.label)}
+      />
       <EndScreen
         state={state}
         playerId={PLAYER}
