@@ -1,0 +1,175 @@
+{
+  "title": "돌의 회랑 · Cloister of Stone",
+  "duration_seconds": 137.14285714285714,
+  "frames": 6048000,
+  "sample_rate": 44100,
+  "seed": 290926,
+  "sso_commit": "32bbdb169aef636b8216029a2e056424ba7c2abb",
+  "peak_dbfs": -1.8000000715255737,
+  "rms_dbfs": -18.227364108384705,
+  "minimum_10ms_rms_dbfs": -25.883684158325195,
+  "seam_step": [
+    0.00039469078183174133,
+    0.0051997750997543335
+  ],
+  "internal_step_p99": [
+    0.06512598693370819,
+    0.04328293725848198
+  ],
+  "sections_rms_dbfs": [
+    -19.438034057617188,
+    -18.39763641357422,
+    -17.6646785736084,
+    -18.63394546508789,
+    -17.384708404541016,
+    -16.942562103271484,
+    -18.50948143005371,
+    -19.551013946533203
+  ],
+  "instruments": {
+    "violin1": {
+      "notes": 131,
+      "samples": 6,
+      "gain": 0.513,
+      "rms": 0.05543
+    },
+    "violin2": {
+      "notes": 49,
+      "samples": 3,
+      "gain": 0.441,
+      "rms": 0.03598
+    },
+    "viola": {
+      "notes": 40,
+      "samples": 3,
+      "gain": 0.335,
+      "rms": 0.03363
+    },
+    "cello": {
+      "notes": 34,
+      "samples": 3,
+      "gain": 0.314,
+      "rms": 0.03737
+    },
+    "bass": {
+      "notes": 47,
+      "samples": 4,
+      "gain": 0.215,
+      "rms": 0.03005
+    },
+    "harp": {
+      "notes": 264,
+      "samples": 10,
+      "gain": 0.35,
+      "rms": 0.02757
+    },
+    "piccolo": {
+      "notes": 10,
+      "samples": 4,
+      "gain": 0.123,
+      "rms": 0.00247
+    },
+    "flute": {
+      "notes": 49,
+      "samples": 5,
+      "gain": 0.234,
+      "rms": 0.01339
+    },
+    "oboe": {
+      "notes": 25,
+      "samples": 5,
+      "gain": 0.224,
+      "rms": 0.00928
+    },
+    "english_horn": {
+      "notes": 38,
+      "samples": 5,
+      "gain": 0.34,
+      "rms": 0.01133
+    },
+    "clarinet": {
+      "notes": 28,
+      "samples": 5,
+      "gain": 0.163,
+      "rms": 0.0091
+    },
+    "bass_clarinet": {
+      "notes": 12,
+      "samples": 2,
+      "gain": 0.233,
+      "rms": 0.00618
+    },
+    "bassoon": {
+      "notes": 24,
+      "samples": 2,
+      "gain": 0.157,
+      "rms": 0.01094
+    },
+    "contrabassoon": {
+      "notes": 8,
+      "samples": 4,
+      "gain": 0.144,
+      "rms": 0.00413
+    },
+    "horn": {
+      "notes": 36,
+      "samples": 6,
+      "gain": 0.149,
+      "rms": 0.01644
+    },
+    "trumpet": {
+      "notes": 8,
+      "samples": 2,
+      "gain": 0.274,
+      "rms": 0.0044
+    },
+    "trombone": {
+      "notes": 8,
+      "samples": 2,
+      "gain": 0.187,
+      "rms": 0.00494
+    },
+    "bass_trombone": {
+      "notes": 8,
+      "samples": 1,
+      "gain": 0.171,
+      "rms": 0.00442
+    },
+    "tuba": {
+      "notes": 4,
+      "samples": 3,
+      "gain": 0.13,
+      "rms": 0.00279
+    },
+    "timpani": {
+      "notes": 12,
+      "samples": 3,
+      "gain": 0.507,
+      "rms": 0.00891
+    },
+    "drums": {
+      "notes": 13,
+      "samples": 3,
+      "gain": 0.389,
+      "rms": 0.00379
+    },
+    "cymbals": {
+      "notes": 3,
+      "samples": 2,
+      "gain": 0.343,
+      "rms": 0.00181
+    },
+    "triangle": {
+      "notes": 3,
+      "samples": 2,
+      "gain": 0.45,
+      "rms": 0.00201
+    },
+    "xylophone": {
+      "notes": 9,
+      "samples": 3,
+      "gain": 0.238,
+      "rms": 0.00148
+    }
+  }
+}

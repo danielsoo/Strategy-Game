@@ -1,5 +1,42 @@
 # 배경음 — 어떻게 만들었고, 무엇을 버렸나
 
+## 현재 작업 기준과 최신 시안 (2026-09-29)
+
+**음악 확정:** `memory-of-the-kingdom-ensemble.mp3`를 선택받아 `src/services/sound.ts`의
+실제 배경음으로 연결했다. 로딩·메뉴·지도 작업에서도 같은 곡을 사용한다.
+
+**사용자가 확정한 멜로디나 타이밍은 없다.** 더 나은 곡을 위해 음·리듬·화성·형식을
+자유롭게 수정해도 된다는 요청이다. 이전의 “선율 유지”는 고정 요구로 해석하지 않는다.
+최신 시안은 하프·바이올린 독주를 추가하고 마지막에 전 편성이 돌아오는
+`public/music/memory-of-the-kingdom-ensemble.*`. [변경·검증](memory-of-the-kingdom-ensemble.md).
+플루트·첼로·호른 중심 시안은 `public/music/memory-of-the-kingdom-voices.*`로 보존한다.
+직전 북·금관 및 선율 시안은 `public/music/memory-of-the-kingdom-journey.*`로 보존한다.
+
+## 북과 금관 보강 (2026-09-29)
+
+오디세이 참고는 **놀란 감독 영화**로 정정. 어벤져스·갓 오브 워·왕좌의 게임 제작진 자료도
+참고해 큰북·작은북·팀파니 롤·징과 금관을 강화했다. 좋아한 멜로디는 유지한다.
+`public/music/memory-of-the-kingdom-epic.*` — [변경·참고·검증](memory-of-the-kingdom-epic.md).
+
+## OST 흐름을 참고한 편곡 (2026-09-29)
+
+사용자가 좋아한 〈왕국의 기억〉의 주제는 유지하고, 나니아·오디세이 제작진 인터뷰의
+주제 발전과 여백에 관한 설명을 참고해 3분 13초의 서사 편곡을 추가했다.
+`public/music/memory-of-the-kingdom-cinematic.*`.
+[참고 자료·변경·검증](memory-of-the-kingdom-cinematic.md).
+
+## 멜로디 재작곡 (2026-09-29)
+
+**왕국의 기억** — “웅장하고 애틋한 왕국의 주제”를 선택받아 16마디 선율과 재현부를
+새로 썼다. 약 37초 주제 미리듣기와 2분 28초 전체 곡을 `public/music/memory-of-the-kingdom.*`에
+추가했다. [음악 변경·검증·재생성 기록](memory-of-the-kingdom.md).
+
+## 별도 신곡 (2026-09-29)
+
+**돌의 회랑** — 중세풍 D 도리안, 6/8, 2분 17초. 기존 곡과 재생 설정은 그대로 두고
+`public/music/cloister-of-stone.*`로 추가했다. 악기별 SSO 합주·독주 녹음 샘플을 사용하며,
+전체 악단의 실제 공연 녹음은 아니다. [편성·청취 파일·재생성 기록](cloister-of-stone.md).
+
 ## 지금 (2026-09-29)
 
 `public/music/theme.mp3` — 2분(128kbps, 1.9MB) 관현악 한 곡을 이음매 없이 되풀이한다.

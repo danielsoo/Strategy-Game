@@ -12,6 +12,8 @@ import {
   Platform,
 } from 'react-native';
 import Board3D from './Board3D';
+import RealmMenu from './RealmMenu';
+import { realm } from './realmTheme';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
 import {
   readSave, writeSave, clearSave, tutorialSeen, markTutorialSeen,
@@ -1759,7 +1761,7 @@ export default function GameScreen() {
           ? '#332e22'
           : '#1e1e1e';
     }
-    if (movable.has(cell.id) && !isSel) fill = '#fbbf24';
+    if (movable.has(cell.id) && !isSel) fill = '#d9bd80';
 
     let icon = '';
     if (shownCastle) icon = '🏴';
@@ -1790,17 +1792,17 @@ export default function GameScreen() {
             fillOpacity={seen ? 1 : 0.85}
             stroke={
               cell.id === coachCell
-                ? '#f472b6'
+                ? '#d2ba80'
                 : isSel
-                ? '#fff'
+                ? '#f0e8d5'
                 : shownCastle
-                ? '#fbbf24'
+                ? '#d9bd80'
                 : shownFort === 4
                 ? '#a78bfa'
                 : isActive
                 ? '#fde68a'
                 : seen && cell.hasRoad
-                ? '#a16207'
+                ? '#786440'
                 : 'rgba(255,255,255,0.14)'
             }
             strokeWidth={
@@ -2455,7 +2457,7 @@ export default function GameScreen() {
               setSelected(null);
             };
             return (
-              <View style={styles.modal}>
+              <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
                 <Text style={styles.chronEyebrow}>조 우</Text>
                 <Text style={styles.modalTitle}>
                   {merc ? '⚔️' : '🦹'} {what} 무리 {band.units}명
@@ -2495,7 +2497,7 @@ export default function GameScreen() {
                 >
                   <Text style={styles.btnText}>그냥 둔다</Text>
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
             );
           })()}
         </View>
@@ -2510,7 +2512,7 @@ export default function GameScreen() {
               <Text
                 style={[
                   styles.chronTitle,
-                  { color: state.nations[chron.nation]?.color ?? '#fff' },
+                  { color: state.nations[chron.nation]?.color ?? '#f0e8d5' },
                 ]}
               >
                 {state.nations[chron.nation]?.name} — {CHARACTER_NAME[chron.to]}
@@ -2604,20 +2606,17 @@ export default function GameScreen() {
       />
 
       {/* 본진 함락 — 병합할까 속국으로 둘까 */}
-      <Modal visible={showHelp} transparent animationType="fade">
-        <View style={styles.overlay}>
+      <Modal visible={showHelp && !showSettings} animationType="fade" onRequestClose={() => { if (inMatch) setShowHelp(false); }}>
+        <RealmMenu inMatch={inMatch} onSettings={() => setShowSettings(true)}>
           {/*
             폰을 눕히면 창 높이가 390 이다. 도움말(380)만으로 꽉 차서 이어하기·시작 단추가
             화면 밖에 있었고 누를 방법이 없었다. 창 전체를 스크롤되게 하고, 도움말 칸은
             남는 높이만큼만 쓴다.
           */}
-          <ScrollView
-            style={[styles.modal, { maxHeight: winH * 0.94, flexGrow: 0 }]}
-            contentContainerStyle={{ flexGrow: 0 }}
-          >
+          <View>
             {/* 두는 중에 열면 '메뉴' 다 — 규칙은 접어 두고 계속하기·새 판·이름이 먼저 보이게 */}
-            <Text style={styles.modalTitle}>{inMatch ? '메뉴' : '어떻게 하는 게임인가'}</Text>
-            {inMatch && !rulesOpen ? (
+            <Text style={styles.modalTitle}>{inMatch ? '원정을 이어가세요' : '당신의 왕국을 세우세요'}</Text>
+            {!rulesOpen ? (
               <TouchableOpacity onPress={() => setRulesOpen(true)}>
                 <Text style={[styles.toggle, { textAlign: 'left' }]}>📖 규칙 보기</Text>
               </TouchableOpacity>
@@ -2635,7 +2634,7 @@ export default function GameScreen() {
               이름을 받는다. 그게 곧 내 나라 이름이 되고, 남는 기록에도 실린다.
               가족들이 각자 두고 기록을 보내주면 그게 누구 판인지 알아야 한다.
             */}
-            <Text style={[styles.helpTitle, { marginTop: 12 }]}>이름</Text>
+            <Text style={[styles.helpTitle, { marginTop: 12 }]}>왕국의 이름</Text>
             <TextInput
               value={playerName}
               onChangeText={(t) => {
@@ -2644,7 +2643,7 @@ export default function GameScreen() {
                 if (t.trim()) setNameAsk(false);
               }}
               placeholder="당신"
-              placeholderTextColor="#6b7280"
+              placeholderTextColor="#909a87"
               maxLength={12}
               style={styles.nameInput}
             />
@@ -2654,7 +2653,7 @@ export default function GameScreen() {
               </Text>
             ) : (
               <Text style={styles.hint}>
-                이 판의 기록이 남습니다 — 매 턴 나라별 형세와 당신이 한 수가 함께 적힙니다.
+                이 이름으로 당신의 연대기가 기록됩니다.
               </Text>
             )}
 
@@ -2717,7 +2716,7 @@ export default function GameScreen() {
               };
               return (
                 <>
-                  <Text style={[styles.helpTitle, { marginTop: 14 }]}>새 판</Text>
+                  <Text style={[styles.helpTitle, { marginTop: 14 }]}>원정 준비</Text>
                   <View style={[styles.row, { marginTop: 4 }]}>
                     {MODES.map((m, i) => (
                       <TouchableOpacity
@@ -2781,21 +2780,21 @@ export default function GameScreen() {
                       style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
                       onPress={startNew}
                     >
-                      <Text style={styles.btnText}>{resumable ? '새로 시작' : '시작'}</Text>
+                      <Text style={styles.btnText}>{resumable ? '새로운 원정 시작' : '왕국의 문을 열다'}</Text>
                     </TouchableOpacity>
                   )}
                 </>
               );
             })()}
-          </ScrollView>
-        </View>
+          </View>
+        </RealmMenu>
       </Modal>
 
       {/* 내 부대가 공격받는 중 — 맞설까, 물러날까, 항복할까 */}
       <Modal visible={!!defenseAsk} transparent animationType="fade">
         <View style={styles.overlay}>
           {defenseAsk && (
-            <View style={styles.modal}>
+            <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
               <Text style={styles.modalTitle}>⚔️ 공격받는 중</Text>
               <Text style={styles.hint}>
                 적 {defenseAsk.attackerUnits}명이 내 {defenseAsk.defenderUnits}명을 친다 · 전력비{' '}
@@ -2840,14 +2839,14 @@ export default function GameScreen() {
                   </Text>
                 </>
               )}
-            </View>
+            </ScrollView>
           )}
         </View>
       </Modal>
 
       <Modal visible={!!conquest} transparent animationType="fade">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
+          <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
             {conquest && (
               <>
                 <Text style={styles.modalTitle}>
@@ -2901,13 +2900,13 @@ export default function GameScreen() {
                 </Text>
               </>
             )}
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
       <Modal visible={!!merchantPick} transparent animationType="slide">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
+          <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
             <Text style={styles.modalTitle}>무역 목적지</Text>
             <ScrollView style={{ maxHeight: 340 }}>
               {merchantPick &&
@@ -2948,7 +2947,7 @@ export default function GameScreen() {
             >
               <Text style={styles.btnText}>닫기</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -2983,7 +2982,7 @@ function CombatModal({
   return (
     <Modal visible transparent animationType="fade">
       <View style={styles.overlay}>
-        <View style={styles.modal}>
+        <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
           <Text style={styles.modalTitle}>⚔️ {headline}</Text>
           {result.attackerResolvePP > 0 && (
             <Text style={styles.resolve}>
@@ -3019,25 +3018,25 @@ function CombatModal({
           <TouchableOpacity style={[styles.btn, styles.endBtn, styles.soloBtn]} onPress={onClose}>
             <Text style={styles.btnText}>확인</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#141414' },
-  header: { paddingTop: 40, paddingHorizontal: 14, paddingBottom: 6, backgroundColor: '#1f1f1f' },
+  container: { flex: 1, backgroundColor: '#111a19' },
+  header: { borderBottomWidth:1,borderBottomColor:realm.border,paddingTop: Platform.OS === 'web' ? 16 : 40, paddingHorizontal: 14, paddingBottom: 6, backgroundColor: '#1c2825' },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  title: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
+  title: { color: '#f0e8d5', fontSize: 17, fontWeight: 'bold' },
   turnChip: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999 },
-  turnChipText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
-  gold: { color: '#fbbf24', fontSize: 14, fontWeight: 'bold', marginTop: 3 },
-  plus: { color: '#34d399' },
+  turnChipText: { color: '#f0e8d5', fontSize: 12, fontWeight: 'bold' },
+  gold: { color: '#d9bd80', fontSize: 14, fontWeight: 'bold', marginTop: 3 },
+  plus: { color: '#96c397' },
   minus: { color: '#f87171' },
-  breakdown: { color: '#cbd5e1', fontSize: 11, marginTop: 2 },
-  breakdownDim: { color: '#6b7280', fontSize: 10 },
-  arrears: { color: '#fbbf24', fontSize: 11, marginTop: 3, fontWeight: 'bold' },
+  breakdown: { color: '#c8cdbd', fontSize: 11, marginTop: 2 },
+  breakdownDim: { color: '#909a87', fontSize: 10 },
+  arrears: { color: '#d9bd80', fontSize: 11, marginTop: 3, fontWeight: 'bold' },
 
   watchBar: {
     flexDirection: 'row',
@@ -3047,33 +3046,34 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6 },
-  chipOn: { backgroundColor: '#3b82f6' },
-  chipOff: { backgroundColor: '#374151' },
-  chipText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  chipOn: { backgroundColor: '#596d52' },
+  chipOff: { backgroundColor: '#303e35' },
+  chipText: { color: '#f0e8d5', fontSize: 12, fontWeight: 'bold' },
 
-  table: { marginHorizontal: 12, backgroundColor: '#1a1a1a', borderRadius: 8, paddingVertical: 4 },
+  table: { marginHorizontal: 12, backgroundColor: '#17211e', borderRadius: 8, paddingVertical: 4 },
   trHead: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 3 },
   tr: { flexDirection: 'row', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
   trActive: { backgroundColor: 'rgba(251,191,36,0.13)' },
-  th: { flex: 1, color: '#6b7280', fontSize: 10, textAlign: 'right' },
-  td: { flex: 1, color: '#e5e7eb', fontSize: 11, textAlign: 'right' },
+  th: { flex: 1, color: '#909a87', fontSize: 10, textAlign: 'right' },
+  td: { flex: 1, color: '#eee5d1', fontSize: 11, textAlign: 'right' },
   colName: { flex: 2.2, textAlign: 'left' },
   nameCell: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   dot: { width: 8, height: 8, borderRadius: 4 },
-  dead: { color: '#6b7280', textDecorationLine: 'line-through' },
-  influence: { color: '#fbbf24', fontWeight: 'bold' },
+  dead: { color: '#909a87', textDecorationLine: 'line-through' },
+  influence: { color: '#d9bd80', fontWeight: 'bold' },
 
   // minHeight 0 이 없으면 flex 항목이 자기 내용보다 작아지지 않는다. 판이
   // 남은 공간을 먹고 아래 버튼을 화면 밖으로 밀어낸다.
   // 넓은 화면: 왼쪽 정보 칸을 비워두고 나머지를 판이 차지한다
   sizeBtn: {
     flex: 1,
-    paddingVertical: 7,
-    borderRadius: 6,
+    paddingVertical: 12,
+    minHeight:44,
+    borderRadius: 3,
     alignItems: 'center',
-    backgroundColor: '#475569',
+    backgroundColor: '#425044',
   },
-  sizeText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  sizeText: { color: '#f0e8d5', fontSize: 12, fontWeight: 'bold' },
   gridWide: { position: 'absolute', top: 8, right: 8, bottom: 8, marginTop: 0 },
   gridWrap: {
     flex: 1,
@@ -3093,7 +3093,7 @@ const styles = StyleSheet.create({
   // 본진·요새는 한눈에 들어와야 한다. 구석의 11px 그림으로는 안 보인다.
   hubIcon: { position: 'absolute', top: -1, fontSize: 17 },
   merchant: { position: 'absolute', bottom: 3, left: 3, fontSize: 11 },
-  units: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  units: { color: '#f0e8d5', fontSize: 13, fontWeight: 'bold' },
   /** 이번 턴에 이미 움직인 부대 */
   spent: { color: 'rgba(255,255,255,0.4)' },
   /** 기억 속의 정보 — 지금도 그런지는 모른다 */
@@ -3104,24 +3104,24 @@ const styles = StyleSheet.create({
 
   // 늘 세 줄 자리를 잡아둔다. 기록이 늘 때마다 아래가 밀리면 안 된다.
   feed: { paddingHorizontal: 14, paddingVertical: 2, height: 51 },
-  feedLine: { color: '#9ca3af', fontSize: 11, lineHeight: 15 },
+  feedLine: { color: '#b0b4a3', fontSize: 11, lineHeight: 15 },
 
   panel: {
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#1c2825',
     marginHorizontal: 12,
     borderRadius: 8,
     padding: 10,
     overflow: 'hidden',
   },
-  panelTitle: { color: '#e5e7eb', fontSize: 12, marginBottom: 6 },
-  panelNote: { color: '#9ca3af', fontSize: 11, marginBottom: 6 },
-  hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic' },
+  panelTitle: { color: '#eee5d1', fontSize: 12, marginBottom: 6 },
+  panelNote: { color: '#b0b4a3', fontSize: 11, marginBottom: 6 },
+  hint: { color: '#b0b4a3', fontSize: 11, fontStyle: 'italic' },
   nameInput: {
-    backgroundColor: '#141414',
+    backgroundColor: '#111a19',
     borderWidth: 1,
-    borderColor: '#3f3f46',
+    borderColor: '#4d5547',
     borderRadius: 8,
-    color: '#fff',
+    color: '#f0e8d5',
     fontSize: 14,
     paddingVertical: 9,
     paddingHorizontal: 12,
@@ -3139,11 +3139,11 @@ const styles = StyleSheet.create({
   turnBadgeText: { color: '#bae6fd', fontSize: 10, fontWeight: 'bold' },
   pathNote: { color: '#7dd3fc', fontSize: 11, marginBottom: 6 },
 
-  footer: { backgroundColor: '#1f1f1f', padding: 10, gap: 6 },
+  footer: { backgroundColor: realm.panel,borderTopWidth:1,borderTopColor:realm.border, padding: 10, gap: 6 },
   footerWide: { position: 'absolute', left: 0, bottom: 0 },
   row: { flexDirection: 'row', gap: 6 },
-  btn: { flex: 1, paddingVertical: 11, borderRadius: 8, alignItems: 'center' },
-  btnDim: { opacity: 0.4 },
+  btn: { flex: 1,minHeight:44, paddingVertical: 11, borderRadius: 3,borderWidth:1,borderColor:'rgba(206,180,123,0.25)', alignItems: 'center',justifyContent:'center' },
+  btnDim: { opacity: 0.65 },
   /**
    * 세로로 혼자 놓인 단추. btn 의 flex:1 은 가로줄에서 칸을 나누려는 것인데, 세로 창
    * 안에서는 높이를 0 부터 나눠 가져 단추가 납작해지고 글자가 아래로 삐져나왔다
@@ -3151,10 +3151,10 @@ const styles = StyleSheet.create({
    * 기준 크기 0 이라 같은 꼴이 된다. 기준을 내용 크기로 둔다.
    */
   soloBtn: { flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
-  endBtn: { backgroundColor: '#3b82f6' },
-  tutorialBtn: { backgroundColor: '#b45309' },
-  diploBtn: { backgroundColor: '#7c3aed' },
+  btnText: { color: '#f0e8d5', fontWeight: 'bold', fontSize: 13 },
+  endBtn: { backgroundColor: '#596d52' },
+  tutorialBtn: { backgroundColor: '#80623c' },
+  diploBtn: { backgroundColor: '#605b4b' },
   /** 스포트라이트 밖 */
   dim: { opacity: 0.22 },
   // 그림자는 카드(Coach)에 — 감싸는 칸에 두면 웹에서 카드 뒤로 검은 네모가 떴다
@@ -3163,20 +3163,20 @@ const styles = StyleSheet.create({
   /** 길잡이가 '이걸 누르세요' 하고 짚는 단추 */
   coachGlow: {
     borderWidth: 3,
-    borderColor: '#f472b6',
-    shadowColor: '#f472b6',
+    borderColor: '#d2ba80',
+    shadowColor: '#d2ba80',
     shadowOpacity: 0.9,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 0 },
   },
-  resetBtn: { backgroundColor: '#ef4444' },
-  modeBtn: { backgroundColor: '#475569' },
-  vassalBtn: { backgroundColor: '#7c3aed' },
-  recruitBtn: { backgroundColor: '#059669' },
-  fortBtn: { backgroundColor: '#a16207' },
-  toggle: { color: '#6b7280', fontSize: 11, textAlign: 'center' },
+  resetBtn: { backgroundColor: '#a34d43' },
+  modeBtn: { backgroundColor: '#425044' },
+  vassalBtn: { backgroundColor: '#605b4b' },
+  recruitBtn: { backgroundColor: '#4f725c' },
+  fortBtn: { backgroundColor: '#786440' },
+  toggle: { color: '#909a87', fontSize: 11, textAlign: 'center' },
 
-  repLine: { color: '#d1d5db', fontSize: 11, marginTop: 2 },
+  repLine: { color: '#d8d5c5', fontSize: 11, marginTop: 2 },
   repJust: { color: '#93c5fd', fontWeight: 'bold' },
   repFear: { color: '#fca5a5', fontWeight: 'bold' },
   chronOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.82)', justifyContent: 'center', alignItems: 'center' },
@@ -3184,13 +3184,13 @@ const styles = StyleSheet.create({
     width: '86%',
     maxWidth: 560,
     backgroundColor: '#161311',
-    borderColor: '#a16207',
+    borderColor: '#786440',
     borderWidth: 1,
     borderRadius: 10,
     padding: 22,
     alignItems: 'center',
   },
-  chronEyebrow: { color: '#a16207', fontSize: 11, letterSpacing: 4, marginBottom: 8 },
+  chronEyebrow: { color: '#786440', fontSize: 11, letterSpacing: 4, marginBottom: 8 },
   chronTitle: { fontSize: 22, fontWeight: 'bold', marginBottom: 12, textAlign: 'center' },
   chronLine: { color: '#f5f0e6', fontSize: 16, lineHeight: 26, textAlign: 'center', fontStyle: 'italic' },
   banner: {
@@ -3213,20 +3213,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(124,58,237,0.96)',
+    backgroundColor: 'rgba(96,91,75,0.96)',
     paddingVertical: 9,
     paddingHorizontal: 14,
     borderRadius: 999,
   },
-  placingText: { color: '#fff', fontSize: 13, fontWeight: 'bold' },
+  placingText: { color: '#f0e8d5', fontSize: 13, fontWeight: 'bold' },
   placingCancel: {
     backgroundColor: 'rgba(0,0,0,0.35)',
     paddingVertical: 5,
     paddingHorizontal: 12,
     borderRadius: 999,
   },
-  bannerText: { color: '#fbbf24', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
-  bannerSub: { color: '#9ca3af', fontSize: 13, textAlign: 'center', marginTop: 4 },
+  bannerText: { color: '#d9bd80', fontSize: 24, fontWeight: 'bold', textAlign: 'center' },
+  bannerSub: { color: '#b0b4a3', fontSize: 13, textAlign: 'center', marginTop: 4 },
 
   overlay: {
     flex: 1,
@@ -3234,17 +3234,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modal: { backgroundColor: '#1f1f1f', borderRadius: 12, padding: 18, width: '88%' },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 10 },
+  modal: { backgroundColor: realm.panel, borderRadius: 4, borderWidth:1,borderColor:realm.border, padding: 18, width: '92%',maxWidth:640,maxHeight:'92%',flexGrow:0 },
+  modalTitle: { color: realm.text,fontFamily:realm.serif,fontSize: 24, marginBottom: 14 },
   helpItem: { marginBottom: 12 },
-  helpTitle: { color: '#fbbf24', fontSize: 13, fontWeight: 'bold', marginBottom: 3 },
-  helpBody: { color: '#d1d5db', fontSize: 12, lineHeight: 18 },
-  resolve: { color: '#fbbf24', fontSize: 12, marginBottom: 8 },
+  helpTitle: { color: '#d9bd80', fontSize: 13, fontWeight: 'bold', marginBottom: 3 },
+  helpBody: { color: '#d8d5c5', fontSize: 12, lineHeight: 18 },
+  resolve: { color: '#d9bd80', fontSize: 12, marginBottom: 8 },
   roundRow: { flexDirection: 'row', marginBottom: 6 },
-  roundNo: { color: '#fbbf24', fontSize: 12, width: 34, fontWeight: 'bold' },
-  roundBody: { color: '#d1d5db', fontSize: 12, flex: 1 },
-  summary: { color: '#9ca3af', fontSize: 12, marginVertical: 10 },
-  destRow: { backgroundColor: '#141414', borderRadius: 8, padding: 12, marginBottom: 8 },
-  destName: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  destInfo: { color: '#9ca3af', fontSize: 12, marginTop: 4 },
+  roundNo: { color: '#d9bd80', fontSize: 12, width: 34, fontWeight: 'bold' },
+  roundBody: { color: '#d8d5c5', fontSize: 12, flex: 1 },
+  summary: { color: '#b0b4a3', fontSize: 12, marginVertical: 10 },
+  destRow: { backgroundColor: '#111a19', borderRadius: 8, padding: 12, marginBottom: 8 },
+  destName: { color: '#f0e8d5', fontSize: 14, fontWeight: 'bold' },
+  destInfo: { color: '#b0b4a3', fontSize: 12, marginTop: 4 },
 });

@@ -1,14 +1,5 @@
-// 소리 — 파일 없이 브라우저에서 합성한다
-//
-// 왜 합성인가. 소리 파일을 받을 곳이 없었고(클라우드에서 바깥 자료를 못 받는다),
-// 파일을 넣으면 저작권과 용량을 따져야 한다. Web Audio 로 짧은 음을 빚으면 둘 다
-// 없다. PC 브라우저·폰 브라우저·홈 화면에 설치한 웹 앱 모두 같은 코드로 운다.
-// 웹이 아닌 곳(네이티브 앱)에서는 조용히 아무것도 하지 않는다.
-//
-// 브라우저는 사람이 한 번 누르기 전에는 소리를 못 내게 막는다. 첫 누름에서 깨운다.
-//
-// 배경음은 곡이 아니라 규칙이다 — 낮은 지속음 위에 도리안 음계에서 몇 음씩
-// 드문드문 뜯는다. 매번 조금씩 달라서 한 시간을 틀어놔도 덜 지친다.
+// 효과음은 Web Audio, 배경음은 확정된 관현악 녹음 샘플 편곡을 사용한다.
+// 첫 입력 후 재생하며, 설정의 음량·음소거를 따른다.
 
 import { getSettings, onSettings } from './settings';
 
@@ -245,13 +236,13 @@ export function sfx(name: Sfx): void {
 }
 
 // ── 배경음 ───────────────────────────────────────────
-// 실제 악기를 녹음한 표본으로 미리 구운 관현악 한 곡(public/music/theme.mp3)을 되풀이한다.
+// 실제 악기를 녹음한 표본으로 미리 구운 관현악 한 곡(public/music/memory-of-the-kingdom-ensemble.mp3)을 되풀이한다.
 // 끝의 울림을 처음에 겹쳐 구웠으므로 이음매 없이 돈다. 굽는 법은 docs/music.md.
 //
 // 버린 것: 브라우저에서 사인·톱니파로 빚은 관현악(orchestra.ts) — 사람이 들어보고
 // "기계음 같다, 실제 악기 소리로" 라고 했다. 그 전의 '지속음 + 도리안 몇 음' 도 같은 까닭.
 
-const MUSIC_URL = '/music/theme.mp3';
+const MUSIC_URL = '/music/memory-of-the-kingdom-ensemble.mp3';
 let musicWanted = false;
 let musicBuf: AudioBuffer | null = null;
 let loading = false;
@@ -262,6 +253,7 @@ async function loadMusic(c: AudioContext): Promise<AudioBuffer | null> {
   loading = true;
   try {
     const res = await fetch(MUSIC_URL);
+    if (!res.ok) throw new Error('배경음 파일을 불러오지 못했습니다.');
     musicBuf = await c.decodeAudioData(await res.arrayBuffer());
   } catch {
     musicBuf = null; // 못 받으면 조용히 — 효과음은 그대로 난다

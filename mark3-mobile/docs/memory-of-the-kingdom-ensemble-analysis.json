@@ -1,0 +1,201 @@
+{
+  "title": "왕국의 기억 · 함께 부르는 주제",
+  "duration_seconds": 192.6921768707483,
+  "frames": 8497725,
+  "sample_rate": 44100,
+  "seed": 290932,
+  "sso_commit": "32bbdb169aef636b8216029a2e056424ba7c2abb",
+  "peak_dbfs": -1.8000000715255737,
+  "rms_dbfs": -19.946447384658388,
+  "minimum_10ms_rms_dbfs": -38.62811279296875,
+  "seam_step": [
+    0.00486829224973917,
+    0.003736313432455063
+  ],
+  "internal_step_p99": [
+    0.05204153433442116,
+    0.0376022644340992
+  ],
+  "sections_rms_dbfs": [
+    -25.009889602661133,
+    -21.607561111450195,
+    -21.23929214477539,
+    -24.72150993347168,
+    -21.08870506286621,
+    -19.72064781188965,
+    -18.93146324157715,
+    -17.882991790771484,
+    -17.498310089111328,
+    -18.205482482910156
+  ],
+  "instruments": {
+    "violin1": {
+      "notes": 114,
+      "samples": 7,
+      "gain": 0.519,
+      "rms": 0.04916
+    },
+    "violin2": {
+      "notes": 81,
+      "samples": 4,
+      "gain": 0.489,
+      "rms": 0.02495
+    },
+    "viola": {
+      "notes": 80,
+      "samples": 4,
+      "gain": 0.364,
+      "rms": 0.02317
+    },
+    "cello": {
+      "notes": 110,
+      "samples": 5,
+      "gain": 0.429,
+      "rms": 0.03724
+    },
+    "bass": {
+      "notes": 63,
+      "samples": 4,
+      "gain": 0.229,
+      "rms": 0.0241
+    },
+    "harp": {
+      "notes": 283,
+      "samples": 12,
+      "gain": 0.335,
+      "rms": 0.02245
+    },
+    "piccolo": {
+      "notes": 14,
+      "samples": 4,
+      "gain": 0.182,
+      "rms": 0.00366
+    },
+    "flute": {
+      "notes": 73,
+      "samples": 6,
+      "gain": 0.352,
+      "rms": 0.02252
+    },
+    "oboe": {
+      "notes": 25,
+      "samples": 6,
+      "gain": 0.356,
+      "rms": 0.00897
+    },
+    "english_horn": {
+      "notes": 30,
+      "samples": 4,
+      "gain": 0.537,
+      "rms": 0.02003
+    },
+    "clarinet": {
+      "notes": 18,
+      "samples": 2,
+      "gain": 0.297,
+      "rms": 0.0124
+    },
+    "bass_clarinet": {
+      "notes": 24,
+      "samples": 3,
+      "gain": 0.273,
+      "rms": 0.00842
+    },
+    "bassoon": {
+      "notes": 32,
+      "samples": 2,
+      "gain": 0.202,
+      "rms": 0.0121
+    },
+    "contrabassoon": {
+      "notes": 23,
+      "samples": 4,
+      "gain": 0.154,
+      "rms": 0.00687
+    },
+    "horn": {
+      "notes": 95,
+      "samples": 16,
+      "gain": 0.312,
+      "rms": 0.03451
+    },
+    "trumpet": {
+      "notes": 39,
+      "samples": 6,
+      "gain": 0.455,
+      "rms": 0.00824
+    },
+    "trombone": {
+      "notes": 26,
+      "samples": 3,
+      "gain": 0.299,
+      "rms": 0.01187
+    },
+    "bass_trombone": {
+      "notes": 26,
+      "samples": 2,
+      "gain": 0.28,
+      "rms": 0.01043
+    },
+    "tuba": {
+      "notes": 24,
+      "samples": 4,
+      "gain": 0.191,
+      "rms": 0.0088
+    },
+    "timpani": {
+      "notes": 95,
+      "samples": 17,
+      "gain": 0.526,
+      "rms": 0.02228
+    },
+    "cymbals": {
+      "notes": 10,
+      "samples": 2,
+      "gain": 0.29,
+      "rms": 0.00321
+    },
+    "triangle": {
+      "notes": 3,
+      "samples": 2,
+      "gain": 0.39,
+      "rms": 0.00117
+    },
+    "xylophone": {
+      "notes": 8,
+      "samples": 5,
+      "gain": 0.14,
+      "rms": 0.00057
+    },
+    "bass_drum": {
+      "notes": 108,
+      "samples": 2,
+      "gain": 0.699,
+      "rms": 0.02706
+    },
+    "snare_drum": {
+      "notes": 92,
+      "samples": 5,
+      "gain": 0.708,
+      "rms": 0.0083
+    },
+    "tamtam": {
+      "notes": 7,
+      "samples": 3,
+      "gain": 0.203,
+      "rms": 0.00296
+    },
+    "cello_solo": {
+      "notes": 32,
+      "samples": 5,
+      "gain": 0.861,
+      "rms": 0.03258
+    },
+    "violin_solo": {
+      "notes": 42,
+      "samples": 6,
+      "gain": 0.665,
+      "rms": 0.0272
+    }
+  }
+}

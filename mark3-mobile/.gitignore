@@ -1,0 +1,4 @@
+# 음악 렌더링 전용 샘플·도구·중간 파일 (게임 배포에 넣지 않는다)
+.music-cache/
+tools/music/__pycache__/
+.ui-preview/

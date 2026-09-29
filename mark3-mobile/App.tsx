@@ -1,11 +1,12 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import GameScreen from './src/screens/GameScreen';
+import { RealmLoading } from './src/screens/RealmMenu';
+const GameScreen = lazy(() => import('./src/screens/GameScreen'));
 
 export default function App() {
   return (
     <>
-      <GameScreen />
+      <Suspense fallback={<RealmLoading />}><GameScreen /></Suspense>
       <StatusBar style="light" />
     </>
   );

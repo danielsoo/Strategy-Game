@@ -1,3 +1,4 @@
+import { realm } from './realmTheme';
 // 외교 — 사신을 보내는 곳, 사신을 맞는 곳, 그리고 행군 중에 만나는 일
 //
 // 세 창이 한 파일에 있다. 셋 다 '다른 이가 나에게 무언가를 청하고 나는
@@ -74,7 +75,7 @@ export default function DiplomacyPanel({
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={s.overlay}>
-        <View style={s.modal}>
+        <ScrollView style={s.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
           <Text style={s.title}>외교</Text>
           <Text style={s.hint}>
             휴전은 {truceLength(state)}턴 동안 서로 치지 않는 약속입니다. 동맹은 기한 없이 서로 치지
@@ -197,7 +198,7 @@ export default function DiplomacyPanel({
           <TouchableOpacity style={s.close} onPress={onClose}>
             <Text style={s.btnText}>닫기</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -218,7 +219,7 @@ export function ProposalCard({
   return (
     <Modal visible transparent animationType="fade">
       <View style={s.overlay}>
-        <View style={s.modal}>
+        <ScrollView style={s.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
           <View style={s.head}>
             <View style={[s.swatch, { backgroundColor: from.color }]} />
             <Text style={s.title}>{from.name}의 사신</Text>
@@ -254,7 +255,7 @@ export function ProposalCard({
               <Text style={s.btnText}>{proposal.kind === 'breakOrder' ? '거부한다' : '거절한다'}</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -272,7 +273,7 @@ export function EncounterCard({
   return (
     <Modal visible transparent animationType="fade">
       <View style={s.overlay}>
-        <View style={s.modal}>
+        <ScrollView style={s.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
           <Text style={s.eyebrow}>행군 중에</Text>
           <Text style={s.title}>{encounter.title}</Text>
           {encounter.rumor && <Text style={s.rumor}>{encounter.rumor}</Text>}
@@ -291,7 +292,7 @@ export function EncounterCard({
               고른 것이 평판(정의·공포)이 됩니다. 평판이 다음에 만날 일을 바꿉니다.
             </Text>
           )}
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -304,19 +305,19 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modal: { backgroundColor: '#1f1f1f', borderRadius: 12, padding: 18, width: '90%', maxWidth: 520 },
-  eyebrow: { color: '#fbbf24', fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
-  title: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
-  story: { color: '#e5e7eb', fontSize: 14, lineHeight: 21, marginBottom: 6 },
+  modal: { backgroundColor: realm.panel,borderWidth:1,borderColor:realm.border,borderRadius:4,padding:18,width:'92%',maxHeight:'92%',flexGrow:0, maxWidth: 520 },
+  eyebrow: { color: '#d9bd80', fontSize: 11, fontWeight: 'bold', marginBottom: 2 },
+  title: { fontFamily:realm.serif,color: realm.text, fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
+  story: { color: '#eee5d1', fontSize: 14, lineHeight: 21, marginBottom: 6 },
   rumor: { color: '#d4b483', fontSize: 12, fontStyle: 'italic', marginBottom: 4 },
-  hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic', lineHeight: 16 },
-  note: { color: '#fbbf24', fontSize: 12, marginTop: 8 },
-  meta: { color: '#9ca3af', fontSize: 11, marginTop: 4 },
+  hint: { color: '#b0b4a3', fontSize: 11, fontStyle: 'italic', lineHeight: 16 },
+  note: { color: '#d9bd80', fontSize: 12, marginTop: 8 },
+  meta: { color: '#b0b4a3', fontSize: 11, marginTop: 4 },
 
-  card: { backgroundColor: '#141414', borderRadius: 8, padding: 12, marginBottom: 8 },
+  card: { backgroundColor: '#111a19', borderRadius: 8, padding: 12, marginBottom: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   swatch: { width: 11, height: 11, borderRadius: 6 },
-  name: { color: '#fff', fontSize: 14, fontWeight: 'bold', flex: 1 },
+  name: { color: '#f0e8d5', fontSize: 14, fontWeight: 'bold', flex: 1 },
   rel: { fontSize: 12, fontWeight: 'bold' },
   relWar: { color: '#f87171' },
   relTruce: { color: '#93c5fd' },
@@ -331,19 +332,19 @@ const s = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
-  truce: { backgroundColor: '#2563eb' },
-  ally: { backgroundColor: '#059669' },
-  war: { backgroundColor: '#ef4444' },
-  plain: { backgroundColor: '#475569' },
+  btnText: { color: '#f0e8d5', fontWeight: 'bold', fontSize: 12 },
+  truce: { backgroundColor: '#496956' },
+  ally: { backgroundColor: '#4f725c' },
+  war: { backgroundColor: '#a34d43' },
+  plain: { backgroundColor: '#425044' },
   // flex 를 주지 않는다 — 세로로 쌓이는 창에서 flex:1 은 높이를 0 으로 눌러
   // 글자가 단추 밖으로 삐져나왔다
   close: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#596d52',
     marginTop: 10,
     paddingVertical: 10,
     borderRadius: 8,
     alignItems: 'center',
   },
-  warnLine: { color: '#fbbf24', fontSize: 12, marginTop: 8 },
+  warnLine: { color: '#d9bd80', fontSize: 12, marginTop: 8 },
 });

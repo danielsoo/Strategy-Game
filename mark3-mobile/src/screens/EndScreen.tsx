@@ -1,3 +1,4 @@
+import { realm } from './realmTheme';
 // 판의 끝 — 이 판은 어떤 판이었나
 //
 // 전에는 이기면 '몇 턴 · 승리' 한 줄이 떴다. 한 시간을 둔 판의 끝으로는 너무
@@ -80,7 +81,7 @@ function TerritoryChart({ state, me }: { state: GameState; me: number }) {
   return (
     <View>
       <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
-        <Line x1={0} y1={H - 3} x2={W} y2={H - 3} stroke="#3f3f46" strokeWidth={1} />
+        <Line x1={0} y1={H - 3} x2={W} y2={H - 3} stroke="#4d5547" strokeWidth={1} />
         {state.nations.map((n) => (
           <Polyline
             key={n.id}
@@ -127,7 +128,7 @@ export default function EndScreen({
   return (
     <Modal visible={visible} transparent animationType="fade">
       <View style={s.overlay}>
-        <View style={s.card}>
+        <ScrollView style={s.card} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
           <Text style={s.eyebrow}>연 대 기 · 종 장 · {state.turn}턴</Text>
           <Text style={[s.title, ending === 'won' ? s.gold : ending === 'fallen' ? s.grey : null]}>
             {TITLE[ending]}
@@ -167,7 +168,7 @@ export default function EndScreen({
               <Text style={s.btnText}>{state.winner === null ? '끝까지 지켜본다' : '지도를 본다'}</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -183,17 +184,18 @@ const s = StyleSheet.create({
   },
   card: {
     backgroundColor: '#17140f',
-    borderColor: '#a16207',
+    borderColor: '#786440',
     borderWidth: 1,
     borderRadius: 12,
     padding: 18,
     width: '100%',
     maxWidth: 640,
     maxHeight: '94%',
+    flexGrow:0,
   },
   eyebrow: { color: '#d4b483', fontSize: 11, letterSpacing: 3, textAlign: 'center' },
   title: { color: '#f5f5f4', fontSize: 20, fontWeight: 'bold', textAlign: 'center', marginTop: 8 },
-  gold: { color: '#fbbf24' },
+  gold: { color: '#d9bd80' },
   grey: { color: '#a8a29e' },
   sub: { color: '#a8a29e', fontSize: 12, textAlign: 'center', marginTop: 4 },
   verdict: {
@@ -207,7 +209,7 @@ const s = StyleSheet.create({
   legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4, alignItems: 'center' },
   legendItem: { fontSize: 11 },
   axis: { color: '#78716c', fontSize: 10, marginLeft: 'auto' },
-  section: { color: '#fbbf24', fontSize: 13, fontWeight: 'bold', marginTop: 12, marginBottom: 6 },
+  section: { color: '#d9bd80', fontSize: 13, fontWeight: 'bold', marginTop: 12, marginBottom: 6 },
   list: { flexGrow: 0, flexShrink: 1, minHeight: 80 },
   empty: { color: '#78716c', fontSize: 12, fontStyle: 'italic' },
   row: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 5 },
@@ -217,7 +219,7 @@ const s = StyleSheet.create({
   mine: { color: '#fde68a' },
   buttons: { flexDirection: 'row', gap: 8, marginTop: 14 },
   btn: { flex: 1, paddingVertical: 11, borderRadius: 8, alignItems: 'center' },
-  primary: { backgroundColor: '#b45309' },
+  primary: { backgroundColor: '#80623c' },
   plain: { backgroundColor: '#44403c' },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 13 },
+  btnText: { color: '#f0e8d5', fontWeight: 'bold', fontSize: 13 },
 });

@@ -3,13 +3,13 @@
     "name": "mark3-mobile",
     "slug": "mark3-mobile",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1a1a1a"
+      "backgroundColor": "#111a19"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#1a1a1a"
+        "backgroundColor": "#111a19"
       }
     },
     "web": {
@@ -29,7 +29,7 @@
       "name": "왕국 연대기",
       "shortName": "왕국 연대기",
       "lang": "ko",
-      "themeColor": "#1a1a1a",
+      "themeColor": "#111a19",
       "description": "정의로 다스릴까, 공포로 다스릴까 — 육각 전략 게임"
     }
   }

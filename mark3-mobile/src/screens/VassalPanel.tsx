@@ -1,3 +1,4 @@
+import { realm } from './realmTheme';
 // 종주국의 집무실 — 플레이어가 속국에게 명령을 내리는 곳
 //
 // 여기서 지켜야 할 선이 하나 있다. 화면에 내보낼 수 있는 것은 종주국이
@@ -64,12 +65,12 @@ function orderStatus(state: GameState, o: VassalOrder): { line: string; tone: st
     // 이게 핵심 표시다. '안 했다'가 아니라 '모른다'
     return {
       line: `아직 확인하지 못했다 · 기한 ${left}턴`,
-      tone: '#9ca3af',
+      tone: '#b0b4a3',
     };
   }
   return {
     line: `확인된 이행 ${seen}% · 기한 ${left}턴`,
-    tone: seen >= 50 ? '#4ade80' : '#fbbf24',
+    tone: seen >= 50 ? '#4ade80' : '#d9bd80',
   };
 }
 
@@ -95,7 +96,7 @@ export default function VassalPanel({
   return (
     <Modal visible={visible} transparent animationType="slide">
       <View style={s.overlay}>
-        <View style={s.modal}>
+        <ScrollView style={s.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
           <Text style={s.title}>속국</Text>
           <Text style={s.hint}>
             명령은 내릴 수 있지만 따르게 할 수는 없다. 속국이 정말 움직였는지는
@@ -148,7 +149,7 @@ export default function VassalPanel({
                   const verdict = h.accepted
                     ? { t: '이행했다', c: '#4ade80' }
                     : h.unverified
-                      ? { t: '끝내 확인하지 못했다', c: '#9ca3af' }
+                      ? { t: '끝내 확인하지 못했다', c: '#b0b4a3' }
                       : { t: '이행하지 않았다', c: '#f87171' };
                   return (
                     <Text key={i} style={s.histLine}>
@@ -164,7 +165,7 @@ export default function VassalPanel({
           <TouchableOpacity style={[s.btn, s.close]} onPress={onClose}>
             <Text style={s.btnText}>닫기</Text>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -326,21 +327,21 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modal: { backgroundColor: '#1f1f1f', borderRadius: 12, padding: 18, width: '90%' },
-  title: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
-  hint: { color: '#9ca3af', fontSize: 11, fontStyle: 'italic', lineHeight: 16 },
-  note: { color: '#fbbf24', fontSize: 12, marginTop: 8 },
+  modal: { backgroundColor: realm.panel,borderWidth:1,borderColor:realm.border,borderRadius:4,padding:18,width:'92%',maxHeight:'92%',flexGrow:0,maxWidth:620 },
+  title: { fontFamily:realm.serif,color: realm.text, fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
+  hint: { color: '#b0b4a3', fontSize: 11, fontStyle: 'italic', lineHeight: 16 },
+  note: { color: '#d9bd80', fontSize: 12, marginTop: 8 },
 
-  card: { backgroundColor: '#141414', borderRadius: 8, padding: 12, marginBottom: 8 },
+  card: { backgroundColor: '#111a19', borderRadius: 8, padding: 12, marginBottom: 8 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   swatch: { width: 11, height: 11, borderRadius: 6 },
-  name: { color: '#fff', fontSize: 14, fontWeight: 'bold', flex: 1 },
-  loyal: { color: '#d1d5db', fontSize: 12 },
-  meta: { color: '#9ca3af', fontSize: 11, marginTop: 4 },
+  name: { color: '#f0e8d5', fontSize: 14, fontWeight: 'bold', flex: 1 },
+  loyal: { color: '#d8d5c5', fontSize: 12 },
+  meta: { color: '#b0b4a3', fontSize: 11, marginTop: 4 },
   warn: { color: '#fca5a5', fontSize: 11, marginTop: 4 },
-  orderLine: { color: '#e5e7eb', fontSize: 12, marginTop: 8 },
+  orderLine: { color: '#eee5d1', fontSize: 12, marginTop: 8 },
   status: { fontSize: 12, marginTop: 3, marginBottom: 6 },
-  histLine: { color: '#9ca3af', fontSize: 11, lineHeight: 17 },
+  histLine: { color: '#b0b4a3', fontSize: 11, lineHeight: 17 },
 
   row: { flexDirection: 'row', gap: 6, marginTop: 4 },
   wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8 },
@@ -352,14 +353,14 @@ const s = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
   },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  btnText: { color: '#f0e8d5', fontWeight: 'bold', fontSize: 12 },
   dim: { opacity: 0.4 },
-  order: { backgroundColor: '#475569' },
-  seize: { backgroundColor: '#a16207' },
-  strip: { backgroundColor: '#b45309' },
-  war: { backgroundColor: '#ef4444' },
+  order: { backgroundColor: '#425044' },
+  seize: { backgroundColor: '#786440' },
+  strip: { backgroundColor: '#80623c' },
+  war: { backgroundColor: '#a34d43' },
   // 세로로 혼자 놓인 단추 — btn 의 flex:1 이 높이를 0 부터 나눠 가져 납작해졌다
-  close: { backgroundColor: '#3b82f6', marginTop: 10, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
+  close: { backgroundColor: '#596d52', marginTop: 10, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' },
   treatyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   warnInline: { color: '#fca5a5' },
   forgive: { backgroundColor: '#0d9488' },

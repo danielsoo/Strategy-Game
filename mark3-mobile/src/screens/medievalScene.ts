@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Cell, GameState, isExplored, isVisible, knownCell, NEUTRAL_COLOR, Terrain } from '../engine';
 
 export type V3 = [number, number, number];
-export type Shape = 'box' | 'stone' | 'metal' | 'cone' | 'trunk' | 'rock' | 'flag' | 'shield';
+export type Shape = 'box' | 'stone' | 'tower' | 'roof' | 'metal' | 'cone' | 'trunk' | 'rock' | 'flag' | 'shield';
 export interface Piece { position: V3; scale: V3; color: string; rotation?: V3 }
 export interface Ground extends Piece { cell: Cell; height: number; seen: boolean; known: boolean }
 export interface Mist { position: V3; memory: boolean }
@@ -15,7 +15,7 @@ export interface MedievalScene {
 
 const HEIGHT: Record<Terrain, number> = { plain: 0.24, forest: 0.3, mountain: 0.5, desert: 0.26 };
 const EARTH: Record<Terrain, string> = {
-  plain: '#63734b', forest: '#3d5c43', mountain: '#777e76', desert: '#b8a074',
+  plain: '#62694a', forest: '#344c39', mountain: '#747569', desert: '#ad976e',
 };
 const world = (c: Cell): [number, number] => [Math.sqrt(3) * (c.col + (c.row % 2) * 0.5), c.row * 1.5];
 // Stable decoration: taking a turn must never reshuffle the landscape.
@@ -30,7 +30,7 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
   const minZ = cells.length ? Math.min(...zs) : 0, maxZ = cells.length ? Math.max(...zs) : 0;
   const ox = (minX + maxX) / 2, oz = (minZ + maxZ) / 2;
   const scene: MedievalScene = {
-    ground: [], pieces: { box: [], stone: [], metal: [], cone: [], trunk: [], rock: [], flag: [], shield: [] },
+    ground: [], pieces: { box: [], stone: [], tower: [], roof: [], metal: [], cone: [], trunk: [], rock: [], flag: [], shield: [] },
     mist: [], span: Math.max(maxX - minX, maxZ - minZ) + 2.5,
   };
 
@@ -48,7 +48,7 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
     const heraldry = seen && cell.neutral ? NEUTRAL_COLOR[cell.neutral] : owner !== null ? state.nations[owner].color : '#bbad87';
     const tint = (color: string) => seen ? color : '#' + new THREE.Color(color).lerp(new THREE.Color('#26363d'), 0.68).getHexString();
     scene.ground.push({ cell, position: [x, h / 2, z], scale: [0.975, h, 0.975],
-      color: known ? tint(EARTH[terrain]) : '#202f36', height: h, seen, known });
+      color: known ? tint('#'+new THREE.Color(EARTH[terrain]).multiplyScalar(.91+random(index)*.16).getHexString()) : '#202f36', height: h, seen, known });
     if (!seen) scene.mist.push({ position: [x, known ? h + 0.52 : 0.62, z], memory: known });
     if (!known) return;
 
@@ -99,9 +99,19 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
     }
     if (seen && cell.hasRoad) box(0, 0.014, 0, 0.23, 0.025, 1.65, '#b4a17a');
 
+    // 수확한 밭·낮은 돌담·목골 가옥으로 성 밖에도 시대감을 준다. 미탐험 정보는 쓰지 않는다.
+    if (!occupied && terrain === 'plain' && random(index*43) > .55) {
+      for(let i=0;i<5;i++) box(-.3+i*.13,.02,.08,.065,.025,.65,i%2?'#8f7c50':'#766846');
+      for(let i=0;i<5;i++) add('rock',-.4+i*.18,.06,-.36,.12,.10,.08,'#8b8a75');
+      box(.38,.15,.28,.27,.3,.33,'#c0ae84');
+      add('roof',.38,.4,.28,.28,.25,.32,'#635044',[0,Math.PI/4,0]);
+      box(.38,.16,.455,.035,.28,.015,'#483f2f');
+      box(.38,.21,.455,.27,.028,.015,'#483f2f');
+    }
+
     if (castle || stage > 0) {
       const complete = castle || stage === 4;
-      const stone = '#b5afa0', lightStone = '#cec5ae';
+      const stone = '#8d9080', lightStone = '#b6b39a';
       box(0, 0.055, -0.07, 1.14, 0.11, 1.0, '#77786d');
       const wallH = complete ? 0.42 : 0.12 * stage;
       // Three walls and a split front wall leave a real gateway.
@@ -111,7 +121,7 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
       [-1, 1].forEach(side => box(side * 0.35, wallH / 2 + 0.1, 0.35, 0.3, wallH, 0.13, stone));
       if (complete) {
         for (const tx of [-0.47, 0.47]) for (const tz of [-0.46, 0.34]) {
-          add('stone', tx, 0.42, tz, 0.28, 0.7, 0.28, lightStone);
+          add('tower', tx, 0.42, tz, 0.19, 0.7, 0.19, lightStone);
           for (const bx of [-0.09, 0.09]) for (const bz of [-0.09, 0.09])
             box(tx + bx, 0.82, tz + bz, 0.09, 0.13, 0.09, stone);
           box(tx, 0.53, tz + 0.145, 0.045, 0.16, 0.012, '#323b38');
@@ -122,9 +132,13 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
         }
         box(0, 0.22, 0.36, 0.22, 0.32, 0.07, '#57452f');
         box(0, 0.41, 0.39, 0.29, 0.11, 0.11, lightStone);
+        // 성문의 철창과 부벽. 개별 조명 대신 기존 인스턴스로 그려 모바일 부담을 줄인다.
+        for(const gx of [-.075,0,.075]) box(gx,.24,.405,.018,.28,.015,'#292e29');
+        for(const side of [-1,1]) for(const zz of [-.25,.12])
+          box(side*.55,.25,zz,.10,.4,.14,'#787e6e');
         if (castle) {
           add('stone', 0, 0.58, -0.14, 0.45, 1.05, 0.42, '#c5bca5');
-          add('cone', 0, 1.25, -0.14, 0.4, 0.45, 0.4, '#4d6570', [0, Math.PI / 4, 0]);
+          add('roof', 0, 1.25, -0.14, 0.4, 0.45, 0.4, '#394a48', [0, Math.PI / 4, 0]);
           box(0, 0.79, 0.075, 0.07, 0.2, 0.012, '#384642');
           flag(0, 1.47, -0.14, 0.55);
         } else flag(0.47, 0.9, -0.46, 0.62);

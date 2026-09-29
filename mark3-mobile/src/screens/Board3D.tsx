@@ -1,5 +1,6 @@
 import React, { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
+import { realm } from './realmTheme';
 import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Cell, GameState } from '../engine';
@@ -20,11 +21,13 @@ interface Props {
   onCellPress: (c: Cell) => void;
 }
 const NO_RAYCAST = () => {};
-const SHAPES: Shape[] = ['box', 'stone', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield'];
+const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield'];
 
 function Geometry({ shape }: { shape: Shape | 'hex' }) {
   if (shape === 'hex') return <cylinderGeometry args={[1, 1, 1, 6]} />;
   if (shape === 'cone') return <coneGeometry args={[1, 1, 5]} />;
+  if (shape === 'roof') return <coneGeometry args={[1, 1, 4]} />;
+  if (shape === 'tower') return <cylinderGeometry args={[1, 1.06, 1, 10]} />;
   if (shape === 'trunk') return <cylinderGeometry args={[1, 1, 1, 5]} />;
   if (shape === 'rock' || shape === 'shield') return <icosahedronGeometry args={[1, 0]} />;
   if (shape === 'flag') return <planeGeometry args={[1, 1, 8, 1]} />;
@@ -61,6 +64,16 @@ function Instances({ shape, pieces, onClick }: {
     <meshStandardMaterial roughness={shape === 'metal' ? 0.45 : 0.95} metalness={shape === 'metal' ? 0.55 : 0}
       side={shape === 'flag' ? THREE.DoubleSide : THREE.FrontSide}
       onBeforeCompile={shader => {
+        if (shape === 'hex' || shape === 'stone' || shape === 'tower') {
+          // 월드 좌표의 미세한 명암만 더한다. 텍스처 다운로드나 추가 draw call이 없다.
+          shader.vertexShader='varying vec3 vStone;\n'+shader.vertexShader;
+          shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvStone=(instanceMatrix*vec4(position,1.0)).xyz;');
+          shader.fragmentShader='varying vec3 vStone;\n'+shader.fragmentShader;
+          shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+            float grain=fract(sin(dot(floor(vStone*65.0),vec3(12.9898,78.233,45.164)))*43758.5453);
+            diffuseColor.rgb *= 0.91 + grain*0.15;
+          `);
+        }
         if (shape !== 'flag') return;
         shader.uniforms.uTime = time;
         shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader;
@@ -317,6 +330,8 @@ class SceneBoundary extends React.Component<{ children: React.ReactNode }, { fai
 }
 
 export default function Board3D({ state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
+  const {width:viewportWidth,height:viewportHeight}=useWindowDimensions();
+  const compact=viewportWidth<600 || viewportHeight<500;
   const scene = useMemo(() => buildMedievalScene(state, player, watching), [state, player, watching]);
 
   /**
@@ -416,7 +431,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
   };
   return <View style={styles.container}>
     <SceneBoundary>
-      <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, scene.span * 1.8, scene.span * 1.5], fov: 40, near: 0.1, far: 600 }}
+      <Canvas shadows dpr={[1, compact?1.25:1.5]} camera={{ position: [0, scene.span * 1.8, scene.span * 1.5], fov: 40, near: 0.1, far: 600 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }} style={{ touchAction: 'none' }}
         fallback={<View style={styles.fallback}><Text style={styles.subtitle}>WebGL을 지원하는 브라우저에서 3D 지도를 볼 수 있습니다.</Text></View>}
         onContextMenu={e => e.preventDefault()}
@@ -468,7 +483,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         <color attach="background" args={['#111e24']} />
         <hemisphereLight args={['#dae9e5', '#414333', 1.55]} />
         <directionalLight position={[-scene.span * 0.4, scene.span, scene.span * 0.35]} color="#ffe0a6" intensity={2.8}
-          castShadow shadow-mapSize={[2048, 2048]} shadow-bias={-0.0004} shadow-normalBias={0.04}
+          castShadow shadow-mapSize={compact?[1024,1024]:[2048,2048]} shadow-bias={-0.0004} shadow-normalBias={0.04}
           shadow-camera-left={-scene.span * 0.7} shadow-camera-right={scene.span * 0.7}
           shadow-camera-top={scene.span * 0.7} shadow-camera-bottom={-scene.span * 0.7}
           shadow-camera-near={0.1} shadow-camera-far={scene.span * 3} />
@@ -496,13 +511,13 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         {hintTile && <CoachMarker tile={hintTile} />}
       </Canvas>
     </SceneBoundary>
-    <View pointerEvents="none" style={styles.heading}>
-      <Text style={styles.eyebrow}>C H R O N I C L E   O F   C R O W N S</Text>
-      <Text style={styles.title}>왕국 연대기</Text>
-      <Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>
+    <View pointerEvents="none" style={[styles.heading,compact&&{top:10,left:12}]}>
+      {!compact&&<Text style={styles.eyebrow}>C H R O N I C L E   O F   C R O W N S</Text>}
+      <Text style={[styles.title,compact&&{fontSize:16}]}>왕국 연대기</Text>
+      {!compact&&<Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>}
     </View>
     <View style={styles.bottom} pointerEvents="box-none">
-      <View pointerEvents="none"><Text style={styles.hint}>끌어서 이동 · 오른쪽 단추·Shift 끌기 / 두 손가락 비틀기 회전 · 휠 / 두 손가락 확대</Text></View>
+      {!compact&&<View pointerEvents="none"><Text style={styles.hint}>끌어서 이동 · 오른쪽 단추·Shift 끌기 / 두 손가락 비틀기 회전 · 휠 / 두 손가락 확대</Text></View>}
       <View style={styles.controls}>
         <TouchableOpacity accessibilityLabel="지도 축소" style={styles.control} onPress={() => zoomBy(1.2)}><Text style={styles.controlText}>−</Text></TouchableOpacity>
         <TouchableOpacity accessibilityLabel="지도 확대" style={styles.control} onPress={() => zoomBy(1 / 1.2)}><Text style={styles.controlText}>＋</Text></TouchableOpacity>
@@ -511,7 +526,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
           setTarget([selectedTile.position[0], 0, selectedTile.position[2]]); setZoom(0.28); zoomRef.current = 0.28;
         }}><Text style={styles.smallControl}>선택 확대</Text></TouchableOpacity>}
       </View>
-      <View pointerEvents="none"><Text style={styles.legend}>깃발·테두리 = 소유국   /   금빛 테두리 = 이동 가능</Text></View>
+      {!compact&&<View pointerEvents="none"><Text style={styles.legend}>깃발·테두리 = 소유국   /   금빛 테두리 = 이동 가능</Text></View>}
     </View>
   </View>;
 }
@@ -520,12 +535,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111e24', overflow: 'hidden', borderRadius: 12, borderWidth: 1, borderColor: '#3c4846' },
   heading: { position: 'absolute', top: 20, left: 22, right: 16 },
   eyebrow: { color: '#bda778', fontSize: 9, fontWeight: '600', marginBottom: 5 },
-  title: { color: '#eee3c9', fontSize: 23, fontWeight: '700', letterSpacing: 2 },
+  title: { color: '#eee3c9', fontFamily:realm.serif,fontSize: 23, fontWeight: '700', letterSpacing: 2 },
   subtitle: { color: '#9cadad', fontSize: 11, marginTop: 6 },
   bottom: { position: 'absolute', bottom: 14, left: 8, right: 8, alignItems: 'center', gap: 8 },
   hint: { color: '#b2c0bc', fontSize: 10, textAlign: 'center' },
   controls: { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#6c6955', backgroundColor: 'rgba(18,30,34,0.94)', overflow: 'hidden' },
-  control: { minWidth: 42, minHeight: 40, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
+  control: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   controlText: { color: '#eee0bf', fontSize: 22 },
   smallControl: { color: '#eee0bf', fontSize: 11 },
   legend: { color: '#849895', fontSize: 9, textAlign: 'center' },
