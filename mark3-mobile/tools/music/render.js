@@ -19,7 +19,7 @@ const M = process.env.MUSIC || '/tmp/mark3-music';
   const T = {}, F = {};
   for (const i of ['violin','cello','contrabass','french-horn','harp','trumpet','trombone','flute','clarinet','bassoon','tuba','xylophone'])
     T[i] = fs.readdirSync(`${M}/inst/${i}/package`).filter((f) => f.endsWith('.mp3'));
-  for (const i of ['string_ensemble_1','viola','tremolo_strings','pizzicato_strings','piccolo','oboe','english_horn','clarinet','bassoon','french_horn','timpani','orchestra_kit'])
+  for (const i of ['pizzicato_strings','piccolo','oboe','english_horn','clarinet','timpani','orchestra_kit'])
     F[i] = fs.readdirSync(`${M}/inst/sfs/package/FluidR3_GM/${i}-mp3`).filter((f) => f.endsWith('.mp3'));
   const r = await p.evaluate(async ([T, F]) => await window.renderScore(T, F), [T, F]);
   await b.close();
