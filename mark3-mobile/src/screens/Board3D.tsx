@@ -497,8 +497,8 @@ export default function Board3D({ state, player, watching, selected, movable, pa
       </Canvas>
     </SceneBoundary>
     <View pointerEvents="none" style={styles.heading}>
-      <Text style={styles.eyebrow}>T H E   W A R   T A B L E</Text>
-      <Text style={styles.title}>왕국의 전장</Text>
+      <Text style={styles.eyebrow}>C H R O N I C L E   O F   C R O W N S</Text>
+      <Text style={styles.title}>왕국 연대기</Text>
       <Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>
     </View>
     <View style={styles.bottom} pointerEvents="box-none">
