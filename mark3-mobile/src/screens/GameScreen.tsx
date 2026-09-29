@@ -19,6 +19,7 @@ import {
 import Coach from './Coach';
 import { sfx, setMusic, installUnlock } from '../services/sound';
 import { getSettings, updateSettings } from '../services/settings';
+import { isAdmin } from '../services/admin';
 import SettingsPanel from './SettingsPanel';
 import { COACH_STEPS, CoachProgress, coachTarget, coachReady } from './tutorial';
 import {
@@ -490,6 +491,12 @@ export default function GameScreen() {
   const [watching, setWatching] = useState(false);
   const [speedIdx, setSpeedIdx] = useState(() => Math.min(SPEEDS.length - 1, getSettings().aiSpeed));
   const [showSettings, setShowSettings] = useState(false);
+  /** 관리자 화면(?admin=1) — 관전·판 짜기 줄·리셋·기록 내보내기 (services/admin.ts) */
+  const [admin] = useState(isAdmin);
+  /** 시작 창에서 고르는 새 판 짜기. null 이면 지금 판의 것을 그대로 */
+  const [setup, setSetup] = useState<{ m: number; s: number; d: number } | null>(null);
+  const [confirmNew, setConfirmNew] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
@@ -1919,7 +1926,7 @@ export default function GameScreen() {
 
       {/* 관전 조작 — 길잡이 중에는 숨긴다(처음 하는 사람에게는 소음이고, 자리를 먹어
           부대 정보가 아래 단추에 가려졌다) */}
-      {coach === null && (
+      {coach === null && (admin || !state.nations[PLAYER].alive) && (
       <View style={styles.watchBar}>
         <TouchableOpacity
           style={[styles.chip, watching ? styles.chipOn : styles.chipOff]}
@@ -2159,12 +2166,14 @@ export default function GameScreen() {
           >
             <Text style={styles.btnText}>턴 종료</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, styles.resetBtn, spot === 'button' && styles.dim]}
-            onPress={() => reset()}
-          >
-            <Text style={styles.btnText}>리셋</Text>
-          </TouchableOpacity>
+          {admin && (
+            <TouchableOpacity
+              style={[styles.btn, styles.resetBtn, spot === 'button' && styles.dim]}
+              onPress={() => reset()}
+            >
+              <Text style={styles.btnText}>리셋</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {/* 외교 — 조약이 있으면 몇 개인지 같이 */}
         <View style={[styles.row, spot === 'button' && coachButton !== 'diplo' && styles.dim]}>
@@ -2214,12 +2223,16 @@ export default function GameScreen() {
         */}
         {phone && (
           <TouchableOpacity onPress={() => setMoreOpen((v) => !v)} style={{ paddingVertical: 4 }}>
-            <Text style={styles.toggle}>{moreOpen ? '▴ 접기' : '▾ 더 보기 — 판 짜기 · 설정 · 도움말'}</Text>
+            <Text style={styles.toggle}>
+              {moreOpen ? '▴ 접기' : admin ? '▾ 더 보기 — 판 짜기 · 설정 · 도움말' : '▾ 더 보기 — 메뉴 · 설정'}
+            </Text>
           </TouchableOpacity>
         )}
         {(!phone || moreOpen) && (
         <>
-        {/* 판 짜기를 바꾸면 새 판으로 시작한다 */}
+        {/* 판 짜기를 바꾸면 새 판으로 시작한다 — 관리자 줄. 플레이어는 시작 창에서 고른다 */}
+        {admin && (
+        <>
         <View style={styles.row}>
           {MODES.map((m, i) => (
             <TouchableOpacity
@@ -2257,12 +2270,14 @@ export default function GameScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        </>
+        )}
         <View style={styles.row}>
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowStats((v) => !v)}>
             <Text style={styles.toggle}>{showStats ? '수치 숨기기' : '수치 보기'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowHelp(true)}>
-            <Text style={styles.toggle}>도움말</Text>
+            <Text style={styles.toggle}>{admin ? '도움말' : '☰ 메뉴'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowSettings(true)}>
             <Text style={styles.toggle}>⚙ 설정</Text>
@@ -2272,7 +2287,7 @@ export default function GameScreen() {
               <Text style={styles.toggle}>{use3D ? '2D 지도' : '중세 3D'}</Text>
             </TouchableOpacity>
           )}
-          {Platform.OS === 'web' && (
+          {Platform.OS === 'web' && admin && (
             <TouchableOpacity
               style={{ flex: 1 }}
               onPress={() => setLogNote(downloadMatches(playerName.trim()) ? '기록을 내려받았습니다' : '아직 남은 기록이 없습니다')}
@@ -2316,6 +2331,8 @@ export default function GameScreen() {
         onClose={() => {
           endSeenRef.current = endKey;
           setEndTick((t) => t + 1);
+          // 무너졌는데 판이 이어진다 — 지켜보기를 켠다(플레이어 화면에는 관전 단추가 없다)
+          if (state.winner === null) setWatching(true);
         }}
       />
       {endingOf(state, PLAYER) !== null && endSeenRef.current === endKey && (
@@ -2577,15 +2594,22 @@ export default function GameScreen() {
             style={[styles.modal, { maxHeight: winH * 0.94, flexGrow: 0 }]}
             contentContainerStyle={{ flexGrow: 0 }}
           >
-            <Text style={styles.modalTitle}>어떻게 하는 게임인가</Text>
-            <ScrollView style={{ maxHeight: Math.max(120, Math.min(380, winH - 470)) }} nestedScrollEnabled>
-              {HELP.map((h) => (
-                <View key={h.title} style={styles.helpItem}>
-                  <Text style={styles.helpTitle}>{h.title}</Text>
-                  <Text style={styles.helpBody}>{h.body}</Text>
-                </View>
-              ))}
-            </ScrollView>
+            {/* 두는 중에 열면 '메뉴' 다 — 규칙은 접어 두고 계속하기·새 판·이름이 먼저 보이게 */}
+            <Text style={styles.modalTitle}>{inMatch ? '메뉴' : '어떻게 하는 게임인가'}</Text>
+            {inMatch && !rulesOpen ? (
+              <TouchableOpacity onPress={() => setRulesOpen(true)}>
+                <Text style={[styles.toggle, { textAlign: 'left' }]}>📖 규칙 보기</Text>
+              </TouchableOpacity>
+            ) : (
+              <ScrollView style={{ maxHeight: Math.max(120, Math.min(380, winH - 470)) }} nestedScrollEnabled>
+                {HELP.map((h) => (
+                  <View key={h.title} style={styles.helpItem}>
+                    <Text style={styles.helpTitle}>{h.title}</Text>
+                    <Text style={styles.helpBody}>{h.body}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
             {/*
               이름을 받는다. 그게 곧 내 나라 이름이 되고, 남는 기록에도 실린다.
               가족들이 각자 두고 기록을 보내주면 그게 누구 판인지 알아야 한다.
@@ -2649,37 +2673,99 @@ export default function GameScreen() {
                 </Text>
               </>
             )}
-            <TouchableOpacity
-              style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
-              onPress={() => {
-                /*
-                  이름 없이는 시작하지 않는다. 비워둔 채 시작하게 두면
-                  '이름없음' 이 쌓여 가족 기록을 나눌 수 없다.
-                  이어하기는 막지 않는다 — 그 판의 이름은 이미 기록에 있다.
-                */
+            {/*
+              새 판 짜기 — 모드·난이도·판 크기. 전에는 게임 화면 아래에 늘 떠 있어, 두던 중에
+              잘못 누르면 판이 그 자리에서 새로 만들어졌다. 이제 여기서 고르고 '시작' 할 때만
+              새 판이 된다. (관리자 화면에는 예전 줄도 남아 있다)
+            */}
+            {(() => {
+              const ch = setup ?? { m: modeIdx, s: sizeIdx, d: diffIdx };
+              const pick = (patch: Partial<typeof ch>) => {
+                setSetup({ ...ch, ...patch });
+                setConfirmNew(false);
+              };
+              const startNew = () => {
                 if (!playerName.trim()) {
                   setNameAsk(true);
                   return;
                 }
-                /*
-                  두던 중에 '도움말' 로 연 것이면 창만 닫는다. 전에는 여기서도
-                  기록을 새로 열어, 판은 그대로인데 기록만 두 조각이 났다.
-                */
-                if (inMatch) {
-                  setShowHelp(false);
-                  return;
-                }
-                setState((prev) => {
-                  beginMatch(prev, diffIdx);
-                  return bump(prev);
-                });
+                reset(ch.m, ch.s, ch.d);
+                setSetup(null);
+                setConfirmNew(false);
                 setShowHelp(false);
-              }}
-            >
-              <Text style={styles.btnText}>
-                {inMatch ? '계속하기' : resumable ? '새로 시작' : '시작'}
-              </Text>
-            </TouchableOpacity>
+              };
+              return (
+                <>
+                  <Text style={[styles.helpTitle, { marginTop: 14 }]}>새 판</Text>
+                  <View style={[styles.row, { marginTop: 4 }]}>
+                    {MODES.map((m, i) => (
+                      <TouchableOpacity
+                        key={m.label}
+                        style={[styles.btn, styles.modeBtn, styles.soloBtn, { flexGrow: 1, flexBasis: 0 }, i !== ch.m && styles.btnDim]}
+                        onPress={() => pick({ m: i })}
+                      >
+                        <Text style={styles.btnText}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={[styles.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+                    {DIFFICULTIES.map((d, i) => (
+                      <TouchableOpacity
+                        key={d.label}
+                        style={[styles.sizeBtn, i !== ch.d && styles.btnDim]}
+                        onPress={() => pick({ d: i })}
+                      >
+                        <Text style={styles.sizeText}>{d.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={[styles.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+                    {SIZES.map((sz, i) => (
+                      <TouchableOpacity
+                        key={sz}
+                        style={[styles.sizeBtn, i !== ch.s && styles.btnDim]}
+                        onPress={() => pick({ s: i })}
+                      >
+                        <Text style={styles.sizeText}>{sz}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.hint}>
+                    {MODES[ch.m].label} · 난이도 {DIFFICULTIES[ch.d].label} · 판 {SIZES[ch.s]}x{SIZES[ch.s]} ({tileCount(SIZES[ch.s])}칸)
+                  </Text>
+
+                  {inMatch ? (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
+                        onPress={() => {
+                          setSetup(null);
+                          setConfirmNew(false);
+                          setShowHelp(false);
+                        }}
+                      >
+                        <Text style={styles.btnText}>계속하기</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.btn, confirmNew ? styles.resetBtn : styles.modeBtn, { marginTop: 8 }, styles.soloBtn]}
+                        onPress={() => (confirmNew ? startNew() : setConfirmNew(true))}
+                      >
+                        <Text style={styles.btnText}>
+                          {confirmNew ? '정말 새 판 — 지금 판은 사라집니다' : '이 짜기로 새 판 시작'}
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
+                      onPress={startNew}
+                    >
+                      <Text style={styles.btnText}>{resumable ? '새로 시작' : '시작'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              );
+            })()}
           </ScrollView>
         </View>
       </Modal>
