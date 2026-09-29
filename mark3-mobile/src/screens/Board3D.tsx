@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
+import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Cell, GameState } from '../engine';
 import { buildMedievalScene, Ground, Mist, Piece, Shape, V3 } from './medievalScene';
@@ -258,14 +258,46 @@ function DimVeil({ tiles, lit }: { tiles: Ground[]; lit: string[] }) {
   </group>;
 }
 
+/** 캔버스 밖(포인터 처리)에서 카메라로 땅의 한 점을 짚으려고 카메라를 잡아 둔다 */
+function CameraBridge({ into }: { into: React.MutableRefObject<THREE.Camera | null> }) {
+  const { camera } = useThree();
+  into.current = camera;
+  return null;
+}
+
+const GROUND = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+/** 판 전체가 들어오는 거리 × 확대 — Rig 와 포인터 처리가 같은 식을 쓴다 */
+function camDistance(span: number, fov: number, aspect: number, zoom: number): number {
+  const halfFov = fov * Math.PI / 360;
+  return Math.max(span / 2 / Math.tan(halfFov), span / 2 / (Math.tan(halfFov) * aspect)) * 1.12 * zoom;
+}
+
+/**
+ * 카메라가 '가려는' 자리. 화면의 카메라는 부드럽게 따라가느라 한 박자 늦어서, 그걸로
+ * 땅을 짚으면 휠을 연달아 굴릴 때 짚은 점이 미끄러졌다. 계산은 도착할 자리로 한다.
+ */
+const DEST = new THREE.PerspectiveCamera();
+function destCamera(like: THREE.PerspectiveCamera, span: number, yaw: number, pitch: number, zoom: number, target: V3) {
+  DEST.fov = like.fov;
+  DEST.aspect = like.aspect;
+  DEST.near = like.near;
+  DEST.far = like.far;
+  DEST.updateProjectionMatrix();
+  const d = camDistance(span, like.fov, like.aspect, zoom);
+  DEST.position.set(target[0] + Math.sin(yaw) * Math.cos(pitch) * d, Math.sin(pitch) * d, target[2] + Math.cos(yaw) * Math.cos(pitch) * d);
+  DEST.lookAt(target[0], target[1], target[2]);
+  DEST.updateMatrixWorld();
+  return DEST;
+}
+const RAY = new THREE.Raycaster();
+
 function Rig({ yaw, pitch, span, zoom, target }: { yaw: number; pitch: number; span: number; zoom: number; target: V3 }) {
   const aim = useRef(new THREE.Vector3());
   const desired = useMemo(() => new THREE.Vector3(), []);
   useFrame(({ camera, size }, delta) => {
     const cam = camera as THREE.PerspectiveCamera;
-    const halfFov = cam.fov * Math.PI / 360;
-    const aspect = size.width / Math.max(1, size.height);
-    const distance = Math.max(span / 2 / Math.tan(halfFov), span / 2 / (Math.tan(halfFov) * aspect)) * 1.12 * zoom;
+    const distance = camDistance(span, cam.fov, size.width / Math.max(1, size.height), zoom);
     const smoothing = 1 - Math.exp(-delta * 12);
     aim.current.lerp(desired.set(...target), smoothing);
     desired.set(aim.current.x + Math.sin(yaw) * Math.cos(pitch) * distance,
@@ -319,44 +351,120 @@ export default function Board3D({ state, player, watching, selected, movable, pa
   const [yaw, setYaw] = useState(0.12);
   const [pitch, setPitch] = useState(0.88);
   const [zoom, setZoom] = useState(1);
-  const [target, setTarget] = useState<V3>([0, 0, 0]);
+  const [target, setTargetState] = useState<V3>([0, 0, 0]);
+  /** 조준점을 옮긴다. 포인터 이벤트가 연달아 와도 앞의 것을 딛고 서게 ref 를 먼저 고친다. */
+  const setTarget = (f: V3 | ((t: V3) => V3)) => {
+    const next = typeof f === 'function' ? f(cam.current.target) : f;
+    cam.current.target = next;
+    setTargetState(next);
+  };
+  // 포인터 처리 안에서 바로 읽어야 해서 상태와 같은 값을 ref 로도 쥔다
+  const zoomRef = useRef(1);
+  const cam = useRef({ yaw: 0.12, pitch: 0.88, target: [0, 0, 0] as V3 });
+  cam.current.yaw = yaw;
+  cam.current.pitch = pitch;
+  const cameraRef = useRef<THREE.Camera | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
+  /** 오른쪽 단추(또는 Ctrl/Shift)로 끄는 중이면 돌리기 */
+  const rotating = useRef(false);
   const moved = useRef(false);
   const dragDistance = useRef(0);
   const selectedTile = scene.ground.find(t => t.cell.id === selected);
-  const zoomBy = (amount: number) => setZoom(z => Math.max(0.22, Math.min(1.7, z * amount)));
-  const reset = () => { setYaw(0.12); setPitch(0.88); setZoom(1); setTarget([0, 0, 0]); };
+  const ZMIN = 0.25, ZMAX = 1.7;
+  /** 판 밖으로 너무 멀리 끌려가지 않게 */
+  const clampTarget = (x: number, z: number): V3 => {
+    const r = scene.span * 0.62, d = Math.hypot(x, z);
+    return d > r ? [x / d * r, 0, z / d * r] : [x, 0, z];
+  };
+
+  /**
+   * 화면의 한 점 아래 땅(y=0)이 어디인가. 확대를 그 점으로, 끌기를 손가락 그대로 따라가게
+   * 하는 데 쓴다. 전에는 확대가 늘 화면 한가운데로만 되어 원하는 곳을 크게 볼 수 없었다.
+   */
+  const groundAt = (clientX: number, clientY: number, el: Element): THREE.Vector3 | null => {
+    const live = cameraRef.current as THREE.PerspectiveCamera | null;
+    if (!live) return null;
+    const c = cam.current;
+    const dest = destCamera(live, scene.span, c.yaw, c.pitch, zoomRef.current, c.target);
+    const r = el.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    RAY.setFromCamera(ndc, dest);
+    const out = new THREE.Vector3();
+    return RAY.ray.intersectPlane(GROUND, out) ? out : null;
+  };
+
+  /**
+   * 한 점을 붙박고 확대한다. 카메라와 조준점을 그 점을 중심으로 같은 비율로 당기면
+   * (닮음 변환) 그 점은 화면의 같은 자리에 남는다.
+   */
+  const zoomAt = (factor: number, at: THREE.Vector3 | null) => {
+    const before = zoomRef.current;
+    const after = Math.max(ZMIN, Math.min(ZMAX, before * factor));
+    if (after === before) return;
+    zoomRef.current = after;
+    setZoom(after);
+    if (!at) return;
+    const k = after / before;
+    setTarget(t => clampTarget(at.x + (t[0] - at.x) * k, at.z + (t[2] - at.z) * k));
+  };
+  const zoomBy = (amount: number) => zoomAt(amount, null);
+  const reset = () => { setYaw(0.12); setPitch(0.88); setZoom(1); zoomRef.current = 1; setTarget([0, 0, 0]); };
   useEffect(() => { reset(); }, [state.rows, state.cols]);
-  const clearPointer = (e: React.PointerEvent<HTMLDivElement>) => { pointers.current.delete(e.pointerId); };
+  const clearPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size === 0) rotating.current = false;
+  };
   return <View style={styles.container}>
     <SceneBoundary>
       <Canvas shadows dpr={[1, 1.5]} camera={{ position: [0, scene.span * 1.8, scene.span * 1.5], fov: 40, near: 0.1, far: 600 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }} style={{ touchAction: 'none' }}
         fallback={<View style={styles.fallback}><Text style={styles.subtitle}>WebGL을 지원하는 브라우저에서 3D 지도를 볼 수 있습니다.</Text></View>}
+        onContextMenu={e => e.preventDefault()}
         onPointerDown={e => {
-          if (pointers.current.size === 0) { moved.current = false; dragDistance.current = 0; }
+          if (pointers.current.size === 0) {
+            moved.current = false;
+            dragDistance.current = 0;
+            rotating.current = e.button === 2 || e.ctrlKey || e.shiftKey;
+          }
           pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
         }}
         onPointerMove={e => {
           const prev = pointers.current.get(e.pointerId);
           if (!prev) return;
+          const el = e.currentTarget as Element;
           const dx = e.clientX - prev.x, dy = e.clientY - prev.y;
           dragDistance.current += Math.hypot(dx, dy);
           if (dragDistance.current > 5) moved.current = true;
           if (pointers.current.size === 2) {
+            // 두 손가락: 벌리면 그 사이로 확대, 함께 끌면 이동, 비틀면 돌리기
             const other = Array.from(pointers.current.entries()).find(([id]) => id !== e.pointerId)![1];
             const before = Math.hypot(prev.x - other.x, prev.y - other.y);
             const after = Math.hypot(e.clientX - other.x, e.clientY - other.y);
-            if (after > 4 && before > 4) zoomBy(before / after);
+            const midPrev = { x: (prev.x + other.x) / 2, y: (prev.y + other.y) / 2 };
+            const midNow = { x: (e.clientX + other.x) / 2, y: (e.clientY + other.y) / 2 };
+            const a = groundAt(midPrev.x, midPrev.y, el), b = groundAt(midNow.x, midNow.y, el);
+            if (a && b) setTarget(t => clampTarget(t[0] + a.x - b.x, t[2] + a.z - b.z));
+            if (after > 4 && before > 4) zoomAt(before / after, b);
+            const angPrev = Math.atan2(prev.y - other.y, prev.x - other.x);
+            const angNow = Math.atan2(e.clientY - other.y, e.clientX - other.x);
+            let twist = angNow - angPrev;
+            if (twist > Math.PI) twist -= 2 * Math.PI;
+            if (twist < -Math.PI) twist += 2 * Math.PI;
+            if (Math.abs(twist) < 0.3) setYaw(v => v - twist);
             moved.current = true;
-          } else {
+          } else if (rotating.current) {
             setYaw(v => v + dx * 0.006);
             setPitch(v => Math.max(0.5, Math.min(1.35, v + dy * 0.004)));
+          } else {
+            // 한 손가락·왼쪽 단추: 땅을 잡고 끈다 — 손가락 밑의 땅이 손가락을 따라온다
+            const a = groundAt(prev.x, prev.y, el), b = groundAt(e.clientX, e.clientY, el);
+            if (a && b) setTarget(t => clampTarget(t[0] + a.x - b.x, t[2] + a.z - b.z));
           }
           pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
         }}
         onPointerUp={clearPointer} onPointerCancel={clearPointer} onPointerLeave={clearPointer}
-        onWheel={e => zoomBy(Math.exp(e.deltaY * 0.001))}>
+        onWheel={e => zoomAt(Math.exp(e.deltaY * 0.0012), groundAt(e.clientX, e.clientY, e.currentTarget as Element))}>
+        <CameraBridge into={cameraRef} />
         <color attach="background" args={['#111e24']} />
         <hemisphereLight args={['#dae9e5', '#414333', 1.55]} />
         <directionalLight position={[-scene.span * 0.4, scene.span, scene.span * 0.35]} color="#ffe0a6" intensity={2.8}
@@ -394,13 +502,13 @@ export default function Board3D({ state, player, watching, selected, movable, pa
       <Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>
     </View>
     <View style={styles.bottom} pointerEvents="box-none">
-      <View pointerEvents="none"><Text style={styles.hint}>드래그 회전 · 휠 / 두 손가락 확대 · 타일 선택</Text></View>
+      <View pointerEvents="none"><Text style={styles.hint}>끌어서 이동 · 오른쪽 단추·Shift 끌기 / 두 손가락 비틀기 회전 · 휠 / 두 손가락 확대</Text></View>
       <View style={styles.controls}>
         <TouchableOpacity accessibilityLabel="지도 축소" style={styles.control} onPress={() => zoomBy(1.2)}><Text style={styles.controlText}>−</Text></TouchableOpacity>
         <TouchableOpacity accessibilityLabel="지도 확대" style={styles.control} onPress={() => zoomBy(1 / 1.2)}><Text style={styles.controlText}>＋</Text></TouchableOpacity>
         <TouchableOpacity accessibilityLabel="카메라 초기화" style={styles.control} onPress={reset}><Text style={styles.smallControl}>전체 보기</Text></TouchableOpacity>
         {selectedTile && <TouchableOpacity style={styles.control} onPress={() => {
-          setTarget([selectedTile.position[0], 0, selectedTile.position[2]]); setZoom(0.28);
+          setTarget([selectedTile.position[0], 0, selectedTile.position[2]]); setZoom(0.28); zoomRef.current = 0.28;
         }}><Text style={styles.smallControl}>선택 확대</Text></TouchableOpacity>}
       </View>
       <View pointerEvents="none"><Text style={styles.legend}>깃발·테두리 = 소유국   /   금빛 테두리 = 이동 가능</Text></View>
