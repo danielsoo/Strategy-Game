@@ -85,6 +85,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginTop: 8,
     padding: 12,
+    // 판 위에 떠 있으니 판과 떨어져 보이게
+    shadowColor: '#000',
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
   },
   cardDone: { borderColor: '#34d399' },
   top: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },

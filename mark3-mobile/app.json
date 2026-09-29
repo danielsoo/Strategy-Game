@@ -26,8 +26,8 @@
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro",
-      "name": "왕국의 전장",
-      "shortName": "왕국의 전장",
+      "name": "왕국 연대기",
+      "shortName": "왕국 연대기",
       "lang": "ko",
       "themeColor": "#1a1a1a",
       "description": "정의로 다스릴까, 공포로 다스릴까 — 육각 전략 게임"
