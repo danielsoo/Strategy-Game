@@ -2484,7 +2484,7 @@ export default function GameScreen() {
             {firstVisit ? (
               <>
                 <TouchableOpacity
-                  style={[styles.btn, styles.tutorialBtn, { marginTop: 12 }]}
+                  style={[styles.btn, styles.tutorialBtn, { marginTop: 12 }, styles.soloBtn]}
                   onPress={startTutorial}
                 >
                   <Text style={styles.btnText}>처음이에요 — 배우면서 한 판</Text>
@@ -2503,7 +2503,7 @@ export default function GameScreen() {
             {resumable && !inMatch && (
               <>
                 <TouchableOpacity
-                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }]}
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }, styles.soloBtn]}
                   onPress={resumeSaved}
                 >
                   <Text style={styles.btnText}>이어하기 — {describeSave(resumable)}</Text>
@@ -2514,7 +2514,7 @@ export default function GameScreen() {
               </>
             )}
             <TouchableOpacity
-              style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
+              style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
               onPress={() => {
                 /*
                   이름 없이는 시작하지 않는다. 비워둔 채 시작하게 두면
@@ -2560,7 +2560,7 @@ export default function GameScreen() {
               </Text>
 
               <TouchableOpacity
-                style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
+                style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
                 onPress={() => answerDefense('fight')}
               >
                 <Text style={styles.btnText}>맞서 싸운다</Text>
@@ -2572,7 +2572,7 @@ export default function GameScreen() {
               {defenseAsk.options.includes('retreat') && (
                 <>
                   <TouchableOpacity
-                    style={[styles.btn, styles.modeBtn, { marginTop: 10 }]}
+                    style={[styles.btn, styles.modeBtn, { marginTop: 10 }, styles.soloBtn]}
                     onPress={() => answerDefense('retreat')}
                   >
                     <Text style={styles.btnText}>물러난다</Text>
@@ -2586,7 +2586,7 @@ export default function GameScreen() {
               {defenseAsk.options.includes('surrender') && (
                 <>
                   <TouchableOpacity
-                    style={[styles.btn, styles.resetBtn, { marginTop: 10 }]}
+                    style={[styles.btn, styles.resetBtn, { marginTop: 10 }, styles.soloBtn]}
                     onPress={() => answerDefense('surrender')}
                   >
                     <Text style={styles.btnText}>항복한다</Text>
@@ -2621,7 +2621,7 @@ export default function GameScreen() {
                 </Text>
 
                 <TouchableOpacity
-                  style={[styles.btn, styles.resetBtn, { marginTop: 12 }]}
+                  style={[styles.btn, styles.resetBtn, { marginTop: 12 }, styles.soloBtn]}
                   onPress={() => {
                     setState((prev) => {
                       const castle = prev.cells.find((c) => c.id === conquest.castleId)!;
@@ -2638,7 +2638,7 @@ export default function GameScreen() {
                 <Text style={styles.hint}>영토가 늘지만 행정비가 가팔라진다</Text>
 
                 <TouchableOpacity
-                  style={[styles.btn, styles.recruitBtn, { marginTop: 10 }]}
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 10 }, styles.soloBtn]}
                   onPress={() => {
                     setState((prev) => {
                       const castle = prev.cells.find((c) => c.id === conquest.castleId)!;
@@ -2700,7 +2700,7 @@ export default function GameScreen() {
                   })}
             </ScrollView>
             <TouchableOpacity
-              style={[styles.btn, styles.endBtn]}
+              style={[styles.btn, styles.endBtn, styles.soloBtn]}
               onPress={() => setMerchantPick(null)}
             >
               <Text style={styles.btnText}>닫기</Text>

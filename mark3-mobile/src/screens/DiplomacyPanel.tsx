@@ -280,7 +280,7 @@ export function EncounterCard({
           {encounter.options.map((o, i) => (
             <TouchableOpacity
               key={i}
-              style={[s.btn, i === 0 ? s.ally : s.plain, { marginTop: 8 }]}
+              style={[s.btn, i === 0 ? s.ally : s.plain, { marginTop: 8, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' }]}
               onPress={() => onPick(i)}
             >
               <Text style={s.btnText}>{o.label}</Text>
