@@ -20,6 +20,7 @@ import { RNG } from '../services/combatSystem';
 import { Cell, GameState, EconomyConfig, DEFAULT_ECONOMY } from './types';
 import { Treaty, TreatyKind, blocOf, treatyOf, wa } from './treaty';
 import { adjustRep, characterOf, effJ, PATH_KNOBS } from './reputation';
+import { recordHistory } from './history';
 import { getHexNeighborOffsets } from '../utils/hexGrid';
 
 /**
@@ -284,6 +285,7 @@ function sign(state: GameState, a: number, b: number, kind: TreatyKind, eco: Eco
   if (kind === 'truce') t.until = state.turn + Math.round(eco.truceTurns * scaleOf(state));
   state.treaties.push(t);
   pushLog(state, `🤝 ${state.nations[a].name} ↔ ${state.nations[b].name}: ${KIND_NAME[kind]} 체결`);
+  if (kind === 'alliance') recordHistory(state, { kind: 'alliance', a, b });
   for (const [v, o] of [
     [a, b],
     [b, a],
@@ -321,10 +323,12 @@ export function breakTreaty(
   const victim = state.nations[t.a === who ? t.b : t.a];
   if (opts.provoked) {
     pushLog(state, `🗡 ${n.name}: ${victim.name}의 영토 침범을 더 참지 않는다 — ${KIND_NAME[t.kind]} 파기`);
+    recordHistory(state, { kind: 'provoked', a: n.id, b: victim.id });
   } else {
     const loss = opts.ordered ? Math.round(eco.betrayJustice / 2) : eco.betrayJustice;
     adjustRep(state, n.id, -loss, opts.ordered ? 2 : 5);
     n.betrayals = (n.betrayals ?? 0) + (opts.ordered ? 0 : 1);
+    if (!opts.ordered) recordHistory(state, { kind: 'betray', a: n.id, b: victim.id });
     pushLog(
       state,
       opts.ordered

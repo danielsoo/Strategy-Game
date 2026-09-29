@@ -17,6 +17,10 @@ import {
   readSave, writeSave, clearSave, tutorialSeen, markTutorialSeen,
 } from '../services/saveStore';
 import Coach from './Coach';
+import { sfx, setMusic, installUnlock } from '../services/sound';
+import { getSettings, updateSettings } from '../services/settings';
+import { isAdmin } from '../services/admin';
+import SettingsPanel from './SettingsPanel';
 import { COACH_STEPS, CoachProgress, coachTarget, coachReady } from './tutorial';
 import {
   MatchLog, startMatch, recordTurn, finishMatch, emptyHumanTurn,
@@ -88,6 +92,7 @@ import {
 } from '../engine';
 import type { OrderKind, Punishment } from '../engine';
 import VassalPanel from './VassalPanel';
+import EndScreen, { endingOf } from './EndScreen';
 import DiplomacyPanel, { ProposalCard, EncounterCard } from './DiplomacyPanel';
 import {
   propose,
@@ -484,11 +489,27 @@ export default function GameScreen() {
     return s;
   });
   const [watching, setWatching] = useState(false);
-  const [speedIdx, setSpeedIdx] = useState(1);
+  const [speedIdx, setSpeedIdx] = useState(() => Math.min(SPEEDS.length - 1, getSettings().aiSpeed));
+  const [showSettings, setShowSettings] = useState(false);
+  /** 관리자 화면(?admin=1) — 관전·판 짜기 줄·리셋·기록 내보내기 (services/admin.ts) */
+  const [admin] = useState(isAdmin);
+  /** 시작 창에서 고르는 새 판 짜기. null 이면 지금 판의 것을 그대로 */
+  const [setup, setSetup] = useState<{ m: number; s: number; d: number } | null>(null);
+  const [confirmNew, setConfirmNew] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
-  const [showStats, setShowStats] = useState(true);
+  // 폰(좁은 화면)에서는 나라 표를 접은 채 시작한다 — 판이 먼저 보여야 한다
+  const [showStats, setShowStats] = useState(
+    () =>
+      !(
+        Platform.OS === 'web' &&
+        typeof window !== 'undefined' &&
+        (window.innerWidth < 600 || window.innerHeight < 600)
+      )
+  );
+  const [moreOpen, setMoreOpen] = useState(false);
   // 처음 켜면 한 번 띄운다. 규칙을 모르고 만나면 "왜 안 움직이지?" 가 된다.
   const [showHelp, setShowHelp] = useState(true);
   /**
@@ -610,6 +631,12 @@ export default function GameScreen() {
   /** 조우 창에서 '공격한다' 를 골랐다 — 이번 한 번은 조우를 건너뛰고 친다 */
   const forceAttackRef = useRef(false);
   const lastChronRef = useRef<Chronicle | null>(null);
+  /**
+   * 끝 화면을 이미 본 끝. '이겼다' 와 '무너졌다(판은 계속)' 는 다른 끝이라 따로 센다 —
+   * 무너진 뒤 지켜보다 누가 이기면 그때 한 번 더 띄운다.
+   */
+  const endSeenRef = useRef<string | null>(null);
+  const [, setEndTick] = useState(0);
   const [chron, setChron] = useState<Chronicle | null>(null);
 
   /**
@@ -666,6 +693,11 @@ export default function GameScreen() {
   );
 
   const paneW = paneWidth(winW);
+  /**
+   * 폰 — 좁거나(세로) 낮은(가로로 눕힘, 높이 390) 화면. 판 짜기 줄을 접고 나라 표를
+   * 접은 채 시작한다. 눕힌 폰에서 다 펼치면 왼쪽 단추 칸이 머리말(턴·금)을 덮었다.
+   */
+  const phone = winW < 600 || winH < 600;
   const boardBox = wide
     ? { width: Math.max(0, winW - paneW - 16), height: Math.max(0, winH - 16) }
     : { width: winW, height: Math.max(0, winH - chromeH) };
@@ -774,6 +806,7 @@ export default function GameScreen() {
         if (readyCastles > 0) {
           setState((prev) => {
             const got = recruit(prev, PLAYER);
+            if (got > 0) sfx('recruit');
             humanRef.current.recruited += got;
             tutRef.current.recruits += got;
             return bump(prev);
@@ -915,6 +948,7 @@ export default function GameScreen() {
       if (cell.owner === PLAYER && cell.units > 0 && !cell.neutral) {
         if (cell.fortStage > 0 && cell.fortStage < 4) return;
         if (actedRef.current.has(cell.id)) return; // 이번 턴엔 이미 움직였다
+        sfx('select');
         setSelected(cell.id);
       }
       return;
@@ -979,7 +1013,16 @@ export default function GameScreen() {
         const victim = to.owner;
         const wasNeutral = to.neutral;
         const outcome = performAttack(prev, from, to, rng);
-        setCombat(outcome.result);
+        // 빠른 전투면 결과 창 없이 기록 한 줄로만 (설정)
+        if (!getSettings().quickCombat) setCombat(outcome.result);
+        else
+          pushLog(
+            prev,
+            `⚔️ ${outcome.result.outcome === 'attacker-win' ? '승리' : '패배'} — 생존 ${outcome.result.attackerSurvivors} : ${outcome.result.defenderSurvivors}`
+          );
+        sfx('attack');
+        const won = outcome.result.outcome === 'attacker-win';
+        setTimeout(() => sfx(won ? 'win' : 'lose'), 420);
         humanRef.current.attacks++;
         tutRef.current.attacks++;
         // 진 무리가 달아난다 — 보내줄지 쫓을지 묻는다 (나라의 자비·잔혹)
@@ -1021,6 +1064,7 @@ export default function GameScreen() {
         const guest = isGuestLand(prev, PLAYER, prevOwner);
         const fresh = prevOwner === null || blocOf(prev, prevOwner) !== blocOf(prev, PLAYER);
         moveStack(from, to);
+        sfx('move');
         if (guest && prevOwner !== null) {
           // 조약 상대의 땅 — 빼앗지 않고 손님으로 선다. 상대는 안다.
           enterAsGuest(prev, to, prevOwner);
@@ -1334,6 +1378,7 @@ export default function GameScreen() {
       answer = undefined;
       if (isAsk(step)) {
         pendingRef.current = { gen, idx: i };
+        sfx('alert');
         setDefenseAsk(step.value);
         return false;
       }
@@ -1450,6 +1495,8 @@ export default function GameScreen() {
 
   /** 기록이 열린 채 두는 중인가. 도움말 창의 '시작' 이 새 판인지 계속인지 가른다. */
   const inMatch = matchRef.current !== null && state.winner === null;
+  /** 이 판의 이 끝 — 판 id 를 넣어야 새 판에서 같은 끝(내가 이김)을 '이미 봤다' 고 치지 않는다 */
+  const endKey = `${matchRef.current?.id ?? ''}:${endingOf(state, PLAYER)}:${state.winner}`;
 
   useEffect(() => {
     const list = state.chronicle ?? [];
@@ -1465,8 +1512,39 @@ export default function GameScreen() {
     while (i >= 0 && list[i] !== lastChronRef.current) i--;
     const fresh = list.slice(i + 1).filter((c) => c.nation === PLAYER || knows(state, PLAYER, c.nation));
     lastChronRef.current = last;
-    if (fresh.length > 0) setChron(fresh[fresh.length - 1]);
+    if (fresh.length > 0) {
+      setChron(fresh[fresh.length - 1]);
+      sfx('chronicle');
+    }
   });
+
+  // ── 소리 ──────────────────────────────────────────────
+  // 브라우저는 첫 누름 전에는 소리를 막는다. 깨울 준비만 하고 배경음을 청해 둔다.
+  useEffect(() => {
+    installUnlock();
+    setMusic(true);
+    return () => setMusic(false);
+  }, []);
+  // 내 차례가 돌아오면 망루의 종
+  useEffect(() => {
+    if (myTurn && !showHelp) sfx('turn');
+  }, [state.turn, myTurn, showHelp]);
+  // 행군 사건·사신이 오면 하프
+  const encHead = encQueueRef.current[0];
+  useEffect(() => {
+    if (encHead) sfx('event');
+  }, [encHead]);
+  const propHead = myTurn ? proposalsFor(state, PLAYER)[0] : undefined;
+  const propKey = propHead ? `${propHead.from}-${propHead.kind}-${propHead.turn}` : '';
+  useEffect(() => {
+    if (propKey) sfx('event');
+  }, [propKey]);
+  // 판의 끝
+  useEffect(() => {
+    const e = endingOf(state, PLAYER);
+    if (!e) return;
+    sfx(e === 'won' ? 'victory' : e === 'survived' ? 'chronicle' : 'defeat');
+  }, [endKey]);
 
   // ── 길잡이 ──────────────────────────────────────────────
   const coachNow: CoachProgress = {
@@ -1763,7 +1841,13 @@ export default function GameScreen() {
   const current = state.nations[state.current];
 
   return (
-    <View style={styles.container}>
+    /*
+      웹에서는 바깥 높이를 창 높이로 못박는다. 안 그러면 판(3D 는 높이를 숫자로 받는다)이
+      처음 어림값(CHROME_H) 그대로 페이지를 밀어 늘리고, onLayout 이 그 늘어난 높이를
+      다시 재서 어림값이 영영 고쳐지지 않았다 — 폰 세로에서 페이지가 창보다 100~390px
+      길어져 턴 종료가 화면 밖에 있었다.
+    */
+    <View style={[styles.container, Platform.OS === 'web' && !wide && { height: winH }]}>
       <View
         style={[
           styles.header,
@@ -1842,7 +1926,7 @@ export default function GameScreen() {
 
       {/* 관전 조작 — 길잡이 중에는 숨긴다(처음 하는 사람에게는 소음이고, 자리를 먹어
           부대 정보가 아래 단추에 가려졌다) */}
-      {coach === null && (
+      {coach === null && (admin || !state.nations[PLAYER].alive) && (
       <View style={styles.watchBar}>
         <TouchableOpacity
           style={[styles.chip, watching ? styles.chipOn : styles.chipOff]}
@@ -1857,7 +1941,10 @@ export default function GameScreen() {
           <TouchableOpacity
             key={s.label}
             style={[styles.chip, i === speedIdx ? styles.chipOn : styles.chipOff]}
-            onPress={() => setSpeedIdx(i)}
+            onPress={() => {
+              setSpeedIdx(i);
+              updateSettings({ aiSpeed: i });
+            }}
           >
             <Text style={styles.chipText}>{s.label}</Text>
           </TouchableOpacity>
@@ -2052,6 +2139,7 @@ export default function GameScreen() {
             onPress={() =>
               setState((prev) => {
                 const got = recruit(prev, PLAYER);
+                if (got > 0) sfx('recruit');
                 humanRef.current.recruited += got;
                 tutRef.current.recruits += got;
                 return bump(prev);
@@ -2078,12 +2166,14 @@ export default function GameScreen() {
           >
             <Text style={styles.btnText}>턴 종료</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.btn, styles.resetBtn, spot === 'button' && styles.dim]}
-            onPress={() => reset()}
-          >
-            <Text style={styles.btnText}>리셋</Text>
-          </TouchableOpacity>
+          {admin && (
+            <TouchableOpacity
+              style={[styles.btn, styles.resetBtn, spot === 'button' && styles.dim]}
+              onPress={() => reset()}
+            >
+              <Text style={styles.btnText}>리셋</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {/* 외교 — 조약이 있으면 몇 개인지 같이 */}
         <View style={[styles.row, spot === 'button' && coachButton !== 'diplo' && styles.dim]}>
@@ -2127,7 +2217,22 @@ export default function GameScreen() {
             </TouchableOpacity>
           </View>
         )}
-        {/* 판 짜기를 바꾸면 새 판으로 시작한다 */}
+        {/*
+          폰 세로 화면에서는 아래 판 짜기·도움말 줄을 '더 보기' 로 접는다. 다 펼쳐 두면
+          턴 종료가 화면 밖(844 높이에 920)으로 밀려 매 턴 스크롤해야 했다.
+        */}
+        {phone && (
+          <TouchableOpacity onPress={() => setMoreOpen((v) => !v)} style={{ paddingVertical: 4 }}>
+            <Text style={styles.toggle}>
+              {moreOpen ? '▴ 접기' : admin ? '▾ 더 보기 — 판 짜기 · 설정 · 도움말' : '▾ 더 보기 — 메뉴 · 설정'}
+            </Text>
+          </TouchableOpacity>
+        )}
+        {(!phone || moreOpen) && (
+        <>
+        {/* 판 짜기를 바꾸면 새 판으로 시작한다 — 관리자 줄. 플레이어는 시작 창에서 고른다 */}
+        {admin && (
+        <>
         <View style={styles.row}>
           {MODES.map((m, i) => (
             <TouchableOpacity
@@ -2165,19 +2270,24 @@ export default function GameScreen() {
             </TouchableOpacity>
           ))}
         </View>
+        </>
+        )}
         <View style={styles.row}>
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowStats((v) => !v)}>
             <Text style={styles.toggle}>{showStats ? '수치 숨기기' : '수치 보기'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowHelp(true)}>
-            <Text style={styles.toggle}>도움말</Text>
+            <Text style={styles.toggle}>{admin ? '도움말' : '☰ 메뉴'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ flex: 1 }} onPress={() => setShowSettings(true)}>
+            <Text style={styles.toggle}>⚙ 설정</Text>
           </TouchableOpacity>
           {can3D && (
             <TouchableOpacity style={{ flex: 1 }} onPress={() => setUse3D((v) => !v)}>
               <Text style={styles.toggle}>{use3D ? '2D 지도' : '중세 3D'}</Text>
             </TouchableOpacity>
           )}
-          {Platform.OS === 'web' && (
+          {Platform.OS === 'web' && admin && (
             <TouchableOpacity
               style={{ flex: 1 }}
               onPress={() => setLogNote(downloadMatches(playerName.trim()) ? '기록을 내려받았습니다' : '아직 남은 기록이 없습니다')}
@@ -2195,16 +2305,51 @@ export default function GameScreen() {
             저장할 수 없는 창입니다 — 닫으면 판이 사라집니다
           </Text>
         )}
+        </>
+        )}
         </View>
       </View>
 
-      {state.winner !== null && (
-        <View style={styles.banner} pointerEvents="none">
-          <Text style={styles.bannerText}>{state.nations[state.winner].name} 승리</Text>
-          <Text style={styles.bannerSub}>
-            {state.turn}턴 · {state.winReason ?? '승리 조건 달성'}
+      {/*
+        판의 끝. 연대기를 닫고 지도를 보는 동안에는 작은 띠만 남기고, 누르면 다시 연다.
+        내 나라가 무너졌으면 판이 끝나지 않았어도 한 번 띄운다 — 지켜볼지 새로 할지.
+      */}
+      <SettingsPanel
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSpeed={(i) => setSpeedIdx(i)}
+        speedLabels={SPEEDS.map((x) => x.label)}
+      />
+      <EndScreen
+        state={state}
+        playerId={PLAYER}
+        visible={!showHelp && endingOf(state, PLAYER) !== null && endSeenRef.current !== endKey}
+        onNewGame={() => {
+          endSeenRef.current = endKey;
+          setShowHelp(true);
+        }}
+        onClose={() => {
+          endSeenRef.current = endKey;
+          setEndTick((t) => t + 1);
+          // 무너졌는데 판이 이어진다 — 지켜보기를 켠다(플레이어 화면에는 관전 단추가 없다)
+          if (state.winner === null) setWatching(true);
+        }}
+      />
+      {endingOf(state, PLAYER) !== null && endSeenRef.current === endKey && (
+        <TouchableOpacity
+          style={styles.banner}
+          onPress={() => {
+            endSeenRef.current = null;
+            setEndTick((t) => t + 1);
+          }}
+        >
+          <Text style={styles.bannerText}>
+            {state.winner !== null ? `${state.nations[state.winner].name} 승리` : '당신의 나라는 무너졌다'}
           </Text>
-        </View>
+          <Text style={styles.bannerSub}>
+            {state.turn}턴{state.winner !== null ? ` · ${state.winReason ?? '승리 조건 달성'}` : ''} · 눌러서 연대기 보기
+          </Text>
+        </TouchableOpacity>
       )}
 
       <VassalPanel
@@ -2440,16 +2585,31 @@ export default function GameScreen() {
       {/* 본진 함락 — 병합할까 속국으로 둘까 */}
       <Modal visible={showHelp} transparent animationType="fade">
         <View style={styles.overlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>어떻게 하는 게임인가</Text>
-            <ScrollView style={{ maxHeight: 380 }}>
-              {HELP.map((h) => (
-                <View key={h.title} style={styles.helpItem}>
-                  <Text style={styles.helpTitle}>{h.title}</Text>
-                  <Text style={styles.helpBody}>{h.body}</Text>
-                </View>
-              ))}
-            </ScrollView>
+          {/*
+            폰을 눕히면 창 높이가 390 이다. 도움말(380)만으로 꽉 차서 이어하기·시작 단추가
+            화면 밖에 있었고 누를 방법이 없었다. 창 전체를 스크롤되게 하고, 도움말 칸은
+            남는 높이만큼만 쓴다.
+          */}
+          <ScrollView
+            style={[styles.modal, { maxHeight: winH * 0.94, flexGrow: 0 }]}
+            contentContainerStyle={{ flexGrow: 0 }}
+          >
+            {/* 두는 중에 열면 '메뉴' 다 — 규칙은 접어 두고 계속하기·새 판·이름이 먼저 보이게 */}
+            <Text style={styles.modalTitle}>{inMatch ? '메뉴' : '어떻게 하는 게임인가'}</Text>
+            {inMatch && !rulesOpen ? (
+              <TouchableOpacity onPress={() => setRulesOpen(true)}>
+                <Text style={[styles.toggle, { textAlign: 'left' }]}>📖 규칙 보기</Text>
+              </TouchableOpacity>
+            ) : (
+              <ScrollView style={{ maxHeight: Math.max(120, Math.min(380, winH - 470)) }} nestedScrollEnabled>
+                {HELP.map((h) => (
+                  <View key={h.title} style={styles.helpItem}>
+                    <Text style={styles.helpTitle}>{h.title}</Text>
+                    <Text style={styles.helpBody}>{h.body}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
             {/*
               이름을 받는다. 그게 곧 내 나라 이름이 되고, 남는 기록에도 실린다.
               가족들이 각자 두고 기록을 보내주면 그게 누구 판인지 알아야 한다.
@@ -2484,7 +2644,7 @@ export default function GameScreen() {
             {firstVisit ? (
               <>
                 <TouchableOpacity
-                  style={[styles.btn, styles.tutorialBtn, { marginTop: 12 }]}
+                  style={[styles.btn, styles.tutorialBtn, { marginTop: 12 }, styles.soloBtn]}
                   onPress={startTutorial}
                 >
                   <Text style={styles.btnText}>처음이에요 — 배우면서 한 판</Text>
@@ -2503,7 +2663,7 @@ export default function GameScreen() {
             {resumable && !inMatch && (
               <>
                 <TouchableOpacity
-                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }]}
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 12 }, styles.soloBtn]}
                   onPress={resumeSaved}
                 >
                   <Text style={styles.btnText}>이어하기 — {describeSave(resumable)}</Text>
@@ -2513,38 +2673,100 @@ export default function GameScreen() {
                 </Text>
               </>
             )}
-            <TouchableOpacity
-              style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
-              onPress={() => {
-                /*
-                  이름 없이는 시작하지 않는다. 비워둔 채 시작하게 두면
-                  '이름없음' 이 쌓여 가족 기록을 나눌 수 없다.
-                  이어하기는 막지 않는다 — 그 판의 이름은 이미 기록에 있다.
-                */
+            {/*
+              새 판 짜기 — 모드·난이도·판 크기. 전에는 게임 화면 아래에 늘 떠 있어, 두던 중에
+              잘못 누르면 판이 그 자리에서 새로 만들어졌다. 이제 여기서 고르고 '시작' 할 때만
+              새 판이 된다. (관리자 화면에는 예전 줄도 남아 있다)
+            */}
+            {(() => {
+              const ch = setup ?? { m: modeIdx, s: sizeIdx, d: diffIdx };
+              const pick = (patch: Partial<typeof ch>) => {
+                setSetup({ ...ch, ...patch });
+                setConfirmNew(false);
+              };
+              const startNew = () => {
                 if (!playerName.trim()) {
                   setNameAsk(true);
                   return;
                 }
-                /*
-                  두던 중에 '도움말' 로 연 것이면 창만 닫는다. 전에는 여기서도
-                  기록을 새로 열어, 판은 그대로인데 기록만 두 조각이 났다.
-                */
-                if (inMatch) {
-                  setShowHelp(false);
-                  return;
-                }
-                setState((prev) => {
-                  beginMatch(prev, diffIdx);
-                  return bump(prev);
-                });
+                reset(ch.m, ch.s, ch.d);
+                setSetup(null);
+                setConfirmNew(false);
                 setShowHelp(false);
-              }}
-            >
-              <Text style={styles.btnText}>
-                {inMatch ? '계속하기' : resumable ? '새로 시작' : '시작'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+              };
+              return (
+                <>
+                  <Text style={[styles.helpTitle, { marginTop: 14 }]}>새 판</Text>
+                  <View style={[styles.row, { marginTop: 4 }]}>
+                    {MODES.map((m, i) => (
+                      <TouchableOpacity
+                        key={m.label}
+                        style={[styles.btn, styles.modeBtn, styles.soloBtn, { flexGrow: 1, flexBasis: 0 }, i !== ch.m && styles.btnDim]}
+                        onPress={() => pick({ m: i })}
+                      >
+                        <Text style={styles.btnText}>{m.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={[styles.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+                    {DIFFICULTIES.map((d, i) => (
+                      <TouchableOpacity
+                        key={d.label}
+                        style={[styles.sizeBtn, i !== ch.d && styles.btnDim]}
+                        onPress={() => pick({ d: i })}
+                      >
+                        <Text style={styles.sizeText}>{d.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={[styles.row, { marginTop: 6, flexWrap: 'wrap' }]}>
+                    {SIZES.map((sz, i) => (
+                      <TouchableOpacity
+                        key={sz}
+                        style={[styles.sizeBtn, i !== ch.s && styles.btnDim]}
+                        onPress={() => pick({ s: i })}
+                      >
+                        <Text style={styles.sizeText}>{sz}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.hint}>
+                    {MODES[ch.m].label} · 난이도 {DIFFICULTIES[ch.d].label} · 판 {SIZES[ch.s]}x{SIZES[ch.s]} ({tileCount(SIZES[ch.s])}칸)
+                  </Text>
+
+                  {inMatch ? (
+                    <>
+                      <TouchableOpacity
+                        style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
+                        onPress={() => {
+                          setSetup(null);
+                          setConfirmNew(false);
+                          setShowHelp(false);
+                        }}
+                      >
+                        <Text style={styles.btnText}>계속하기</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.btn, confirmNew ? styles.resetBtn : styles.modeBtn, { marginTop: 8 }, styles.soloBtn]}
+                        onPress={() => (confirmNew ? startNew() : setConfirmNew(true))}
+                      >
+                        <Text style={styles.btnText}>
+                          {confirmNew ? '정말 새 판 — 지금 판은 사라집니다' : '이 짜기로 새 판 시작'}
+                        </Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <TouchableOpacity
+                      style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
+                      onPress={startNew}
+                    >
+                      <Text style={styles.btnText}>{resumable ? '새로 시작' : '시작'}</Text>
+                    </TouchableOpacity>
+                  )}
+                </>
+              );
+            })()}
+          </ScrollView>
         </View>
       </Modal>
 
@@ -2560,7 +2782,7 @@ export default function GameScreen() {
               </Text>
 
               <TouchableOpacity
-                style={[styles.btn, styles.endBtn, { marginTop: 12 }]}
+                style={[styles.btn, styles.endBtn, { marginTop: 12 }, styles.soloBtn]}
                 onPress={() => answerDefense('fight')}
               >
                 <Text style={styles.btnText}>맞서 싸운다</Text>
@@ -2572,7 +2794,7 @@ export default function GameScreen() {
               {defenseAsk.options.includes('retreat') && (
                 <>
                   <TouchableOpacity
-                    style={[styles.btn, styles.modeBtn, { marginTop: 10 }]}
+                    style={[styles.btn, styles.modeBtn, { marginTop: 10 }, styles.soloBtn]}
                     onPress={() => answerDefense('retreat')}
                   >
                     <Text style={styles.btnText}>물러난다</Text>
@@ -2586,7 +2808,7 @@ export default function GameScreen() {
               {defenseAsk.options.includes('surrender') && (
                 <>
                   <TouchableOpacity
-                    style={[styles.btn, styles.resetBtn, { marginTop: 10 }]}
+                    style={[styles.btn, styles.resetBtn, { marginTop: 10 }, styles.soloBtn]}
                     onPress={() => answerDefense('surrender')}
                   >
                     <Text style={styles.btnText}>항복한다</Text>
@@ -2621,7 +2843,7 @@ export default function GameScreen() {
                 </Text>
 
                 <TouchableOpacity
-                  style={[styles.btn, styles.resetBtn, { marginTop: 12 }]}
+                  style={[styles.btn, styles.resetBtn, { marginTop: 12 }, styles.soloBtn]}
                   onPress={() => {
                     setState((prev) => {
                       const castle = prev.cells.find((c) => c.id === conquest.castleId)!;
@@ -2638,7 +2860,7 @@ export default function GameScreen() {
                 <Text style={styles.hint}>영토가 늘지만 행정비가 가팔라진다</Text>
 
                 <TouchableOpacity
-                  style={[styles.btn, styles.recruitBtn, { marginTop: 10 }]}
+                  style={[styles.btn, styles.recruitBtn, { marginTop: 10 }, styles.soloBtn]}
                   onPress={() => {
                     setState((prev) => {
                       const castle = prev.cells.find((c) => c.id === conquest.castleId)!;
@@ -2700,7 +2922,7 @@ export default function GameScreen() {
                   })}
             </ScrollView>
             <TouchableOpacity
-              style={[styles.btn, styles.endBtn]}
+              style={[styles.btn, styles.endBtn, styles.soloBtn]}
               onPress={() => setMerchantPick(null)}
             >
               <Text style={styles.btnText}>닫기</Text>

@@ -16,6 +16,7 @@ import { RNG } from '../services/combatSystem';
 import { GameState, EconomyConfig, DEFAULT_ECONOMY, Nation } from './types';
 import { computeLedger, nationStats, pushLog, cellPower } from './rules';
 import { adjustRep, loyaltyDrift, characterOf, effJ } from './reputation';
+import { recordHistory } from './history';
 
 /** 이 나라의 속국들 */
 export function vassalsOf(state: GameState, lordId: number): Nation[] {
@@ -78,6 +79,7 @@ export function vassalize(
   vassal.suzerain = lordId;
   vassal.vassalOrigin = origin;
   vassal.loyalty = origin === 'conquest' ? DEFAULT_ECONOMY.conquestLoyalty : 70;
+  recordHistory(state, { kind: origin === 'conquest' ? 'vassal' : 'protect', a: lordId, b: vassalId });
 
   if (origin === 'conquest') {
     // 정복의 평판은 처분(병합이냐 속국이냐)에서 붙는다 — rules.resolveCastleLoss
@@ -93,6 +95,7 @@ export function breakVassalage(state: GameState, vassalId: number, reason: strin
   const v = state.nations[vassalId];
   if (!v || v.suzerain === null) return;
   const lordName = state.nations[v.suzerain]?.name ?? '';
+  recordHistory(state, { kind: 'rebel', a: vassalId, b: v.suzerain });
   v.suzerain = null;
   v.vassalOrigin = null;
   v.loyalty = 50;
