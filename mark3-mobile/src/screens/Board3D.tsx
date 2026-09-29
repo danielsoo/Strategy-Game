@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { realm } from './realmTheme';
+import CampaignLand, { TerrainRing } from './CampaignLand';
 import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Cell, GameState } from '../engine';
@@ -21,12 +22,38 @@ interface Props {
   onCellPress: (c: Cell) => void;
 }
 const NO_RAYCAST = () => {};
-const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield'];
+const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield', 'foliage'];
+
+function GableRoof(){
+  const geometry=useMemo(()=>{
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute([-.7,-.5,-.7,.7,-.5,-.7,0,.5,-.7,-.7,-.5,.7,.7,-.5,.7,0,.5,.7],3));
+    g.setIndex([0,2,1,3,4,5,0,3,5,0,5,2,1,2,5,1,5,4,0,1,4,0,4,3]);g.computeVertexNormals();return g;
+  },[]);
+  useEffect(()=>()=>geometry.dispose(),[geometry]);return <primitive object={geometry} attach="geometry"/>;
+}
+
+// 여러 크기의 잎 무리를 하나의 인스턴스용 수관으로 합친다.
+function TreeCrown() {
+  const geometry=useMemo(()=>{
+    const leaf=new THREE.IcosahedronGeometry(1,0), source=leaf.getAttribute('position');
+    const vertices:number[]=[];
+    const clusters=[[0,.3,0,.68],[-.48,0,.1,.52],[.43,.05,.22,.56],[.1,-.25,-.43,.53],[-.15,.65,-.1,.43],[.24,.4,-.3,.47],[0,-.36,.25,.44]];
+    for(const [x,y,z,r] of clusters)for(let i=0;i<source.count;i++) {
+      const jagged=1+.14*Math.sin(i*7.3+x*19);
+      vertices.push(x+source.getX(i)*r*jagged,y+source.getY(i)*r,z+source.getZ(i)*r*jagged);
+    }
+    leaf.dispose();const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));g.computeVertexNormals();return g;
+  },[]);
+  useEffect(()=>()=>geometry.dispose(),[geometry]);return <primitive object={geometry} attach="geometry"/>;
+}
 
 function Geometry({ shape }: { shape: Shape | 'hex' }) {
   if (shape === 'hex') return <cylinderGeometry args={[1, 1, 1, 6]} />;
-  if (shape === 'cone') return <coneGeometry args={[1, 1, 5]} />;
-  if (shape === 'roof') return <coneGeometry args={[1, 1, 4]} />;
+  if (shape === 'cone') return <coneGeometry args={[1, 1, 9]} />;
+  if (shape === 'roof') return <GableRoof/>;
+  if (shape === 'foliage') return <TreeCrown/>;
   if (shape === 'tower') return <cylinderGeometry args={[1, 1.06, 1, 10]} />;
   if (shape === 'trunk') return <cylinderGeometry args={[1, 1, 1, 5]} />;
   if (shape === 'rock' || shape === 'shield') return <icosahedronGeometry args={[1, 0]} />;
@@ -34,7 +61,7 @@ function Geometry({ shape }: { shape: Shape | 'hex' }) {
   return <boxGeometry args={[1, 1, 1]} />;
 }
 
-/** Thousands of miniature parts share a handful of draw calls. */
+/** 수천 개의 지형 장식을 종류별로 묶어 그린다. */
 function Instances({ shape, pieces, onClick }: {
   shape: Shape | 'hex'; pieces: Piece[]; onClick?: (event: ThreeEvent<MouseEvent>) => void;
 }) {
@@ -71,7 +98,18 @@ function Instances({ shape, pieces, onClick }: {
           shader.fragmentShader='varying vec3 vStone;\n'+shader.fragmentShader;
           shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
             float grain=fract(sin(dot(floor(vStone*65.0),vec3(12.9898,78.233,45.164)))*43758.5453);
-            diffuseColor.rgb *= 0.91 + grain*0.15;
+            float row=floor(vStone.y*15.0);
+            float mortar=step(.89,fract(vStone.y*15.0))+step(.94,fract((vStone.x+vStone.z)*13.0+mod(row,2.0)*.5));
+            diffuseColor.rgb *= (0.85 + grain*0.22)*(1.0-min(mortar,1.0)*.2);
+          `);
+        }
+        if (shape === 'foliage' || shape === 'cone' || shape === 'roof') {
+          shader.vertexShader='varying vec3 vDetail;\n'+shader.vertexShader;
+          shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvDetail=(instanceMatrix*vec4(position,1.0)).xyz;');
+          shader.fragmentShader='varying vec3 vDetail;\n'+shader.fragmentShader;
+          shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
+            float speckle=fract(sin(dot(floor(vDetail*110.0),vec3(12.9898,78.233,45.164)))*43758.5453);
+            diffuseColor.rgb*=.68+speckle*.49;
           `);
         }
         if (shape !== 'flag') return;
@@ -209,17 +247,9 @@ function TroopCount({ tile }: { tile: Ground }) {
   }, [tile.cell.units]);
   useEffect(() => () => texture.dispose(), [texture]);
   return <sprite position={[tile.position[0], tile.height + 0.3, tile.position[2] + 0.84]}
-    scale={[0.58, 0.29, 1]} raycast={NO_RAYCAST} renderOrder={4}>
+    scale={[0.45, 0.225, 1]} raycast={NO_RAYCAST} renderOrder={4}>
     <spriteMaterial map={texture} transparent depthTest={false} toneMapped={false} />
   </sprite>;
-}
-
-function TileRing({ tile, selected }: { tile: Ground; selected: boolean }) {
-  return <mesh position={[tile.position[0], tile.height + 0.045, tile.position[2]]}
-    rotation={[-Math.PI / 2, 0, Math.PI / 6]} raycast={NO_RAYCAST}>
-    <ringGeometry args={[selected ? 0.86 : 0.91, 0.99, 6]} />
-    <meshBasicMaterial color={selected ? '#fff1bc' : '#e5b960'} side={THREE.DoubleSide} toneMapped={false} />
-  </mesh>;
 }
 
 /**
@@ -480,8 +510,8 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         onPointerUp={clearPointer} onPointerCancel={clearPointer} onPointerLeave={clearPointer}
         onWheel={e => zoomAt(Math.exp(e.deltaY * 0.0012), groundAt(e.clientX, e.clientY, e.currentTarget as Element))}>
         <CameraBridge into={cameraRef} />
-        <color attach="background" args={['#111e24']} />
-        <hemisphereLight args={['#dae9e5', '#414333', 1.55]} />
+        <color attach="background" args={['#303e35']} />
+        <hemisphereLight args={['#dde6d6', '#4c493b', 1.4]} />
         <directionalLight position={[-scene.span * 0.4, scene.span, scene.span * 0.35]} color="#ffe0a6" intensity={2.8}
           castShadow shadow-mapSize={compact?[1024,1024]:[2048,2048]} shadow-bias={-0.0004} shadow-normalBias={0.04}
           shadow-camera-left={-scene.span * 0.7} shadow-camera-right={scene.span * 0.7}
@@ -493,14 +523,14 @@ export default function Board3D({ state, player, watching, selected, movable, pa
           <planeGeometry args={[scene.span * 8, scene.span * 8]} />
           <meshStandardMaterial color="#18272c" roughness={1} />
         </mesh>
-        <Instances shape="hex" pieces={scene.ground} onClick={e => {
+        <CampaignLand ground={scene.ground} onPick={(index,e) => {
           e.stopPropagation();
-          if (moved.current || e.delta > 5 || e.instanceId === undefined) return;
-          onCellPress(scene.ground[e.instanceId].cell);
+          if (moved.current || e.delta > 5) return;
+          onCellPress(scene.ground[index].cell);
         }} />
         {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}
         {scene.ground.filter(t => movable.has(t.cell.id) || selected === t.cell.id).map(t =>
-          <TileRing key={t.cell.id} tile={t} selected={selected === t.cell.id} />)}
+          <TerrainRing key={t.cell.id} tile={t} ground={scene.ground} selected={selected === t.cell.id} />)}
         <WarMist cells={unknownMist} memory={false} />
         <WarMist cells={memoryMist} memory />
         {scene.ground.filter(t => t.seen && t.cell.units > 0).map(t => <TroopCount key={t.cell.id} tile={t} />)}
