@@ -11,7 +11,6 @@
 // 드문드문 뜯는다. 매번 조금씩 달라서 한 시간을 틀어놔도 덜 지친다.
 
 import { getSettings, onSettings } from './settings';
-import { startOrchestra, stopOrchestra } from './orchestra';
 
 type AC = AudioContext;
 let ctx: AC | null = null;
@@ -246,27 +245,59 @@ export function sfx(name: Sfx): void {
 }
 
 // ── 배경음 ───────────────────────────────────────────
-// 곡은 orchestra.ts. 여기서는 켜고 끄기만 한다.
-// (처음의 '낮은 지속음 + 도리안 몇 음' 은 사람이 들어보고 안 어울린다고 해서 버렸다.)
+// 실제 악기를 녹음한 표본으로 미리 구운 관현악 한 곡(public/music/theme.mp3)을 되풀이한다.
+// 끝의 울림을 처음에 겹쳐 구웠으므로 이음매 없이 돈다. 굽는 법은 docs/music.md.
+//
+// 버린 것: 브라우저에서 사인·톱니파로 빚은 관현악(orchestra.ts) — 사람이 들어보고
+// "기계음 같다, 실제 악기 소리로" 라고 했다. 그 전의 '지속음 + 도리안 몇 음' 도 같은 까닭.
 
+const MUSIC_URL = '/music/theme.mp3';
 let musicWanted = false;
-let playing = false;
+let musicBuf: AudioBuffer | null = null;
+let loading = false;
+let musicSrc: AudioBufferSourceNode | null = null;
 
-function syncMusic() {
+async function loadMusic(c: AudioContext): Promise<AudioBuffer | null> {
+  if (musicBuf || loading) return musicBuf;
+  loading = true;
+  try {
+    const res = await fetch(MUSIC_URL);
+    musicBuf = await c.decodeAudioData(await res.arrayBuffer());
+  } catch {
+    musicBuf = null; // 못 받으면 조용히 — 효과음은 그대로 난다
+  }
+  loading = false;
+  return musicBuf;
+}
+
+async function syncMusic() {
   const s = getSettings();
   const on = musicWanted && unlocked && !s.muted && s.music > 0;
   const c = audio();
-  if (on && !playing && c && musicBus) {
-    startOrchestra(c, musicBus);
-    playing = true;
-  } else if (!on && playing) {
-    stopOrchestra();
-    playing = false;
+  if (on && !musicSrc && c && musicBus) {
+    const buf = await loadMusic(c);
+    // 받는 사이에 꺼졌을 수 있다
+    const still = musicWanted && unlocked && !getSettings().muted && getSettings().music > 0;
+    if (!buf || musicSrc || !still) return;
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.connect(musicBus);
+    src.start();
+    musicSrc = src;
+  } else if (!on && musicSrc) {
+    try {
+      musicSrc.stop();
+    } catch {
+      /* 이미 멈췄다 */
+    }
+    musicSrc.disconnect();
+    musicSrc = null;
   }
 }
 
 /** 배경음을 켜고 끈다. 소리가 깨어나기 전이면 깨어날 때 시작한다. */
 export function setMusic(on: boolean): void {
   musicWanted = on;
-  syncMusic();
+  void syncMusic();
 }
