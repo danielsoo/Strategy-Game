@@ -10,6 +10,8 @@ import {terrainField} from './campaignTerrain';
 import CampaignLand from './CampaignLand';
 import RealmModels from './RealmModels';
 import RealmArmy from './RealmKnight';
+import RealmImpact from './RealmImpact';
+import type {ArmyAction} from './armyAnimation';
 import RealmDaylight from './RealmDaylight';
 import RealmGrass from './RealmGrass';
 import RealmLandscape from './RealmLandscape';
@@ -18,7 +20,7 @@ import {Instances,SHAPES} from './Board3D';
 const names=['왕실 성채','수도원 도시','변경 성','군대 대열','병사 상세','숲과 지면'];
 function SceneReady({onReady}:{onReady:(ready:boolean)=>void}){useEffect(()=>onReady(true),[onReady]);return null;}
 /** 실제 게임과 같은 모델·재질·배치 코드. 저장이나 게임 서버 요청은 하지 않는다. */
-function ReviewScene({variant,angle}:{variant:number;angle:number}){
+function ReviewScene({variant,angle,action}:{variant:number;angle:number;action:ArmyAction}){
   const scene=useMemo(()=>{
     const state=createGameState(2,9,9,makeRng(947));
     state.cells.forEach(c=>{c.units=0;c.castle=false;c.fortStage=0;c.owner=null;c.terrain=variant===5&&c.col<4?'forest':'plain';c.hasRoad=false;});
@@ -36,20 +38,22 @@ function ReviewScene({variant,angle}:{variant:number;angle:number}){
     <RealmDaylight/>
     <CampaignLand ground={scene.ground} onPick={()=>{}}/>
     {variant<3&&<><RealmModels ground={scene.ground}/><RealmLandscape ground={scene.ground}/>{SHAPES.map(shape=><Instances key={shape} shape={shape} pieces={scene.pieces[shape]}/>)}</>}
-    {variant!==5&&<RealmArmy ground={scene.ground} detail={variant===4}/>}
+    {variant!==5&&<RealmArmy ground={scene.ground} detail={variant===4} action={action}/>}
+    {variant===4&&(action==='attack'||action==='hit'||action==='block')&&<RealmImpact position={[-.35,scene.field.height(0,0)+1.05,.65]} scale={.8}/>}
     {variant===5&&<RealmModels ground={scene.ground} architecture={false}/>}
     {variant!==4&&<RealmGrass ground={scene.ground}/>}
   </>;
 }
 export default function RealmArtReview(){
-  const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:0),[angle,setAngle]=useState(.35);
+  const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('unit')==='1'?4:0),[angle,setAngle]=useState(.35);
+  const [action,setAction]=useState<ArmyAction>('idle');
   const [ready,setReady]=useState(false);
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
     {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>그래픽 작업본 · 실제 3D 렌더링</Text></View>
-    <View style={styles.tabs}>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</View></>}
-    <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>
+    <View style={styles.tabs}>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</View>{(variant===3||variant===4)&&<View style={styles.tabs}>{([['idle','대기'],['walk','걷기'],['attack','공격'],['block','방어'],['hit','피격']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View>}</>}
+    <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle} action={action}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>
     {!capture&&<View style={styles.footer}><TouchableOpacity accessibilityRole="button" accessibilityLabel="왼쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a-.5)}><Text style={styles.label}>↶ 왼쪽</Text></TouchableOpacity><Text style={styles.note}>{variant===5?'입체 수목 · 풀 · 낙엽과 흙':variant===4?'갑옷·방패·검 · 병사 모델 검토':variant===3?'병사 모델 · 대열과 크기 검토':variant===0?'영주관 · 예배당 · 시장과 시가지':variant===1?'석조 수도원 · 시장 · 골목과 주택':'목조 요새 · 장원 · 변경 마을'}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="오른쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a+.5)}><Text style={styles.label}>오른쪽 ↷</Text></TouchableOpacity></View>}
   </View>;
 }

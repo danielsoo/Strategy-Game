@@ -4,6 +4,7 @@ import { realm } from './realmTheme';
 import CampaignLand, { TerrainRing } from './CampaignLand';
 import RealmModels from './RealmModels';
 import RealmArmy from './RealmArmy';
+import type {BattleCue} from './armyTimeline';
 import ArmyStandard from './ArmyStandard';
 import RealmMinimap from './RealmMinimap';
 import RealmDaylight from './RealmDaylight';
@@ -19,6 +20,7 @@ import { buildMedievalScene, Ground, Mist, Piece, Shape, V3 } from './medievalSc
 
 interface Props {
   hud?: boolean;
+  battles?: BattleCue[];
   state: GameState;
   player: number;
   watching: boolean;
@@ -368,7 +370,7 @@ class SceneBoundary extends React.Component<{ children: React.ReactNode;onFailur
   }
 }
 
-export default function Board3D({ hud=false, state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
+export default function Board3D({ hud=false, battles, state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
   const [assetsReady,setAssetsReady]=useState(false);
   const [renderStats,setRenderStats]=useState<RenderStats|null>(null);
   const showStats=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('graphics')==='1';
@@ -423,6 +425,12 @@ export default function Board3D({ hud=false, state, player, watching, selected, 
   const cam = useRef({ yaw: 0.12, pitch: 0.88, target: [0, 0, 0] as V3 });
   cam.current.yaw = yaw;
   cam.current.pitch = pitch;
+  const focusedBattle=useRef(battles?.at(-1)?.sequence??0);
+  useEffect(()=>{const cue=battles?.at(-1);if(!cue||cue.sequence<=focusedBattle.current)return;focusedBattle.current=cue.sequence;
+    if(cue.attackerNation!==player&&cue.defenderNation!==player)return;
+    const from=scene.ground.find(g=>g.cell.id===cue.fromId),to=scene.ground.find(g=>g.cell.id===cue.toId);if(!from?.known||!to?.seen)return;
+    setTarget([(from.position[0]+to.position[0])/2,to.height,(from.position[2]+to.position[2])/2]);setZoom(.15);zoomRef.current=.15;setPitch(.72);
+  },[battles,scene,player]);
   const cameraRef = useRef<THREE.Camera | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   /** 오른쪽 단추(또는 Ctrl/Shift)로 끄는 중이면 돌리기 */
@@ -546,7 +554,7 @@ export default function Board3D({ hud=false, state, player, watching, selected, 
         <RealmModels ground={scene.ground}/>
         <RealmGrass ground={scene.ground}/>
         <RealmLandscape ground={scene.ground}/>
-        <RealmArmy ground={scene.ground}/>
+        <RealmArmy ground={scene.ground} battles={battles}/>
         {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}
         {scene.ground.filter(t => movable.has(t.cell.id) || selected === t.cell.id).map(t =>
           <TerrainRing key={t.cell.id} tile={t} ground={scene.ground} selected={selected === t.cell.id} />)}

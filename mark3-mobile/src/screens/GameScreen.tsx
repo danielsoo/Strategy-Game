@@ -14,6 +14,8 @@ import {
 import Board3D from './Board3D';
 import RealmMenu from './RealmMenu';
 import RealmHUD from './RealmHUD';
+import type {BattleCue} from './armyTimeline';
+import type {AttackOutcome} from '../engine';
 import { realm } from './realmTheme';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
 import {
@@ -420,7 +422,8 @@ function playOneNation(
   s: GameState,
   rng: RNG,
   aiPolicy?: Policy,
-  plan?: (s: GameState, id: number, w: AIWeights) => Cell | null | undefined
+  plan?: (s: GameState, id: number, w: AIWeights) => Cell | null | undefined,
+  onBattle?: (outcome:AttackOutcome,state:GameState)=>void
 ): void {
   if (s.winner !== null) return;
   const id = s.current;
@@ -432,6 +435,7 @@ function playOneNation(
     const log = takeAITurn(s, id, w, rng, undefined, aiPolicy, 0, plan?.(s, id, w));
     restUnmoved(s, id, log.moved);
     for (const a of log.attacks) {
+      onBattle?.(a,s);
       const res = a.result;
       const verb =
         res.outcome === 'attacker-win' ? '점령' : res.outcome === 'stalemate' ? '교착' : '격퇴당함';
@@ -503,6 +507,15 @@ export default function GameScreen() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
+  const [motionEpoch,setMotionEpoch]=useState(0);
+  const [pendingCombat,setPendingCombat]=useState<DetailedCombatResult|null>(null);
+  const [battleCues,setBattleCues]=useState<BattleCue[]>([]),battleSequence=useRef(0);
+  useEffect(()=>{if(!pendingCombat)return;const timer=setTimeout(()=>{setCombat(pendingCombat);setPendingCombat(null);},2800);return()=>clearTimeout(timer);},[pendingCombat]);
+  const queueBattle=(outcome:AttackOutcome,s:GameState)=>{
+    const from=s.cells.find(c=>c.id===outcome.fromId),to=s.cells.find(c=>c.id===outcome.toId);
+    if(!from||!to||!outcome.result.rounds.length||!isVisible(s,PLAYER,from)||!isVisible(s,PLAYER,to))return;
+    const cue={...outcome,sequence:++battleSequence.current};setBattleCues(q=>[...q.slice(-11),cue]);
+  };
   const [merchantPick, setMerchantPick] = useState<Merchant | null>(null);
   // 폰(좁은 화면)에서는 나라 표를 접은 채 시작한다 — 판이 먼저 보여야 한다
   const [showStats, setShowStats] = useState(
@@ -718,14 +731,14 @@ export default function GameScreen() {
   // 성 하나당 한 턴에 한 번. 성이 많으면 그만큼 더 뽑는다.
   const readyCastles = recruitableCastles(state, PLAYER).length;
   const ledger = useMemo(() => computeLedger(state, PLAYER), [state]);
-  const myTurn = !watching && state.current === PLAYER && state.winner === null;
+  const myTurn = !watching && !pendingCombat && state.current === PLAYER && state.winner === null;
 
   // ── 관전 모드: 한 나라씩 자동으로 둔다 ────────────────────
   useEffect(() => {
     if (!watching || state.winner !== null) return;
     const t = setTimeout(() => {
       setState((prev) => {
-        playOneNation(prev, rng, aiPolicy, planFor);
+        playOneNation(prev, rng, aiPolicy, planFor, queueBattle);
         return bump(prev);
       });
     }, SPEEDS[speedIdx].ms);
@@ -791,7 +804,7 @@ export default function GameScreen() {
     if (Platform.OS !== 'web') return;
     const onKey = (e: KeyboardEvent) => {
       // 무언가 물어보는 중이면 키는 끈다. 모르고 누른 Enter 가 턴을 넘기면 안 된다.
-      const asking = showHelp || !!defenseAsk || !!conquest || !!merchantPick || showVassals;
+      const asking = showHelp || !!combat || !!pendingCombat || !!defenseAsk || !!conquest || !!merchantPick || showVassals;
 
       if (e.key === 'Escape') {
         if (placing) {
@@ -824,7 +837,7 @@ export default function GameScreen() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    showHelp, defenseAsk, conquest, merchantPick, showVassals,
+    showHelp, combat, pendingCombat, defenseAsk, conquest, merchantPick, showVassals,
     placing, pathTo, myTurn, state, readyCastles,
   ]);
 
@@ -878,6 +891,7 @@ export default function GameScreen() {
     setSelected(null);
     setPathTo(null);
     setCombat(null);
+    setPendingCombat(null);setBattleCues([]);setMotionEpoch(v=>v+1);
     setState(file.state);
     setShowHelp(false);
     /*
@@ -1021,7 +1035,8 @@ export default function GameScreen() {
         const wasNeutral = to.neutral;
         const outcome = performAttack(prev, from, to, rng);
         // 빠른 전투면 결과 창 없이 기록 한 줄로만 (설정)
-        if (!getSettings().quickCombat) setCombat(outcome.result);
+        queueBattle(outcome,prev);
+        if (!getSettings().quickCombat) {if(use3D&&can3D&&outcome.result.rounds.length)setPendingCombat(outcome.result);else setCombat(outcome.result);}
         else
           pushLog(
             prev,
@@ -1398,6 +1413,7 @@ export default function GameScreen() {
         판 기록에도 아무것도 안 남아서, 남겨봐야 형세 숫자뿐이었다.
       */
       for (const a of step.value.attacks) {
+        queueBattle(a,s);
         const res = a.result;
         const verb =
           res.outcome === 'attacker-win' ? '점령' : res.outcome === 'stalemate' ? '교착' : '격퇴당함';
@@ -1427,6 +1443,7 @@ export default function GameScreen() {
   };
 
   const endTurn = () => {
+    if(pendingCombat)return;
     setSelected(null);
     setState((prev) => {
       // 움직인 부대는 쉬지 못한다. 빈 집합을 넘기면 플레이어만 피로가 안 쌓여
@@ -1458,7 +1475,7 @@ export default function GameScreen() {
 
   const stepOnce = () => {
     setState((prev) => {
-      playOneNation(prev, rng, aiPolicy, planFor);
+      playOneNation(prev, rng, aiPolicy, planFor, queueBattle);
       return bump(prev);
     });
   };
@@ -1497,6 +1514,7 @@ export default function GameScreen() {
     });
     setSelected(null);
     setCombat(null);
+    setPendingCombat(null);setBattleCues([]);setMotionEpoch(v=>v+1);
     actedRef.current = new Set();
   };
 
@@ -1920,7 +1938,7 @@ export default function GameScreen() {
       </View>
 
 
-      {realmHUD&&<RealmHUD state={state} player={PLAYER} selected={selectedCell} myTurn={myTurn} income={ledger.net} readyCastles={readyCastles} recruitCost={DEFAULT_ECONOMY.recruitCost} fortCost={DEFAULT_ECONOMY.fortCost} canFort={!!fortCheck?.ok} vassals={myVassals.length}
+      {realmHUD&&<RealmHUD busy={!!pendingCombat} state={state} player={PLAYER} selected={selectedCell} myTurn={myTurn} income={ledger.net} readyCastles={readyCastles} recruitCost={DEFAULT_ECONOMY.recruitCost} fortCost={DEFAULT_ECONOMY.fortCost} canFort={!!fortCheck?.ok} vassals={myVassals.length}
         note={preview?`${preview.steps.length}칸 · ${preview.turns===0?'이번 턴 도착':`${preview.turns}턴 후 도착`} · 목적지를 다시 누르면 행군`:selectedCell?.order?'명령받은 목적지로 행군 중':''}
         onRecruit={()=>setState(prev=>{const got=recruit(prev,PLAYER);if(got>0)sfx('recruit');humanRef.current.recruited+=got;tutRef.current.recruits+=got;return bump(prev);})}
         onEnd={endTurn} onFort={buildFortHandler()} onMenu={()=>setShowHelp(true)} onSettings={()=>setShowSettings(true)} onDiplo={()=>{setDiploNote(null);setShowDiplo(true);}} onVassals={()=>{setOrderNote(null);setShowVassals(true);}} onDetails={()=>setRealmDetails(v=>!v)} onMap={()=>setUse3D(false)}/>}
@@ -2038,8 +2056,9 @@ export default function GameScreen() {
       >
         {use3D && can3D ? (
           <View style={{ width: boardBox.width, height: boardBox.height }}>
-            <Board3D
+            <Board3D key={motionEpoch}
               hud={realmHUD}
+              battles={battleCues}
               state={state}
               player={PLAYER}
               watching={watching}
@@ -2537,7 +2556,7 @@ export default function GameScreen() {
       </Modal>
 
       <EncounterCard
-        encounter={!combat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
+        encounter={!combat && !pendingCombat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
         onPick={(choice) => {
           const e = encQueueRef.current.shift();
           if (!e) return;
@@ -2553,7 +2572,7 @@ export default function GameScreen() {
         proposal={
           myTurn &&
           !showHelp &&
-          !combat &&
+          !combat && !pendingCombat &&
           !defenseAsk &&
           !conquest &&
           !showVassals &&
@@ -2856,7 +2875,7 @@ export default function GameScreen() {
         </View>
       </Modal>
 
-      <Modal visible={!!conquest} transparent animationType="fade">
+      <Modal visible={!!conquest&&!pendingCombat} transparent animationType="fade">
         <View style={styles.overlay}>
           <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
             {conquest && (
