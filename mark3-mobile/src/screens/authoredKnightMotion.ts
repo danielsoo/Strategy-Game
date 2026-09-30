@@ -27,7 +27,8 @@ const H=(s:number)=>V([s*.135,.83,0]),K=(s:number)=>V([s*.14,.45,.01]),F=(s:numb
 const align=(a:T.Vector3,b:T.Vector3)=>new T.Quaternion().setFromUnitVectors(a.clone().normalize(),b.clone().normalize());
 const segmentCorrection=(a:T.Vector3,b:T.Vector3,i:number,j:number)=>align(b.clone().sub(a),rests[2][j].p.clone().sub(rests[2][i].p));
 const corrections=[segmentCorrection(S(-1),E(-1),5,6),segmentCorrection(E(-1),W(-1),6,7),segmentCorrection(S(1),E(1),8,9),segmentCorrection(E(1),W(1),9,10),segmentCorrection(H(-1),K(-1),11,12),segmentCorrection(K(-1),F(-1),12,13),segmentCorrection(H(1),K(1),14,15),segmentCorrection(K(1),F(1),15,16)];
-const shieldSocket=Q(clips.Idle_Shield_Loop.frames[0].slice(73,77)).invert().multiply(shieldRotation([0,0,1]));
+// 원본 법선은 손잡이가 있는 뒷면 방향이다. 문장이 있는 앞면을 상대에게 향하게 한다.
+const shieldSocket=Q(clips.Idle_Shield_Loop.frames[0].slice(73,77)).invert().multiply(shieldRotation([0,0,-1]));
 /** 날·가드·손잡이의 축이 명확한 한손검. 큰 갈고리형 가드가 손목 윤곽을 가리지 않는다. */
 function buildArmingSword(){
  const group=new T.Group(),steel=new T.MeshStandardMaterial({color:'#abb4bb',metalness:.93,roughness:.29}),leather=new T.MeshStandardMaterial({color:'#29231f',roughness:.92}),darkSteel=new T.MeshStandardMaterial({color:'#565f65',metalness:.85,roughness:.4});
@@ -102,7 +103,7 @@ export function knightTransforms(p:Pose){
   }else{
    // 방패 면과 손잡이를 같은 아래팔 좌표계에 붙인다.
    const shieldQ=actualHandQ.clone().multiply(shieldSocket);
-   const grip=wrist.clone().add(V([.025,.076,0]).applyQuaternion(actualHandQ));set(13,grip.add(V(SHIELD_REST_NORMAL).multiplyScalar(.09).applyQuaternion(shieldQ)),shieldQ);
+   const grip=wrist.clone().add(V([.025,.076,0]).applyQuaternion(actualHandQ));set(13,grip.add(V(SHIELD_REST_NORMAL).multiplyScalar(-.09).applyQuaternion(shieldQ)),shieldQ);
   }
   const leg=right?9:11,k=right?11:14,l=right?4:6,hip=pelvis.clone().add(H(s).sub(V([0,.8,0])).applyQuaternion(p[0].q));
   const thighQ=p[k].q.clone().multiply(corrections[l]),calfQ=p[k+1].q.clone().multiply(corrections[l+1]);
@@ -111,7 +112,7 @@ export function knightTransforms(p:Pose){
  }
  const lift=.08-Math.min(bones[14].position.y,bones[15].position.y);
  bones.forEach(b=>b.position.y+=lift);hands.forEach(h=>h.position.y+=lift);
- return {bones,hands,tip:V([0,0,.87]).applyQuaternion(bones[16].quaternion).add(bones[16].position),grip:bones[16].position.clone(),shield:bones[13].position.clone(),normal:V(SHIELD_REST_NORMAL).applyQuaternion(bones[13].quaternion).normalize()};
+ return {bones,hands,tip:V([0,0,.87]).applyQuaternion(bones[16].quaternion).add(bones[16].position),grip:bones[16].position.clone(),shield:bones[13].position.clone(),normal:V(SHIELD_REST_NORMAL).negate().applyQuaternion(bones[13].quaternion).normalize()};
 }
 export function poseAuthoredKnight(rig:AuthoredRig,p:Pose){
  const f=knightTransforms(p);
@@ -133,7 +134,7 @@ const plans=atTimes.map((at,n)=>{
  const point=a.grip.clone().lerp(a.tip,.65),targetX=-target.x;
  const yaw=Math.asin(T.MathUtils.clamp(targetX/Math.hypot(point.x,point.z),-.95,.95))-Math.atan2(point.x,point.z);
  const rotated=point.clone().applyAxisAngle(V([0,1,0]),yaw);
- return {yaw,distance:rotated.z+target.z+[.024,.091,.075][n]};
+ return {yaw,distance:rotated.z+target.z+[.044,.049,.075][n]};
 });
 export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
  const time=T.MathUtils.clamp(seconds,0,AUTHORED_DUEL_DURATION),poses:[Pose,Pose]=[combatPose(time),combatPose(time)],roots=[V([-.9,0,0]),V([.9,0,0])],yaws=[Math.PI/2,-Math.PI/2];
