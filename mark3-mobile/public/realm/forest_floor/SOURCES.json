@@ -1,0 +1,32 @@
+[
+  {
+    "file": "forest_floor\\diff.jpg",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_floor/forest_floor_diff_2k.jpg",
+    "md5": "a93f845fca105e6cabc82853161ff7b6"
+  },
+  {
+    "file": "forest_floor\\nor_gl.jpg",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_floor/forest_floor_nor_gl_2k.jpg",
+    "md5": "41e49ec58f74a749e325f59290266e9d"
+  },
+  {
+    "file": "forest_floor\\rough.jpg",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/2k/forest_floor/forest_floor_rough_2k.jpg",
+    "md5": "4d8070c33b0daf195fd2a054faa2a491"
+  },
+  {
+    "file": "mobile\\forest_floor\\diff.jpg",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_floor/forest_floor_diff_1k.jpg",
+    "md5": "d67f308e4b8be6a65989e8dc76ec40fe"
+  },
+  {
+    "file": "mobile\\forest_floor\\nor_gl.jpg",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_floor/forest_floor_nor_gl_1k.jpg",
+    "md5": "7cb480d082527766acdf3b6c8cba50f4"
+  },
+  {
+    "file": "mobile\\forest_floor\\rough.jpg",
+    "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_floor/forest_floor_rough_1k.jpg",
+    "md5": "446092b42424c7bcf15994d651949546"
+  }
+]

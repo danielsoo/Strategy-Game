@@ -6,12 +6,13 @@ import {campaignSurface,campaignBorders,campaignBackdrop,terrainField} from './c
 import {useRealmMaterial} from './realmAssets';
 
 function TerrainMaterial(){
-  const grass=useRealmMaterial('grass_ground'),rock=useRealmMaterial('aerial_rocks_02');
+  const grass=useRealmMaterial('grass_ground'),rock=useRealmMaterial('aerial_rocks_02'),floor=useRealmMaterial('forest_floor');
   return <meshStandardMaterial side={THREE.DoubleSide} normalMap={grass.normalMap} normalScale={new THREE.Vector2(.65,.65)} roughnessMap={grass.roughnessMap} roughness={1} onBeforeCompile={shader=>{
         shader.uniforms.uGrass={value:grass.map};shader.uniforms.uRock={value:rock.map};shader.uniforms.uRockNormal={value:rock.normalMap};
+        shader.uniforms.uFloor={value:floor.map};shader.uniforms.uFloorNormal={value:floor.normalMap};shader.uniforms.uFloorRough={value:floor.roughnessMap};shader.uniforms.uGrassNormal={value:grass.normalMap};
         shader.vertexShader='varying vec3 vLandscape; varying vec3 vRealm; attribute vec3 realmMask;\n'+shader.vertexShader;
         shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvLandscape=position;vRealm=realmMask;');
-        shader.fragmentShader=`varying vec3 vLandscape;varying vec3 vRealm;uniform sampler2D uGrass;uniform sampler2D uRock;uniform sampler2D uRockNormal;
+        shader.fragmentShader=`varying vec3 vLandscape;varying vec3 vRealm;uniform sampler2D uGrass;uniform sampler2D uRock;uniform sampler2D uRockNormal;uniform sampler2D uFloor;uniform sampler2D uFloorNormal;uniform sampler2D uFloorRough;uniform sampler2D uGrassNormal;
           float hashland(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
           float nland(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hashland(i),hashland(i+vec2(1,0)),f.x),mix(hashland(i+vec2(0,1)),hashland(i+vec2(1,1)),f.x),f.y);}
         `+shader.fragmentShader;
@@ -20,15 +21,24 @@ function TerrainMaterial(){
           float stone=smoothstep(.95,1.8,vLandscape.y+soil*.25);
           vec3 axis=pow(abs(normalize(cross(dFdx(vLandscape),dFdy(vLandscape)))),vec3(4.0));axis/=max(dot(axis,vec3(1.0)),.001);
           float meadow=smoothstep(.35,.7,nland(vLandscape.xz*.48)+nland(vLandscape.xz*2.7)*.18);
-          vec3 turf=texture2D(uGrass,vLandscape.xz*.65).rgb*mix(vec3(.80,1.25,.83),vec3(1.07,1.14,.83),meadow);
-          turf=mix(turf,turf*vec3(.68,.71,.55),vRealm.z*.72);
+          vec2 groundUV=vLandscape.xz*4.0;
+          vec3 turf=texture2D(uGrass,groundUV).rgb*mix(vec3(.82,.96,.77),vec3(1.0,1.02,.88),meadow);
+          float litter=clamp(vRealm.z*.88+smoothstep(.62,.83,soil)*.42,0.,.94)*(1.-vRealm.y);
+          vec3 woodland=texture2D(uFloor,groundUV).rgb;
+          turf=mix(turf,woodland,litter);
           vec3 cliff=texture2D(uRock,vLandscape.yz*.4).rgb*axis.x+texture2D(uRock,vLandscape.xz*.4).rgb*axis.y+texture2D(uRock,vLandscape.xy*.4).rgb*axis.z;
           cliff=mix(cliff,vec3(dot(cliff,vec3(.2126,.7152,.0722))),.42)*vec3(.92,.98,1.04);
           stone=max(stone,smoothstep(.35,.85,1.0-axis.y));
           turf=mix(turf,vec3(.39,.32,.21)*(texture2D(uRock,vLandscape.xz*.8).rgb+.4),vRealm.y*.95);
           diffuseColor.rgb=mix(turf,cliff,stone)*(.84+soil*.28)*mix(vec3(.12,.20,.23),vec3(1.0),vRealm.x);
         `);
-        shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+        shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
+          roughnessFactor=mix(.92,texture2D(uFloorRough,groundUV).r,litter);
+        `);
+        shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`
+          vec3 groundNormal=mix(texture2D(uGrassNormal,groundUV).xyz,texture2D(uFloorNormal,groundUV).xyz,litter)*2.-1.;
+          groundNormal.xy*=.7;
+          normal=normalize(getTangentFrame(-vViewPosition,normal,groundUV)*groundNormal);
           vec3 rockNormal=texture2D(uRockNormal,vLandscape.xz*.33+vLandscape.y*.14).xyz*2.0-1.0;
           normal=normalize(mix(normal,getTangentFrame(-vViewPosition,normal,vLandscape.xz*.33+vLandscape.y*.14)*rockNormal,smoothstep(.65,1.6,vLandscape.y)*.65));
         `);

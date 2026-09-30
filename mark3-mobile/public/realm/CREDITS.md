@@ -27,3 +27,13 @@ Poly Haven의 CC0 1.0 자산을 게임에 포함했습니다. PC는 2K, 작은 �
 재생성: `python tools/fetch-realm-assets.py`, `node tools/prepare-realm-tree.cjs`.
 
 추가 식생: `python tools/fetch-realm-diversity.py`, `node tools/prepare-realm-tree.cjs pine_sapling_small`, `node tools/prepare-realm-tree.cjs shrub_01`. 건축 변환: `python tools/build-medieval-architecture.py`. 3종 도시 배치와 4종 병력 모델은 프로젝트 코드이다.
+
+## 사실적 그래픽 작업본 추가 자산
+
+- 검·방패병: [Knight — piacenti](https://opengameart.org/content/knight-2), [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). [변환·출처 기록](knight/CREDITS.md). 현재 검·방패병만 원본 모델로 교체했고 나머지 병종은 기존 모델이다.
+- 풀: [Grass Medium 01](https://polyhaven.com/a/grass_medium_01), Poly Haven, CC0. 원본 glTF의 세 군락 변형을 사용하며 비례·UV·재질을 보존한다.
+- 고사리: [Fern 02](https://polyhaven.com/a/fern_02), Poly Haven, CC0.
+- 숲 바닥: [Forest Floor](https://polyhaven.com/a/forest_floor), Poly Haven, CC0. 색·법선·거칠기 원본을 PC 2K / 모바일 1K로 사용한다.
+- 환경광: [Kloofendal 48d Partly Cloudy Pure Sky](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky), Greg Zaal / Jarod Guest, CC0.
+
+재생성: `python -X utf8 tools/fetch-realm-floor.py`, `python -X utf8 tools/fetch-realm-undergrowth.py`, `python tools/prepare-realm-knight.py`.

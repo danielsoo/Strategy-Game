@@ -4,6 +4,8 @@ import { realm } from './realmTheme';
 import CampaignLand, { TerrainRing } from './CampaignLand';
 import RealmModels from './RealmModels';
 import RealmArmy from './RealmArmy';
+import RealmDaylight from './RealmDaylight';
+import RealmGrass from './RealmGrass';
 import RealmLandscape from './RealmLandscape';
 import RealmAtmosphere,{RenderStats} from './RealmAtmosphere';
 import {useRealmMaterial} from './realmAssets';
@@ -545,13 +547,6 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         onWheel={e => zoomAt(Math.exp(e.deltaY * 0.0012), groundAt(e.clientX, e.clientY, e.currentTarget as Element))}>
         <CameraBridge into={cameraRef} />
         <color attach="background" args={['#a6b9b7']} />
-        <hemisphereLight args={['#d8e3ec', '#434935', 1.1]} />
-        <directionalLight position={[-scene.span * 0.5, scene.span*.8, scene.span * 0.4]} color="#fff0d9" intensity={2.7}
-          castShadow shadow-mapSize={compact?[2048,2048]:[4096,4096]} shadow-bias={-0.00015} shadow-normalBias={0.012}
-          shadow-camera-left={-scene.span * 0.7} shadow-camera-right={scene.span * 0.7}
-          shadow-camera-top={scene.span * 0.7} shadow-camera-bottom={-scene.span * 0.7}
-          shadow-camera-near={0.1} shadow-camera-far={scene.span * 3} />
-        <directionalLight position={[0, 8, -12]} color="#a6c9e5" intensity={0.65} />
         <Rig yaw={yaw} pitch={pitch} span={scene.span} zoom={zoom} target={target} height={heightField.height}/>
         <RealmAtmosphere onStats={showStats?setRenderStats:undefined}/>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.09, 0]} receiveShadow raycast={NO_RAYCAST}>
@@ -559,12 +554,14 @@ export default function Board3D({ state, player, watching, selected, movable, pa
           <meshStandardMaterial color="#18272c" roughness={1} />
         </mesh>
         <Suspense fallback={null}>
+        <RealmDaylight/>
         <CampaignLand ground={scene.ground} onPick={(index,e) => {
           e.stopPropagation();
           if (moved.current || e.delta > 5) return;
           onCellPress(scene.ground[index].cell);
         }} />
         <RealmModels ground={scene.ground}/>
+        <RealmGrass ground={scene.ground}/>
         <RealmLandscape ground={scene.ground}/>
         <RealmArmy ground={scene.ground}/>
         {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}

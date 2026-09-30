@@ -4,6 +4,7 @@ import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils';
 import type {Ground,Piece,V3} from './medievalScene';
 import {terrainField} from './campaignTerrain';
 import {armyFormation,ArmyKind} from './realmLayout';
+import RealmKnight from './RealmKnight';
 
 type Surface='mail'|'steel'|'cloth'|'leather'|'wood'|'skin'|'horse'|'dark';
 const colors:Record<Surface,string>={mail:'#636962',steel:'#a0aaa5',cloth:'#b7b3a3',leather:'#483c30',wood:'#786042',skin:'#b2967c',horse:'#66513d',dark:'#242a28'};
@@ -100,5 +101,5 @@ export default function RealmArmy({ground}:{ground:Ground[]}){
         out[p.kind].push({position:[x,field.height(x,z)+.008,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:cloth});}}
     return out;
   },[ground]);
-  return <group>{(Object.keys(models) as ArmyKind[]).flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]}/>))}</group>;
+  return <group><RealmKnight ground={ground} kind="guard"/>{(Object.keys(models) as ArmyKind[]).filter(k=>k!=='guard').flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]}/>))}</group>;
 }

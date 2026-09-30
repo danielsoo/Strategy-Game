@@ -12,13 +12,13 @@ const random=(n:number)=>{const a=Math.sin(n*127.1+311.7)*43758.5453;return a-Ma
 type Part={geometry:THREE.BufferGeometry;material:THREE.Material|THREE.Material[]};
 
 // 모듈 전시용 위치를 제거하고 밑면 중앙이 원점인 단위 모델로 정규화한다.
-function partsOf(root:THREE.Object3D,uniform=false):Part[]{
+export function partsOf(root:THREE.Object3D,uniform=false):Part[]{
   root.updateWorldMatrix(true,true);
   const inverse=root.matrixWorld.clone().invert(),box=new THREE.Box3(),parts:Part[]=[];
   root.traverse(obj=>{if(!(obj as THREE.Mesh).isMesh)return;const mesh=obj as THREE.Mesh;
     const geometry=mesh.geometry.clone().applyMatrix4(inverse.clone().multiply(mesh.matrixWorld));geometry.computeBoundingBox();box.union(geometry.boundingBox!);
     const materials=(Array.isArray(mesh.material)?mesh.material:[mesh.material]).map(m=>{const copy=m.clone() as THREE.MeshStandardMaterial;copy.side=THREE.DoubleSide;copy.transparent=false;copy.depthWrite=true;
-      if(copy.name.includes('leaves')){copy.emissive.set('#445528');copy.emissiveIntensity=.42;}
+      if(copy.name.includes('leaves')){copy.emissive.set('#000000');copy.emissiveIntensity=0;copy.roughness=.88;}
       for(const tex of [copy.map,copy.normalMap,copy.roughnessMap])if(tex)tex.anisotropy=8;return copy;});
     parts.push({geometry,material:Array.isArray(mesh.material)?materials:materials[0]});});
   const size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
@@ -26,14 +26,14 @@ function partsOf(root:THREE.Object3D,uniform=false):Part[]{
   return parts;
 }
 
-function MeshBatch({part,places}:{part:Part;places:Piece[]}){
+export function MeshBatch({part,places,castShadow=true}:{part:Part;places:Piece[];castShadow?:boolean}){
   const ref=useRef<THREE.InstancedMesh>(null);
   useLayoutEffect(()=>{if(!ref.current)return;const obj=new THREE.Object3D(),color=new THREE.Color();
     places.forEach((p,i)=>{obj.position.set(...p.position);obj.scale.set(...p.scale);obj.rotation.set(...(p.rotation??[0,0,0]));obj.updateMatrix();ref.current!.setMatrixAt(i,obj.matrix);ref.current!.setColorAt(i,color.set(p.color));});
     ref.current.instanceMatrix.needsUpdate=true;if(ref.current.instanceColor)ref.current.instanceColor.needsUpdate=true;ref.current.computeBoundingSphere();
   },[places,part]);
   if(!places.length)return null;
-  return <instancedMesh key={places.length} ref={ref} args={[part.geometry,part.material,places.length]} castShadow receiveShadow raycast={ignore} dispose={null}/>;
+  return <instancedMesh key={places.length} ref={ref} args={[part.geometry,part.material,places.length]} castShadow={castShadow} receiveShadow raycast={ignore} dispose={null}/>;
 }
 
 /** 실제 모델을 네 방향에서 구워 원거리 수목의 잎·가지 실루엣을 보존한다. */
@@ -56,7 +56,7 @@ function Forest({parts,trees}:{parts:Part[];trees:Piece[]}){
   const [near,setNear]=useState<number[]>([]),last=useRef(''),tick=useRef(0);
   useFrame(({camera,size,clock})=>{if(clock.elapsedTime-tick.current<.3)return;tick.current=clock.elapsedTime;
     const candidates=trees.map((p,i)=>({i,d:camera.position.distanceTo(new THREE.Vector3(...p.position)),h:p.scale[1]}))
-      .filter(p=>p.h/Math.max(.1,p.d)*size.height>29).sort((a,b)=>a.d-b.d).slice(0,18).map(p=>p.i);
+      .filter(p=>p.h/Math.max(.1,p.d)*size.height>20).sort((a,b)=>a.d-b.d).slice(0,size.width<700?20:48).map(p=>p.i);
     const key=candidates.join(',');if(key!==last.current){last.current=key;setNear(candidates);}
   });
   const targets=useMemo(()=>bakeTree(parts,gl),[parts,gl]);
@@ -78,7 +78,7 @@ function Forest({parts,trees}:{parts:Part[];trees:Piece[]}){
   </instancedMesh>)}{parts.map((part,i)=><MeshBatch key={'detail'+i} part={part} places={detail}/>)}</group>;
 }
 
-export default function RealmModels({ground}:{ground:Ground[]}){
+export default function RealmModels({ground,architecture=true}:{ground:Ground[];architecture?:boolean}){
   const root=useRealmAssetRoot();
   const [tree,rock,pine,shrub]=useLoader(GLTFLoader,['/realm/tree_small_02/campaign-tree.gltf',`${root}rock_face_01/model.gltf`,'/realm/pine_sapling_small/campaign-tree.gltf','/realm/shrub_01/campaign-tree.gltf']);
   const models=useMemo(()=>{
@@ -111,7 +111,7 @@ export default function RealmModels({ground}:{ground:Ground[]}){
   },[ground]);
   return <group>
     {models.rock.map((part,i)=><MeshBatch key={'rock'+i} part={part} places={places.rock}/>)}
-    <RealmArchitecture ground={ground}/>
+    {architecture&&<RealmArchitecture ground={ground}/>}
     <Forest parts={models.tree} trees={places.tree}/>
     <Forest parts={models.pine} trees={places.pine}/>
     <Forest parts={models.shrub} trees={places.shrub}/>
