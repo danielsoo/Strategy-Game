@@ -48,23 +48,25 @@ function ReviewScene({variant,angle,action,clock,onPhase,closeup}:{variant:numbe
 export default function RealmArtReview(){
   const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('unit')==='1'?4:0),[angle,setAngle]=useState(.35);
   const clock=useRef<DuelClock>({time:0,paused:false,speed:1,first:0}).current;
-  const [closeup,setCloseup]=useState(false);
+  const [closeup,setCloseup]=useState(false),[reviewCut,setReviewCut]=useState(0);
   const [phase,setPhase]=useState('서로 거리를 좁힙니다'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false);
   const [action,setAction]=useState<ArmyAction>('idle');
   const [ready,setReady]=useState(false);
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>손목·베기 수정본 2 · 사선베기 / 횡베기</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>방패 방어·반동 수정본 3 · 사선베기 / 횡베기</Text></View>
     <View style={styles.tabs}>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</View>{variant===3&&<View style={styles.tabs}>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View>}{variant===4&&<><View style={styles.tabs}>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
-      ['사선베기',()=>{clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
-      ['횡베기',()=>{clock.time=CONTACT_TIMES[1]-.7;clock.paused=false;setPaused(false);}],
+      ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
+      ['횡베기',()=>{setReviewCut(1);clock.time=CONTACT_TIMES[1]-.7;clock.paused=false;setPaused(false);}],
       ['적군 선공',()=>{clock.first=1;clock.time=0;clock.paused=false;setPaused(false);}],
       [paused?'재생':'일시정지',()=>{clock.paused=!clock.paused;setPaused(clock.paused);}],
       [slow?'정상 속도':'느리게 보기',()=>{clock.speed=slow?1:.3;setSlow(!slow);}],
-      ['접촉 순간',()=>{clock.time=CONTACT_TIMES[0];clock.paused=true;setPaused(true);}],
+      ['접촉 순간',()=>{clock.time=CONTACT_TIMES[reviewCut];clock.paused=true;setPaused(true);}],
       [closeup?'전체 자세':'손목 확대',()=>setCloseup(!closeup)],
+      ['준비 자세',()=>{clock.time=CONTACT_TIMES[reviewCut]-.34;clock.paused=true;setPaused(true);}],
+      ['이전 단계',()=>{clock.time=Math.max(0,clock.time-.08);clock.paused=true;setPaused(true);}],
       ['한 단계',()=>{clock.time=(clock.time+.08)%DUEL_DURATION;clock.paused=true;setPaused(true);}],
     ] as [string,()=>void][]).map(([label,fn])=><TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={fn} style={styles.button}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View><Text style={[styles.note,{paddingHorizontal:16,paddingBottom:8}]}>푸른 원: 아군 · 붉은 원: 적군 — {phase}</Text></>}</>}
     <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle} action={action} clock={clock} onPhase={setPhase} closeup={closeup}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>

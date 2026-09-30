@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils';
 import {tagKnightEquipment} from './armyAnimation';
-import {FighterPose,Point,jointIK,solveSwordArm,SWORD_REST_DIRECTION,SWORD_FOREARM} from './duelMotion';
+import {FighterPose,Point,jointIK,solveSwordArm,SWORD_REST_DIRECTION,SWORD_FOREARM,shieldGrip,shieldRotation} from './duelMotion';
 
 const V=(p:Point)=>new THREE.Vector3(...p);
 const shoulder=(s:number):Point=>[s*.24,1.34,0];
@@ -10,7 +10,7 @@ const wrist=(s:number):Point=>[s*.61,1.01,.045];
 const hip=(s:number):Point=>[s*.135,.83,0];
 const knee=(s:number):Point=>[s*.14,.45,.01];
 const ankle=(s:number):Point=>[s*.145,.08,0];
-const rest:Point[]=[[0,.88,0],shoulder(-1),elbow(-1),wrist(-1),shoulder(1),elbow(1),wrist(1),[0,1.48,0],[0,.8,0],hip(-1),knee(-1),hip(1),knee(1),[.524625,1.191472,-.103256]];
+const rest:Point[]=[[0,.88,0],shoulder(-1),elbow(-1),wrist(-1),shoulder(1),elbow(1),wrist(1),[0,1.48,0],[0,.8,0],hip(-1),knee(-1),hip(1),knee(1),[.524625,1.191472,-.103256],ankle(-1),ankle(1)];
 const smooth=(a:number,b:number,x:number)=>{const t=THREE.MathUtils.clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
 
 /** 정적 원본에 관절 가중치를 추가한다. 검·방패는 단일 손뼈에 묶어 휘지 않게 한다. */
@@ -42,7 +42,7 @@ export function buildKnightRig(scene:THREE.Group){
   else if(ax>.24&&y>.83){
    const lower=smooth(.40,.49,ax),hand=smooth(.56,.61,ax),armWeight=smooth(.23,.33,ax);
    influences=[[0,1-armWeight],[arm,armWeight*(1-lower)],[arm+1,armWeight*lower*(1-hand)],[arm+2,armWeight*lower*hand]];
-  }else if(y<.79){const legWeight=1-smooth(.69,.81,y),lower=1-smooth(.40,.50,y);influences=[[8,1-legWeight],[leg,legWeight*(1-lower)],[leg+1,legWeight*lower]];}
+  }else if(y<.79){const legWeight=1-smooth(.69,.81,y),lower=1-smooth(.40,.50,y),foot=1-smooth(.12,.22,y);influences=[[8,1-legWeight],[leg,legWeight*(1-lower)],[leg+1,legWeight*lower*(1-foot)],[side<0?14:15,legWeight*lower*foot]];}
   else influences=[[y<.9?8:0,1]];
   for(let k=0;k<4;k++){ids.push(influences[k]?.[0]??0);weights.push(influences[k]?.[1]??0);}
  }
@@ -69,15 +69,15 @@ export function poseKnight(rig:ReturnType<typeof buildKnightRig>,pose:FighterPos
    segment(1,arm.shoulder,arm.elbow,shoulder(-1),elbow(-1));
    set(2,arm.elbow,arm.rotation);set(3,arm.hand,arm.rotation);
   }else{
-  const i=4,a=torsoPoint(shoulder(side)),hand:Point=[pose.shield[0],pose.shield[1]-.13,pose.shield[2]-.06];
-  // 손이 닿을 수 있는 범위를 제한해 팔이 고무처럼 늘어나지 않게 한다.
-  const delta=V(hand).sub(V(a)),length=.51;const endpoint=delta.length()>length?V(a).add(delta.normalize().multiplyScalar(length)).toArray() as Point:hand;
-  const joint=jointIK(a,endpoint,[side*.70,1.04,-.25],.263,.251);
+  const i=4,a=torsoPoint(shoulder(side)),endpoint=shieldGrip(pose);
+  const joint=jointIK(a,endpoint,[side*.64,.98,-.16],.263,.236);
   segment(i,a,joint,shoulder(side),elbow(side));segment(i+1,joint,endpoint,elbow(side),wrist(side));
-  const shieldRotation=new THREE.Quaternion().setFromUnitVectors(V([-.529848,.030807,.847533]).normalize(),new THREE.Vector3(0,0,1));set(i+2,endpoint,shieldRotation);set(13,pose.shield,shieldRotation);
+  const rotation=shieldRotation(pose.shieldNormal);set(i+2,endpoint,rotation);set(13,pose.shield,rotation);
   }
   const leg=side<0?9:11,h:Point=[side*.135,.83-pose.crouch,0],foot=pose.feet[side<0?0:1];
   const k=jointIK(h,foot,[side*.14,.42,.6],.38,.37);segment(leg,h,k,hip(side),knee(side));segment(leg+1,k,foot,knee(side),ankle(side));
+  // 종아리가 기울어도 지지하는 발바닥은 지면에 남는다.
+  set(side<0?14:15,foot);
  }
  rig.mesh.updateMatrixWorld(true);
 }
