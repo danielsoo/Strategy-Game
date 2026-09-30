@@ -6,6 +6,7 @@ import {Ground,Piece,V3} from './medievalScene';
 import {terrainField} from './campaignTerrain';
 import {useRealmAssetRoot} from './realmAssets';
 import RealmArchitecture from './RealmArchitecture';
+import RealmFortifications from './RealmFortifications';
 
 const ignore=()=>{};
 const random=(n:number)=>{const a=Math.sin(n*127.1+311.7)*43758.5453;return a-Math.floor(a);};
@@ -72,7 +73,7 @@ function Forest({parts,trees}:{parts:Part[];trees:Piece[]}){
   useEffect(()=>()=>materials.forEach(m=>m.dispose()),[materials]);
   // 정면만 향하는 평면 대신, 직교하는 두 잎 카드로 회전 중에도 수관의 부피를 유지한다.
   useLayoutEffect(()=>{const obj=new THREE.Object3D(),color=new THREE.Color();batches.forEach((batch,k)=>{const mesh=refs.current[k];if(!mesh)return;
-    batch.forEach((p,i)=>{for(let cross=0;cross<2;cross++){obj.position.set(p.position[0],p.position[1]+p.scale[1]*.55,p.position[2]);obj.scale.set(p.scale[1]*1.36,p.scale[1]*1.44,1);obj.rotation.set(0,(p.rotation?.[1]??0)+cross*Math.PI/2,0);obj.updateMatrix();mesh.setMatrixAt(i*2+cross,obj.matrix);mesh.setColorAt(i*2+cross,color.set(p.color));}});mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;mesh.computeBoundingSphere();});},[batches]);
+    batch.forEach((p,i)=>{for(let cross=0;cross<2;cross++){obj.position.set(p.position[0],p.position[1]+p.scale[1]*.55,p.position[2]);obj.scale.set(p.scale[0]*1.36,p.scale[1]*1.44,1);obj.rotation.set(0,(p.rotation?.[1]??0)+cross*Math.PI/2,0);obj.updateMatrix();mesh.setMatrixAt(i*2+cross,obj.matrix);mesh.setColorAt(i*2+cross,color.set(p.color));}});mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;mesh.computeBoundingSphere();});},[batches]);
   return <group>{batches.map((batch,k)=><instancedMesh key={`${k}-${batch.length}`} ref={m=>{refs.current[k]=m;}} args={[undefined,materials[k],batch.length*2]} raycast={ignore} castShadow>
     <planeGeometry/>
   </instancedMesh>)}{parts.map((part,i)=><MeshBatch key={'detail'+i} part={part} places={detail}/>)}</group>;
@@ -88,14 +89,14 @@ export default function RealmModels({ground,architecture=true}:{ground:Ground[];
   const places=useMemo(()=>{
     const field=terrainField(ground),out:{tree:Piece[];rock:Piece[];pine:Piece[];shrub:Piece[]}={tree:[],rock:[],pine:[],shrub:[]};
     ground.forEach((g,i)=>{if(!g.known)return;const [x,,z]=g.position;
-      const put=(kind:keyof typeof out,dx:number,dz:number,scale:V3,yaw=0)=>out[kind].push({position:[x+dx,field.height(x+dx,z+dz)-.015,z+dz],scale,rotation:[0,yaw,0],color:g.seen?'#ffffff':'#68747b'});
+      const put=(kind:keyof typeof out,dx:number,dz:number,scale:V3,yaw=0)=>{if(kind!=='rock'&&ground.some(t=>(t.known&&t.castle&&Math.hypot(x+dx-t.position[0],z+dz-t.position[2])<1.13)||(t.seen&&t.cell.units>0&&!t.castle&&Math.hypot(x+dx-t.position[0],z+dz-t.position[2])<.68)))return;out[kind].push({position:[x+dx,field.height(x+dx,z+dz)-.015,z+dz],scale,rotation:[0,yaw,0],color:g.seen?'#ffffff':'#68747b'});};
       const occupied=g.castle||g.cell.fortStage>0&&g.seen;
-      const count=g.terrain==='forest'?(occupied?3:38+Math.floor(random(i)*20)):g.terrain==='plain'?(occupied?3:7):g.terrain==='mountain'?7:1;
-      for(let j=0;j<count;j++){const a=random(i*153+j*13)*6.28,r=occupied?1.12:.13+Math.sqrt(random(i*93+j))*.73;const dx=Math.cos(a)*r,dz=Math.sin(a)*r;
+      const count=g.terrain==='forest'?(occupied?5:145+Math.floor(random(i)*60)):g.terrain==='plain'?(occupied?4:22):g.terrain==='mountain'?7:1;
+      for(let j=0;j<count;j++){const a=random(i*153+j*13)*6.28,r=occupied?1.17:.08+Math.sqrt(random(i*93+j))*.86;const dx=Math.cos(a)*r,dz=Math.sin(a)*r;
         if(g.seen&&g.cell.units>0&&!occupied&&Math.abs(dx)<.5&&Math.abs(dz)<.52)continue;
         const kind=g.terrain==='desert'?'shrub':g.terrain==='mountain'||random(i*7+j)>.62?'pine':'tree';
-        const s=kind==='shrub'?.10:kind==='pine'?.22+random(i*31+j)*.27:.22+random(i*31+j)*.25;
-        put(kind,dx,dz,[s*(.8+random(j)*.3),s,s],random(i*59+j)*6.28);
+        const s=kind==='shrub'?.10:kind==='pine'?.32+random(i*31+j)*.24:.36+random(i*31+j)*.25;
+        put(kind,dx,dz,[s*(1.25+random(j)*.25),s,s*1.25],random(i*59+j)*6.28);
         if(!occupied&&j%7===0)put('shrub',dx+.09,dz-.06,[.10,.10,.10],a);
       }
       if(g.terrain==='mountain')for(let j=0;j<2;j++){const a=j*2.4+i*.8,r=.18+j*.18;put('rock',Math.cos(a)*r,Math.sin(a)*r,[.36,.10+random(i+j)*.16,.34],a);}
@@ -112,7 +113,7 @@ export default function RealmModels({ground,architecture=true}:{ground:Ground[];
   },[ground]);
   return <group>
     {models.rock.map((part,i)=><MeshBatch key={'rock'+i} part={part} places={places.rock}/>)}
-    {architecture&&<RealmArchitecture ground={ground}/>}
+    {architecture&&<><RealmArchitecture ground={ground}/><RealmFortifications ground={ground}/></>}
     <Forest parts={models.tree} trees={places.tree}/>
     <Forest parts={models.pine} trees={places.pine}/>
     <Forest parts={models.shrub} trees={places.shrub}/>

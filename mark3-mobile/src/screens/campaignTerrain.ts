@@ -21,17 +21,17 @@ export function terrainField(ground: Ground[]) {
     for(const g of nearby(x,z)){
       const d=Math.hypot(x-g.position[0],z-g.position[2]);
       if(g.known&&g.terrain==='mountain'&&d<2.8){
-        const dx=x-g.position[0],dz=z-g.position[2],a=hash(g.position[0],g.position[2])*6.28;
+        const dx=x-g.position[0],dz=z-g.position[2],a=.65+noise(g.position[0]*.17,g.position[2]*.17)*.7;
         const along=dx*Math.cos(a)+dz*Math.sin(a),across=-dx*Math.sin(a)+dz*Math.cos(a);
-        const ridge=.82+.24*noise(x*1.7,z*1.7)+.05*noise(x*5,z*5);
+        const ridge=.62+.44*(1-Math.abs(noise(x*2.1,z*2.1)*2-1))+.19*(1-Math.abs(noise(x*5.3,z*5.3)*2-1));
         const distance=Math.hypot(along*.7,across*1.18);
-        mountain=Math.max(mountain,Math.pow(Math.max(0,1-distance/2.45),1.65)*1.8*ridge);
+        mountain=Math.max(mountain,Math.pow(Math.max(0,1-distance/2.65),1.9)*2.25*ridge);
       }
       if(g.castle&&d<1.65){const t=Math.max(0,(d-1.16)/.49);flat=Math.max(flat,1-t*t*(3-2*t));}
     }
     const rolling=.16+.22*noise(x*.5,z*.5)+.10*noise(x*1.6,z*1.6);
     const detail=.028*noise(x*9,z*9);
-    return rolling+detail*(1-flat)+mountain*(1-flat);
+    return rolling*(1-flat)+.32*flat+detail*(1-flat)+mountain*(1-flat);
   };
   const color=(x:number,z:number)=>{
     const result=new THREE.Color(0,0,0);let sum=0;

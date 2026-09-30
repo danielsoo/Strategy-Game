@@ -25,9 +25,9 @@ export function armyFormation(g:Ground){
   return Array.from({length:count},(_,i)=>{
     const row=Math.floor(i/6),col=i%6;
     const kind:ArmyKind=i===0&&g.cell.units>=4?'rider':row<2?(i%3===0?'pike':'guard'):i%2?'archer':'pike';
-    const x=(col-2.5)*.125+(realmRandom(seed+i*3)-.5)*.012;
-    const z=(fortified?1.12:.32)-row*.15+(kind==='rider'?.08:0);
+    const x=(col-2.5)*.15+(realmRandom(seed+i*3)-.5)*.012;
+    const z=(fortified?1.24:.32)-row*.18+(kind==='rider'?.08:0);
     return {kind,x:x*Math.cos(yaw)+z*Math.sin(yaw),z:-x*Math.sin(yaw)+z*Math.cos(yaw),
-      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.077+realmRandom(seed+i*11)*.008};
+      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.10+realmRandom(seed+i*11)*.01};
   });
 }

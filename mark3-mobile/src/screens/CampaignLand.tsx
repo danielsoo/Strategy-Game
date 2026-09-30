@@ -21,12 +21,13 @@ function TerrainMaterial(){
           float stone=smoothstep(.95,1.8,vLandscape.y+soil*.25);
           vec3 axis=pow(abs(normalize(cross(dFdx(vLandscape),dFdy(vLandscape)))),vec3(4.0));axis/=max(dot(axis,vec3(1.0)),.001);
           float meadow=smoothstep(.35,.7,nland(vLandscape.xz*.48)+nland(vLandscape.xz*2.7)*.18);
-          vec2 groundUV=vLandscape.xz*4.0;
-          vec3 turf=texture2D(uGrass,groundUV).rgb*mix(vec3(.68,1.14,.65),vec3(.9,1.1,.72),meadow);
-          float litter=clamp(vRealm.z*.88+smoothstep(.62,.83,soil)*.42,0.,.94)*(1.-vRealm.y);
+          vec2 groundUV=vLandscape.xz*3.1;
+          vec2 rotatedUV=mat2(.8,-.6,.6,.8)*vLandscape.xz*1.73+vec2(7.3,4.1);
+          vec3 turf=mix(texture2D(uGrass,groundUV).rgb,texture2D(uGrass,rotatedUV).rgb,.48)*mix(vec3(.46,.86,.40),vec3(.72,.97,.51),meadow);
+          float litter=clamp(vRealm.z*.72+smoothstep(.67,.85,soil)*.2,0.,.88)*(1.-vRealm.y);
           vec3 woodland=texture2D(uFloor,groundUV).rgb*vec3(.64,.70,.58);
           turf=mix(turf,woodland,litter);
-          vec3 cliff=texture2D(uRock,vLandscape.yz*.4).rgb*axis.x+texture2D(uRock,vLandscape.xz*.4).rgb*axis.y+texture2D(uRock,vLandscape.xy*.4).rgb*axis.z;
+          vec3 cliff=texture2D(uRock,vLandscape.yz*1.2).rgb*axis.x+texture2D(uRock,vLandscape.xz*1.2).rgb*axis.y+texture2D(uRock,vLandscape.xy*1.2).rgb*axis.z;
           cliff=mix(cliff,vec3(dot(cliff,vec3(.2126,.7152,.0722))),.42)*vec3(.92,.98,1.04);
           stone=max(stone,smoothstep(.35,.85,1.0-axis.y));
           turf=mix(turf,vec3(.39,.32,.21)*(texture2D(uRock,vLandscape.xz*.8).rgb+.4),vRealm.y*.95);
@@ -46,7 +47,7 @@ function TerrainMaterial(){
 }
 
 export default function CampaignLand({ground,onPick}:{ground:Ground[];onPick:(index:number,event:ThreeEvent<MouseEvent>)=>void}) {
-  const surface=useMemo(()=>campaignSurface(ground),[ground]);
+  const surface=useMemo(()=>campaignSurface(ground,18),[ground]);
   const borders=useMemo(()=>campaignBorders(ground,surface.field.height),[ground,surface]);
   const backdrop=useMemo(()=>campaignBackdrop(ground),[ground]);
   useEffect(()=>()=>{surface.geometry.dispose();borders.dispose();backdrop.dispose();},[surface,borders,backdrop]);

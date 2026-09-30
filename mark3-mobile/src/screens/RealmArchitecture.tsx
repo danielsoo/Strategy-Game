@@ -23,7 +23,7 @@ export default function RealmArchitecture({ground}:{ground:Ground[]}){
       const box=new THREE.Box3().setFromObject(node),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3()),span=Math.max(size.x,size.z);
       const parts:Part[]=[];
       node.traverse(o=>{if(!(o as THREE.Mesh).isMesh)return;const mesh=o as THREE.Mesh;
-        const geometry=mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);geometry.translate(-center.x,0,-center.z);geometry.scale(1/span,1/span,1/span);
+        const geometry=mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);geometry.translate(-center.x,-box.min.y,-center.z);geometry.scale(1/span,1/span,1/span);
         const materials=(Array.isArray(mesh.material)?mesh.material:[mesh.material]).map(m=>{const material=m.clone() as THREE.MeshStandardMaterial;
           for(const t of [material.map,material.normalMap,material.aoMap])if(t)t.anisotropy=8;return material;});
         parts.push({geometry,material:Array.isArray(mesh.material)?materials:materials[0]});
@@ -34,6 +34,7 @@ export default function RealmArchitecture({ground}:{ground:Ground[]}){
   const batches=useMemo(()=>{const field=terrainField(ground),out:Record<string,Piece[]>={};
     for(const g of ground)for(const p of cityLayout(g)){
       const x=g.position[0]+p.x,z=g.position[2]+p.z,h=field.height(x,z);
+      if(!g.castle&&ground.some(t=>t.known&&t.castle&&Math.hypot(x-t.position[0],z-t.position[2])<1.15))continue;
       // 산비탈의 경작지·농가는 급경사에 붙이지 않는다. 성 주변은 지형 생성 단계에서 평탄화한다.
       if(!g.castle&&Math.max(...[[.25,0],[-.25,0],[0,.25],[0,-.25]].map(([dx,dz])=>Math.abs(field.height(x+dx,z+dz)-h)))>.12)continue;
       (out[p.asset]??=[]).push({position:[x,h-.008,z],scale:p.scale,rotation:[0,p.yaw,0],color:g.seen?'#ffffff':'#68747b'});

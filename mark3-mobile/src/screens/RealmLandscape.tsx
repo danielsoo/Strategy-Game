@@ -18,7 +18,7 @@ export function landscapeDetails(ground:Ground[]){
     }
   };
   for(const g of ground){if(!g.known)continue;const [x,,z]=g.position,seed=g.cell.row*113+g.cell.col*31;
-    const color=(hex:string)=>new THREE.Color(hex).multiplyScalar(g.seen?.48:.26);
+    const color=(hex:string)=>new THREE.Color(hex).multiplyScalar(g.seen?.23:.12);
     if(g.castle){const {yaw}=settlementPlan(g),road=color('#8d806b');
       const local=(ax:number,az:number,bx:number,bz:number,w:number)=>strip(x+ax*Math.cos(yaw)+az*Math.sin(yaw),z-ax*Math.sin(yaw)+az*Math.cos(yaw),x+bx*Math.cos(yaw)+bz*Math.sin(yaw),z-bx*Math.sin(yaw)+bz*Math.cos(yaw),w,road);
       local(0,-.38,0,1.02,.09);local(-1.1,.68,1.1,.68,.055);
@@ -31,7 +31,7 @@ export function landscapeDetails(ground:Ground[]){
         const ox=.22+(plot-1)*.24,oz=(random(seed+plot*7)-.5)*.30;
         const width=.19+random(seed+plot*13)*.07,length=.35+random(seed+plot*19)*.19;
         for(let row=0;row<24;row++){const xx=ox-width/2+row*width/24,bend=Math.sin(row*.12+seed)*.035;
-          const tint=color(plot===0?'#b4a376':plot===1?'#87915f':'#a19070').multiplyScalar(row%2?.96:1);
+          const tint=color(plot===0?'#9c7b3c':plot===1?'#59703b':'#655036').multiplyScalar(row%2?.96:1);
           strip(x+xx*co-(oz-length/2+bend)*si,z+xx*si+(oz-length/2+bend)*co,x+xx*co-(oz+length/2+bend)*si,z+xx*si+(oz+length/2+bend)*co,width/24*1.12,tint);}
       }
       strip(x-.52*co,z-.52*si,x+.54*co,z+.54*si,.028,color('#9c9277'));
