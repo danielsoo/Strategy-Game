@@ -12,6 +12,14 @@ const knee=(s:number):Point=>[s*.14,.45,.01];
 const ankle=(s:number):Point=>[s*.145,.08,0];
 const rest:Point[]=[[0,.88,0],shoulder(-1),elbow(-1),wrist(-1),shoulder(1),elbow(1),wrist(1),[0,1.48,0],[0,.8,0],hip(-1),knee(-1),hip(1),knee(1),[.524625,1.191472,-.103256],ankle(-1),ankle(1)];
 const smooth=(a:number,b:number,x:number)=>{const t=THREE.MathUtils.clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
+/** 180도 반대 방향에서도 최단 회전축이 뒤집히지 않도록 팔의 굽힘 면을 함께 사용한다. */
+function upperArmRotation(a:Point,b:Point,c:Point){
+ const frame=(a:Point,b:Point,c:Point)=>{
+  const along=V(b).sub(V(a)).normalize(),normal=new THREE.Vector3().crossVectors(along,V(c).sub(V(b))).normalize();
+  return new THREE.Matrix4().makeBasis(along,new THREE.Vector3().crossVectors(normal,along),normal);
+ };
+ return new THREE.Quaternion().setFromRotationMatrix(frame(a,b,c).multiply(frame(shoulder(-1),elbow(-1),wrist(-1)).transpose()));
+}
 
 /** 정적 원본에 관절 가중치를 추가한다. 검·방패는 단일 손뼈에 묶어 휘지 않게 한다. */
 export function buildKnightRig(scene:THREE.Group){
@@ -40,7 +48,10 @@ export function buildKnightRig(scene:THREE.Group){
   else if(equipment.getX(i)>.5)influences=[[3,1]];
   else if(y>1.46&&ax<.18)influences=[[7,1]];
   else if(ax>.24&&y>.83){
-   const lower=smooth(.40,.49,ax),hand=smooth(.56,.61,ax),armWeight=smooth(.23,.33,ax);
+   // 가로 좌표만 쓰면 넓은 어깨 갑옷 끝이 아래팔로 분류되어 접힌다.
+   const origin=V(shoulder(side)),axis=V(wrist(side)).sub(origin),point=new THREE.Vector3(x,y,p.getZ(i));
+   const along=point.sub(origin).dot(axis)/axis.lengthSq();
+   const lower=smooth(.47,.60,along),hand=smooth(.87,1.0,along),armWeight=smooth(.23,.33,ax);
    influences=[[0,1-armWeight],[arm,armWeight*(1-lower)],[arm+1,armWeight*lower*(1-hand)],[arm+2,armWeight*lower*hand]];
   }else if(y<.79){const legWeight=1-smooth(.69,.81,y),lower=1-smooth(.40,.50,y),foot=1-smooth(.12,.22,y);influences=[[8,1-legWeight],[leg,legWeight*(1-lower)],[leg+1,legWeight*lower*(1-foot)],[side<0?14:15,legWeight*lower*foot]];}
   else influences=[[y<.9?8:0,1]];
@@ -66,13 +77,16 @@ export function poseKnight(rig:ReturnType<typeof buildKnightRig>,pose:FighterPos
  for(const side of [-1,1]){
   if(side<0){
    const arm=solveSwordArm(pose);
-   segment(1,arm.shoulder,arm.elbow,shoulder(-1),elbow(-1));
+   set(1,arm.shoulder,upperArmRotation(arm.shoulder,arm.elbow,arm.hand));
    set(2,arm.elbow,arm.rotation);set(3,arm.hand,arm.rotation);
   }else{
   const i=4,a=torsoPoint(shoulder(side)),endpoint=shieldGrip(pose);
   const joint=jointIK(a,endpoint,[side*.64,.98,-.16],.263,.236);
-  segment(i,a,joint,shoulder(side),elbow(side));segment(i+1,joint,endpoint,elbow(side),wrist(side));
-  const rotation=shieldRotation(pose.shieldNormal);set(i+2,endpoint,rotation);set(13,pose.shield,rotation);
+  segment(i,a,joint,shoulder(side),elbow(side));
+  const rotation=shieldRotation(pose.shieldNormal),restForearm=V(wrist(side)).sub(V(elbow(side))).normalize();
+  // 방패 각도를 손목에 그대로 복사하지 않는다. 손과 아래팔은 같은 축을 유지한다.
+  const forearmRotation=new THREE.Quaternion().setFromUnitVectors(restForearm.clone().applyQuaternion(rotation),V(endpoint).sub(V(joint)).normalize()).multiply(rotation);
+  set(i+1,joint,forearmRotation);set(i+2,endpoint,forearmRotation);set(13,pose.shield,rotation);
   }
   const leg=side<0?9:11,h:Point=[side*.135,.83-pose.crouch,0],foot=pose.feet[side<0?0:1];
   const k=jointIK(h,foot,[side*.14,.42,.6],.38,.37);segment(leg,h,k,hip(side),knee(side));segment(leg+1,k,foot,knee(side),ankle(side));

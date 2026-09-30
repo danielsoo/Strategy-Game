@@ -4,6 +4,7 @@ export const DUEL_DURATION=6.4;
 export const SWORD_REST_DIRECTION:Point=[.000187,.407555,.74768];
 export const SWORD_LENGTH=Math.hypot(...SWORD_REST_DIRECTION);
 export const SWORD_FOREARM:Point=[-.18,-.15,.03];
+export const MAX_ELBOW_FLEX=125*Math.PI/180;
 export const SHIELD_REST_NORMAL:Point=[-.529848,.030807,.847533];
 export const SHIELD_GRIP_OFFSET:Point=[.085375,-.181472,.148256];
 // 원본 방패 앞쪽 돌출부. 중심 평면을 쓰면 검이 문양과 테두리를 관통한다.
@@ -56,27 +57,39 @@ export function swordShoulder(pose:FighterPose):Point {
 export function solveSwordArm(pose:FighterPose){
  const shoulder=swordShoulder(pose),offset=v(pose.aimPoint).sub(v(shoulder));
  const distal=v(SWORD_FOREARM).addScaledVector(v(SWORD_REST_DIRECTION),pose.bladeFraction);
- const length=distal.length(),distance=Math.max(length-.263+.005,Math.min(length+.263-.005,offset.length()));
- const target=v(shoulder).add(offset.normalize().multiplyScalar(distance));
- const elbow=jointIK(shoulder,target.toArray() as Point,[-.72,1.04,-.3],.263,length);
- const axis=target.clone().sub(v(elbow)).normalize();
- const rotation=new Quaternion().setFromUnitVectors(distal.clone().normalize(),axis);
- // 방향 벡터의 투영이 0을 지날 때 생기는 180도 뒤집힘을 피한다.
- let roll=pose.bladeRoll;
- if(pose.blockNormal&&pose.blockAlignment){
-  const normal=v(pose.blockNormal),blade=v(SWORD_REST_DIRECTION).applyQuaternion(rotation).normalize();
-  const parallel=axis.clone().multiplyScalar(blade.dot(axis)),radial=blade.clone().sub(parallel);
-  const A=radial.dot(normal),B=new Vector3().crossVectors(axis,radial).dot(normal),C=parallel.dot(normal),radius=Math.hypot(A,B);
-  if(radius>1e-6){
-   const base=Math.atan2(B,A),angle=Math.acos(Math.max(-1,Math.min(1,-C/radius)));
-   const delta=(r:number)=>Math.atan2(Math.sin(r-roll),Math.cos(r-roll));
-   const x=delta(base+angle),y=delta(base-angle);roll+=(Math.abs(x)<Math.abs(y)?x:y)*pose.blockAlignment;
+ const length=distal.length(),maximum=length+.263-.045;
+ const distance=Math.max(length-.263+.08,Math.min(maximum,offset.length())),direction=offset.normalize();
+ const atDistance=(distance:number)=>{
+  const target=v(shoulder).addScaledVector(direction,distance);
+  const pole=v([-.55,-.32,.22]).applyEuler(new Euler(0,pose.twist,0)).add(v(shoulder)).toArray() as Point;
+  const elbow=jointIK(shoulder,target.toArray() as Point,pole,.263,length);
+  const axis=target.clone().sub(v(elbow)).normalize();
+  const rotation=new Quaternion().setFromUnitVectors(distal.clone().normalize(),axis);
+  let roll=pose.bladeRoll;
+  if(pose.blockNormal&&pose.blockAlignment){
+   const normal=v(pose.blockNormal),blade=v(SWORD_REST_DIRECTION).applyQuaternion(rotation).normalize();
+   const parallel=axis.clone().multiplyScalar(blade.dot(axis)),radial=blade.clone().sub(parallel);
+   const A=radial.dot(normal),B=new Vector3().crossVectors(axis,radial).dot(normal),C=parallel.dot(normal),radius=Math.hypot(A,B);
+   if(radius>1e-6){
+    const base=Math.atan2(B,A),angle=Math.acos(Math.max(-1,Math.min(1,-C/radius)));
+    const delta=(r:number)=>Math.atan2(Math.sin(r-roll),Math.cos(r-roll));
+    const x=delta(base+angle),y=delta(base-angle);roll+=(Math.abs(x)<Math.abs(y)?x:y)*pose.blockAlignment;
+   }
   }
+  rotation.premultiply(new Quaternion().setFromAxisAngle(axis,roll));
+  const hand=v(elbow).add(v(SWORD_FOREARM).applyQuaternion(rotation));
+  const tip=hand.clone().add(v(SWORD_REST_DIRECTION).applyQuaternion(rotation));
+  const flex=v(elbow).sub(v(shoulder)).angleTo(hand.clone().sub(v(elbow)));
+  return {shoulder,elbow,hand:hand.toArray() as Point,tip:tip.toArray() as Point,rotation,flex};
+ };
+ let result=atDistance(distance);
+ // 검을 몸 안으로 끌어당겨 팔을 접지 않는다. 쥐는 각도를 유지한 채 궤적을 몸 밖으로 제한한다.
+ if(result.flex>MAX_ELBOW_FLEX){
+  let low=distance,high=maximum;
+  for(let i=0;i<14;i++){const mid=(low+high)/2;if(atDistance(mid).flex>MAX_ELBOW_FLEX)low=mid;else high=mid;}
+  result=atDistance(high);
  }
- rotation.premultiply(new Quaternion().setFromAxisAngle(axis,roll));
- const hand=v(elbow).add(v(SWORD_FOREARM).applyQuaternion(rotation));
- const tip=hand.clone().add(v(SWORD_REST_DIRECTION).applyQuaternion(rotation));
- return {shoulder,elbow,hand:hand.toArray() as Point,tip:tip.toArray() as Point,rotation};
+ return result;
 }
 /** 손목 위치를 직선으로 끌어당기지 않고 어깨 주위의 호를 따라 칼끝을 이동시킨다. */
 function arcTip(from:Point,to:Point,origin:Point,t:number):Point {
@@ -85,7 +98,7 @@ function arcTip(from:Point,to:Point,origin:Point,t:number):Point {
  return a.normalize().applyQuaternion(new Quaternion().slerp(turn,t)).multiplyScalar(radius).add(v(origin)).toArray() as Point;
 }
 function cutCurve(from:Point,to:Point,normal:Point,t:number):Point {
- const c1=v(from).add(new Vector3(0,0,.20)),c2=v(to).addScaledVector(v(normal),.34),u=1-t;
+ const c1=v(from).add(new Vector3(0,0,.20)),c2=v(to).addScaledVector(v(normal),.16),u=1-t;
  return v(from).multiplyScalar(u*u*u).addScaledVector(c1,3*u*u*t).addScaledVector(c2,3*u*t*t).addScaledVector(v(to),t*t*t).toArray() as Point;
 }
 /** 칼날이 방패 면과 나란해지는 접촉 자세. 찌르기처럼 검 끝을 면 안으로 보내지 않는다. */

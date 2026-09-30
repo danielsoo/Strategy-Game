@@ -25,7 +25,7 @@ assert.equal(sampleTrack({...track,defender:true},1.5).action,'idle','집단 전
 console.log('행군 감지·반복 방지·시야 비노출·징병 구분·전투 단계 검증 통과');
 
 import * as THREE from 'three';
-import {sampleDuel,CONTACT_TIMES,DUEL_DURATION,localToWorld,worldToLocal,jointIK,solveSwordArm,SWORD_FOREARM,SWORD_REST_DIRECTION,shieldGrip} from '../src/screens/duelMotion';
+import {sampleDuel,CONTACT_TIMES,DUEL_DURATION,localToWorld,worldToLocal,jointIK,solveSwordArm,SWORD_FOREARM,SWORD_REST_DIRECTION,shieldGrip,MAX_ELBOW_FLEX} from '../src/screens/duelMotion';
 import {buildKnightRig,poseKnight} from '../src/screens/knightRig';
 import {testKnightScene} from './knight-test-model';
 const rig=buildKnightRig(testKnightScene());
@@ -53,12 +53,16 @@ console.log('양쪽 선공·정면 표적·실제 스키닝된 검/방패 접촉
 
 const wristRig=buildKnightRig(testKnightScene());
 const neutralAngle=new THREE.Vector3(...SWORD_FOREARM).angleTo(new THREE.Vector3(...SWORD_REST_DIRECTION));
-let maxFrameAngle=0;
+let maxFrameAngle=0,maxUpperAngle=0,maxElbowFlex=0;
 for(const first of [0,1] as const)for(const winner of [0,1] as const)for(const actor of [0,1]){
- let previousRotation:THREE.Quaternion|undefined;
+ let previousRotation:THREE.Quaternion|undefined,previousUpper:THREE.Quaternion|undefined;
  for(let t=0;t<=DUEL_DURATION;t+=1/120){
  const pose=sampleDuel(t,first,winner).fighters[actor],arm=solveSwordArm(pose);
  poseKnight(wristRig,pose);
+ maxElbowFlex=Math.max(maxElbowFlex,arm.flex);
+ assert(arm.flex<=MAX_ELBOW_FLEX+1e-6,'팔꿈치가 허용 굽힘 범위를 넘지 않는다');
+ assert(wristRig.bones[5].quaternion.angleTo(wristRig.bones[6].quaternion)<1e-6,'방패 손목도 아래팔과 독립적으로 꺾지 않는다');
+ if(previousUpper)maxUpperAngle=Math.max(maxUpperAngle,previousUpper.angleTo(wristRig.bones[1].quaternion));previousUpper=wristRig.bones[1].quaternion.clone();
  assert(wristRig.bones[2].quaternion.angleTo(wristRig.bones[3].quaternion)<1e-6,'손목에 아래팔과 독립된 회전을 가하지 않는다');
  const forearm=new THREE.Vector3(...arm.hand).sub(new THREE.Vector3(...arm.elbow)),blade=new THREE.Vector3(...arm.tip).sub(new THREE.Vector3(...arm.hand));
  assert(Math.abs(forearm.angleTo(blade)-neutralAngle)<1e-6,'쥐는 각도가 동작 내내 일정하다');
@@ -67,6 +71,12 @@ for(const first of [0,1] as const)for(const winner of [0,1] as const)for(const a
 }
 console.log('최대 1/120초 아래팔 회전',maxFrameAngle*180/Math.PI);
 assert(maxFrameAngle<.15,'준비·타격·회수 사이에 관절 회전이 튀지 않는다');
+console.log('최대 팔꿈치 굽힘 / 1/120초 위팔 회전',maxElbowFlex*180/Math.PI,maxUpperAngle*180/Math.PI);
+assert(maxUpperAngle<.25,'위팔 회전축이 준비·베기·회수 사이에 뒤집히지 않는다');
+const positions=wristRig.mesh.geometry.getAttribute('position'),indices=wristRig.mesh.geometry.getAttribute('skinIndex'),weights=wristRig.mesh.geometry.getAttribute('skinWeight');
+let shoulderVertices=0;
+for(let i=0;i<positions.count;i++){const x=Math.abs(positions.getX(i)),y=positions.getY(i);if(x>.35&&x<.50&&y>1.30&&y<1.44){shoulderVertices++;for(let j=0;j<4;j++){const bone=indices.getComponent(i,j);assert(![2,3,5,6].includes(bone)||weights.getComponent(i,j)<.001,'어깨 갑옷 바깥 끝이 아래팔/손을 따라 접히지 않는다');}}}
+assert(shoulderVertices>20,'어깨 갑옷 영역의 실제 정점들을 검사한다');
 wristRig.dispose();
 console.log('손목 독립 회전 제거·쥐는 각도 보존·전 구간 회전 연속성 검증 통과');
 
