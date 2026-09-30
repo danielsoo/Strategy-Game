@@ -20,14 +20,14 @@ export type ArmyKind='guard'|'pike'|'archer'|'rider';
 export function armyFormation(g:Ground){
   if(!g.seen||g.cell.units<=0)return [];
   const seed=g.cell.row*113+g.cell.col*31,fortified=g.castle||g.cell.fortStage>0;
-  const count=Math.min(48,Math.max(6,g.cell.units*5));
+  const count=Math.min(24,Math.max(6,g.cell.units*3));
   const yaw=(realmRandom(seed+7)-.5)*.8;
   return Array.from({length:count},(_,i)=>{
-    const row=Math.floor(i/8),col=i%8;
+    const row=Math.floor(i/6),col=i%6;
     const kind:ArmyKind=i===0&&g.cell.units>=4?'rider':row<2?(i%3===0?'pike':'guard'):i%2?'archer':'pike';
-    const x=(col-3.5)*.057+(realmRandom(seed+i*3)-.5)*.008;
-    const z=(fortified?.99:.22)-row*.07+(kind==='rider'?.06:0);
+    const x=(col-2.5)*.125+(realmRandom(seed+i*3)-.5)*.012;
+    const z=(fortified?1.12:.32)-row*.15+(kind==='rider'?.08:0);
     return {kind,x:x*Math.cos(yaw)+z*Math.sin(yaw),z:-x*Math.sin(yaw)+z*Math.cos(yaw),
-      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.031+realmRandom(seed+i*11)*.003};
+      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.077+realmRandom(seed+i*11)*.008};
   });
 }

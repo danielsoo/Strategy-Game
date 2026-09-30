@@ -92,6 +92,7 @@ export default function RealmModels({ground,architecture=true}:{ground:Ground[];
       const occupied=g.castle||g.cell.fortStage>0&&g.seen;
       const count=g.terrain==='forest'?(occupied?3:38+Math.floor(random(i)*20)):g.terrain==='plain'?(occupied?3:7):g.terrain==='mountain'?7:1;
       for(let j=0;j<count;j++){const a=random(i*153+j*13)*6.28,r=occupied?1.12:.13+Math.sqrt(random(i*93+j))*.73;const dx=Math.cos(a)*r,dz=Math.sin(a)*r;
+        if(g.seen&&g.cell.units>0&&!occupied&&Math.abs(dx)<.5&&Math.abs(dz)<.52)continue;
         const kind=g.terrain==='desert'?'shrub':g.terrain==='mountain'||random(i*7+j)>.62?'pine':'tree';
         const s=kind==='shrub'?.10:kind==='pine'?.22+random(i*31+j)*.27:.22+random(i*31+j)*.25;
         put(kind,dx,dz,[s*(.8+random(j)*.3),s,s],random(i*59+j)*6.28);

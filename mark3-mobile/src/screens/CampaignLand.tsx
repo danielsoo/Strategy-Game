@@ -22,9 +22,9 @@ function TerrainMaterial(){
           vec3 axis=pow(abs(normalize(cross(dFdx(vLandscape),dFdy(vLandscape)))),vec3(4.0));axis/=max(dot(axis,vec3(1.0)),.001);
           float meadow=smoothstep(.35,.7,nland(vLandscape.xz*.48)+nland(vLandscape.xz*2.7)*.18);
           vec2 groundUV=vLandscape.xz*4.0;
-          vec3 turf=texture2D(uGrass,groundUV).rgb*mix(vec3(.82,.96,.77),vec3(1.0,1.02,.88),meadow);
+          vec3 turf=texture2D(uGrass,groundUV).rgb*mix(vec3(.68,1.14,.65),vec3(.9,1.1,.72),meadow);
           float litter=clamp(vRealm.z*.88+smoothstep(.62,.83,soil)*.42,0.,.94)*(1.-vRealm.y);
-          vec3 woodland=texture2D(uFloor,groundUV).rgb;
+          vec3 woodland=texture2D(uFloor,groundUV).rgb*vec3(.64,.70,.58);
           turf=mix(turf,woodland,litter);
           vec3 cliff=texture2D(uRock,vLandscape.yz*.4).rgb*axis.x+texture2D(uRock,vLandscape.xz*.4).rgb*axis.y+texture2D(uRock,vLandscape.xy*.4).rgb*axis.z;
           cliff=mix(cliff,vec3(dot(cliff,vec3(.2126,.7152,.0722))),.42)*vec3(.92,.98,1.04);

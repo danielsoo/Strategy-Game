@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import Board3D from './Board3D';
 import RealmMenu from './RealmMenu';
+import RealmHUD from './RealmHUD';
 import { realm } from './realmTheme';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
 import {
@@ -493,6 +494,7 @@ export default function GameScreen() {
   const [watching, setWatching] = useState(false);
   const [speedIdx, setSpeedIdx] = useState(() => Math.min(SPEEDS.length - 1, getSettings().aiSpeed));
   const [showSettings, setShowSettings] = useState(false);
+  const [realmDetails,setRealmDetails]=useState(false);
   /** 관리자 화면(?admin=1) — 관전·판 짜기 줄·리셋·기록 내보내기 (services/admin.ts) */
   const [admin] = useState(isAdmin);
   /** 시작 창에서 고르는 새 판 짜기. null 이면 지금 판의 것을 그대로 */
@@ -697,12 +699,13 @@ export default function GameScreen() {
   );
 
   const paneW = paneWidth(winW);
+  const realmHUD=use3D&&can3D&&coach===null&&!admin;
   /**
    * 폰 — 좁거나(세로) 낮은(가로로 눕힘, 높이 390) 화면. 판 짜기 줄을 접고 나라 표를
    * 접은 채 시작한다. 눕힌 폰에서 다 펼치면 왼쪽 단추 칸이 머리말(턴·금)을 덮었다.
    */
   const phone = winW < 600 || winH < 600;
-  const boardBox = wide
+  const boardBox = realmHUD ? {width:winW,height:winH} : wide
     ? { width: Math.max(0, winW - paneW - 16), height: Math.max(0, winH - 16) }
     : { width: winW, height: Math.max(0, winH - chromeH) };
 
@@ -1851,10 +1854,11 @@ export default function GameScreen() {
       다시 재서 어림값이 영영 고쳐지지 않았다 — 폰 세로에서 페이지가 창보다 100~390px
       길어져 턴 종료가 화면 밖에 있었다.
     */
-    <View style={[styles.container, Platform.OS === 'web' && !wide && { height: winH }]}>
+    <View style={[styles.container, Platform.OS === 'web' && { height: winH }]}>
       <View
         style={[
           styles.header,
+          realmHUD&&{display:'none'},
           wide && { width: paneW },
           spot !== null && spot !== 'gold' && styles.dim,
           spot === 'gold' && styles.coachGlow,
@@ -1916,6 +1920,11 @@ export default function GameScreen() {
       </View>
 
 
+      {realmHUD&&<RealmHUD state={state} player={PLAYER} selected={selectedCell} myTurn={myTurn} income={ledger.net} readyCastles={readyCastles} recruitCost={DEFAULT_ECONOMY.recruitCost} fortCost={DEFAULT_ECONOMY.fortCost} canFort={!!fortCheck?.ok} vassals={myVassals.length}
+        note={preview?`${preview.steps.length}칸 · ${preview.turns===0?'이번 턴 도착':`${preview.turns}턴 후 도착`} · 목적지를 다시 누르면 행군`:selectedCell?.order?'명령받은 목적지로 행군 중':''}
+        onRecruit={()=>setState(prev=>{const got=recruit(prev,PLAYER);if(got>0)sfx('recruit');humanRef.current.recruited+=got;tutRef.current.recruits+=got;return bump(prev);})}
+        onEnd={endTurn} onFort={buildFortHandler()} onMenu={()=>setShowHelp(true)} onSettings={()=>setShowSettings(true)} onDiplo={()=>{setDiploNote(null);setShowDiplo(true);}} onVassals={()=>{setOrderNote(null);setShowVassals(true);}} onDetails={()=>setRealmDetails(v=>!v)} onMap={()=>setUse3D(false)}/>}
+
       {/* 관전 조작 — 길잡이 중에는 숨긴다(처음 하는 사람에게는 소음이고, 자리를 먹어
           부대 정보가 아래 단추에 가려졌다) */}
       {coach === null && (admin || !state.nations[PLAYER].alive) && (
@@ -1945,8 +1954,8 @@ export default function GameScreen() {
       )}
 
       {/* 수치 표 */}
-      {showStats && coach === null && (
-        <View style={[styles.table, wide && { width: paneW }]}>
+      {(realmHUD?realmDetails:showStats) && coach === null && (
+        <View style={[styles.table, wide && { width: paneW },realmHUD&&{position:'absolute',top:118,left:8,right:8,width:undefined,zIndex:30,borderWidth:1,borderColor:'#ae935e'}]}>
           <View style={styles.trHead}>
             <Text style={[styles.th, styles.colName]}>나라</Text>
             <Text style={styles.th}>영향력</Text>
@@ -2017,18 +2026,20 @@ export default function GameScreen() {
           styles.gridWrap,
           wide && styles.gridWide,
           wide && { left: paneW + 8 },
+          realmHUD&&{position:'absolute',top:0,left:0,right:0,bottom:0,marginTop:0},
           (spot === 'button' || spot === 'gold') && styles.dim,
         ]}
         onLayout={(e) => {
           const L = e.nativeEvent.layout;
           setGridBox({ y: L.y, h: L.height });
           // 옆에 둘 때는 판이 절대 위치라 이 값이 위아래 높이를 말해주지 않는다
-          if (!wide) setChromeH(Math.max(0, winH - L.height));
+          if (!wide&&!realmHUD) setChromeH(Math.max(0, winH - L.height));
         }}
       >
         {use3D && can3D ? (
           <View style={{ width: boardBox.width, height: boardBox.height }}>
             <Board3D
+              hud={realmHUD}
               state={state}
               player={PLAYER}
               watching={watching}
@@ -2051,7 +2062,7 @@ export default function GameScreen() {
       </View>
 
       {/* 최근 사건 */}
-      <View style={[styles.feed, wide && { width: paneW }, spot !== null && styles.dim]}>
+      <View style={[styles.feed,realmHUD&&{display:'none'}, wide && { width: paneW }, spot !== null && styles.dim]}>
         {state.log.slice(-3).map((l, i) => (
           <Text key={i} style={styles.feedLine} numberOfLines={1}>
             · {l}
@@ -2061,7 +2072,7 @@ export default function GameScreen() {
       </View>
 
       {selectedCell && (
-        <View style={[styles.panel, wide && { width: paneW }, spot !== null && styles.dim]}>
+        <View style={[styles.panel,realmHUD&&{display:'none'}, wide && { width: paneW }, spot !== null && styles.dim]}>
           <Text style={styles.panelTitle}>
             병력 {selectedCell.units} · 사기 {Math.round(selectedCell.morale)} · 피로{' '}
             {Math.round(selectedCell.exhaustion)}
@@ -2116,6 +2127,7 @@ export default function GameScreen() {
       <View
         style={[
           styles.footer,
+          realmHUD&&{display:'none'},
           wide && styles.footerWide,
           wide && { width: paneW },
           (spot === 'cell' || spot === 'gold') && styles.dim,

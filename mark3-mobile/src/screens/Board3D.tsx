@@ -4,6 +4,8 @@ import { realm } from './realmTheme';
 import CampaignLand, { TerrainRing } from './CampaignLand';
 import RealmModels from './RealmModels';
 import RealmArmy from './RealmArmy';
+import ArmyStandard from './ArmyStandard';
+import RealmMinimap from './RealmMinimap';
 import RealmDaylight from './RealmDaylight';
 import RealmGrass from './RealmGrass';
 import RealmLandscape from './RealmLandscape';
@@ -12,10 +14,11 @@ import {useRealmMaterial} from './realmAssets';
 import {terrainField} from './campaignTerrain';
 import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { Cell, GameState } from '../engine';
+import { Cell, GameState, relationOf } from '../engine';
 import { buildMedievalScene, Ground, Mist, Piece, Shape, V3 } from './medievalScene';
 
 interface Props {
+  hud?: boolean;
   state: GameState;
   player: number;
   watching: boolean;
@@ -250,26 +253,6 @@ function TurnBadge({ tile, turn }: { tile: Ground; turn: number }) {
   </sprite>;
 }
 
-function TroopCount({ tile }: { tile: Ground }) {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128; canvas.height = 64;
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#172327'; ctx.fillRect(23, 9, 82, 46);
-    ctx.strokeStyle = '#bca674'; ctx.lineWidth = 2; ctx.strokeRect(23, 9, 82, 46);
-    ctx.fillStyle = '#f2e6c8'; ctx.font = 'bold 34px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(String(tile.cell.units), 64, 33);
-    const map = new THREE.CanvasTexture(canvas);
-    map.colorSpace = THREE.SRGBColorSpace;
-    return map;
-  }, [tile.cell.units]);
-  useEffect(() => () => texture.dispose(), [texture]);
-  return <sprite position={[tile.position[0], tile.height + 0.3, tile.position[2] + 0.84]}
-    scale={[0.45, 0.225, 1]} raycast={NO_RAYCAST} renderOrder={4}>
-    <spriteMaterial map={texture} transparent depthTest={false} toneMapped={false} />
-  </sprite>;
-}
-
 /**
  * 길잡이 표지. 금빛 고리(갈 수 있는 칸)와 헷갈리지 않게 분홍으로, 그리고
  * 숨 쉬듯 커졌다 작아진다 — 3D 판에서 가만히 있는 표시는 지형에 묻힌다.
@@ -385,14 +368,14 @@ class SceneBoundary extends React.Component<{ children: React.ReactNode;onFailur
   }
 }
 
-export default function Board3D({ state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
+export default function Board3D({ hud=false, state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
   const [assetsReady,setAssetsReady]=useState(false);
   const [renderStats,setRenderStats]=useState<RenderStats|null>(null);
   const showStats=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('graphics')==='1';
   const ready=useCallback(()=>setAssetsReady(true),[]);
   const pending=useCallback(()=>setAssetsReady(false),[]);
   const {width:viewportWidth,height:viewportHeight}=useWindowDimensions();
-  const compact=viewportWidth<600 || viewportHeight<500;
+  const compact=viewportWidth<900 || viewportHeight<500;
   const scene = useMemo(() => buildMedievalScene(state, player, watching), [state, player, watching]);
   const heightField=useMemo(()=>terrainField(scene.ground),[scene.ground]);
 
@@ -569,7 +552,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
           <TerrainRing key={t.cell.id} tile={t} ground={scene.ground} selected={selected === t.cell.id} />)}
         <WarMist cells={unknownMist} memory={false} />
         <WarMist cells={memoryMist} memory />
-        {scene.ground.filter(t => t.seen && t.cell.units > 0).map(t => <TroopCount key={t.cell.id} tile={t} />)}
+        {scene.ground.filter(t => t.seen && t.cell.units > 0).map(t => <ArmyStandard key={t.cell.id} tile={t} own={t.owner===player} selected={selected===t.cell.id} label={t.owner===player?'내 군대':t.owner===null?'중립':`${relationOf(state,player,t.owner)==='alliance'?'동맹':relationOf(state,player,t.owner)==='truce'?'휴전':'적군'} · ${state.nations[t.owner].name}`} onPick={()=>onCellPress(t.cell)}/>)}
         {pathTiles.map((t, i) => i === 0 ? null :
           <PathArrow key={'a' + t.tile.cell.id} from={pathTiles[i - 1].tile.position} to={t.tile.position} />)}
         {turnStops.map(({ tile, turn }) => <TurnBadge key={'b' + tile.cell.id} tile={tile} turn={turn} />)}
@@ -580,14 +563,16 @@ export default function Board3D({ state, player, watching, selected, movable, pa
       </Canvas>
     </SceneBoundary>
     {!assetsReady&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center',backgroundColor:'#172322'}]}><Text style={styles.title}>왕국의 풍경을 준비합니다</Text><Text style={styles.subtitle}>성곽 · 수목 · 고해상도 지형 불러오는 중</Text></View>}
-    <View pointerEvents="none" style={[styles.heading,compact&&{top:10,left:12,width:180,padding:8}]}>
+    {!hud&&<View pointerEvents="none" style={[styles.heading,compact&&{top:10,left:12,width:180,padding:8}]}>
       {!compact&&<Text style={styles.eyebrow}>C H R O N I C L E   O F   C R O W N S</Text>}
       <Text style={[styles.title,compact&&{fontSize:16}]}>왕국 연대기</Text>
       {!compact&&<Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>}
       {showStats&&renderStats&&<Text testID="render-stats" style={styles.subtitle}>{renderStats.fps} FPS · {renderStats.triangles.toLocaleString()} tris · {renderStats.calls} calls</Text>}
     </View>
-    <View style={styles.bottom} pointerEvents="box-none">
-      {!compact&&<View pointerEvents="none"><Text style={styles.hint}>끌어서 이동 · 오른쪽 단추·Shift 끌기 / 두 손가락 비틀기 회전 · 휠 / 두 손가락 확대</Text></View>}
+    }
+    {hud&&<RealmMinimap ground={scene.ground} target={target} onMove={tile=>setTarget([tile.position[0],tile.height,tile.position[2]])}/>}
+    <View style={[styles.bottom,hud&&{bottom:compact?(selectedTile?245:184):18,left:compact?8:400,right:compact?8:245}]} pointerEvents="box-none">
+      {!compact&&!hud&&<View pointerEvents="none"><Text style={styles.hint}>끌어서 이동 · 오른쪽 단추·Shift 끌기 / 두 손가락 비틀기 회전 · 휠 / 두 손가락 확대</Text></View>}
       <View style={styles.controls}>
         <TouchableOpacity accessibilityLabel="지도 축소" style={styles.control} onPress={() => zoomBy(1.2)}><Text style={styles.controlText}>−</Text></TouchableOpacity>
         <TouchableOpacity accessibilityLabel="지도 확대" style={styles.control} onPress={() => zoomBy(1 / 1.2)}><Text style={styles.controlText}>＋</Text></TouchableOpacity>
@@ -597,20 +582,20 @@ export default function Board3D({ state, player, watching, selected, movable, pa
           setTarget([selectedTile.position[0], 0, selectedTile.position[2]]); setZoom(0.28); zoomRef.current = 0.28;
         }}><Text style={styles.smallControl}>선택 확대</Text></TouchableOpacity>}
       </View>
-      {!compact&&<View pointerEvents="none"><Text style={styles.legend}>깃발·테두리 = 소유국   /   금빛 테두리 = 이동 가능</Text></View>}
+      {!compact&&!hud&&<View pointerEvents="none"><Text style={styles.legend}>깃발·테두리 = 소유국   /   금빛 테두리 = 이동 가능</Text></View>}
     </View>
   </View>;
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111e24', overflow: 'hidden', borderRadius: 12, borderWidth: 1, borderColor: '#3c4846' },
+  container: { flex: 1, backgroundColor: '#111e24', overflow: 'hidden', borderRadius: 0, borderWidth: 0, borderColor: '#3c4846' },
   heading: { position: 'absolute', top: 20, left: 22, width:350,padding:14,backgroundColor:'rgba(15,27,27,.76)',borderLeftWidth:2,borderLeftColor:'#bda778' },
   eyebrow: { color: '#bda778', fontSize: 9, fontWeight: '600', marginBottom: 5 },
   title: { color: '#eee3c9', fontFamily:realm.serif,fontSize: 23, fontWeight: '700', letterSpacing: 2 },
   subtitle: { color: '#9cadad', fontSize: 11, marginTop: 6 },
   bottom: { position: 'absolute', bottom: 14, left: 8, right: 8, alignItems: 'center', gap: 8 },
   hint: { color: '#d6ded5', fontSize: 10, textAlign: 'center',backgroundColor:'rgba(15,27,27,.7)',paddingHorizontal:10,paddingVertical:4 },
-  controls: { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#6c6955', backgroundColor: 'rgba(18,30,34,0.94)', overflow: 'hidden' },
+  controls: { flexDirection: 'row',flexWrap:'wrap',maxWidth:'100%', borderRadius: 8, borderWidth: 1, borderColor: '#6c6955', backgroundColor: 'rgba(18,30,34,0.94)', overflow: 'hidden' },
   control: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   controlText: { color: '#eee0bf', fontSize: 22 },
   smallControl: { color: '#eee0bf', fontSize: 11 },
