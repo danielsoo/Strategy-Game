@@ -1,6 +1,6 @@
 import {Vector3,Quaternion,Euler} from 'three';
 export type Point=[number,number,number];
-export const DUEL_DURATION=8.4;
+export const DUEL_DURATION=13.2;
 export const SWORD_REST_DIRECTION:Point=[.000187,.407555,.74768];
 export const SWORD_LENGTH=Math.hypot(...SWORD_REST_DIRECTION);
 export const SWORD_FOREARM:Point=[-.18,-.15,.03];

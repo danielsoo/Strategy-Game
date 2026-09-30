@@ -13,7 +13,7 @@ for(const [path,version] of sources){
  const read=()=>bones.flatMap(b=>[...b.getWorldPosition(new T.Vector3()).toArray(),...b.getWorldQuaternion(new T.Quaternion()).toArray()].map(v=>+v.toFixed(6)));
  const set=(name,t)=>{mixer.stopAllAction();const clip=asset.animations.find(c=>c.name===name),action=mixer.clipAction(clip);action.reset().setLoop(T.LoopOnce,1);action.clampWhenFinished=true;action.play();mixer.setTime(t);asset.scene.updateMatrixWorld(true);};
  set('A_TPose',0);result.rests[version]=read();
- for(const name of version===1?['Sword_Attack','Hit_Chest']:['Idle_Shield_Loop','Shield_OneShot','Sword_Regular_A']){
+ for(const name of version===1?['Sword_Attack','Hit_Chest','Death01']:['Idle_Shield_Loop','Shield_OneShot','Sword_Regular_A']){
   const clip=asset.animations.find(c=>c.name===name),count=Math.ceil(clip.duration*60)+1,frames=[];
   for(let i=0;i<count;i++){set(name,Math.min(clip.duration,i/60));frames.push(read());}
   result.clips[name]={version,duration:clip.duration,frames};console.log(name,clip.duration,count);

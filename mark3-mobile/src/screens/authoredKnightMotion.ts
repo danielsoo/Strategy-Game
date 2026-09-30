@@ -110,7 +110,8 @@ export function knightTransforms(p:Pose){
   const knee=hip.clone().add(K(s).sub(H(s)).applyQuaternion(thighQ)),foot=knee.clone().add(F(s).sub(K(s)).applyQuaternion(calfQ));
   set(leg,hip,thighQ);set(leg+1,knee,calfQ);set(right?14:15,foot,p[k+2].q);
  }
- const lift=.08-Math.min(bones[14].position.y,bones[15].position.y);
+ // 쓰러진 자세에서는 발뿐 아니라 몸통·머리도 지면을 지지한다.
+ const lift=-Math.min(bones[14].position.y-.08,bones[15].position.y-.08,bones[0].position.y-.17,bones[8].position.y-.15,bones[7].position.y-.12);
  bones.forEach(b=>b.position.y+=lift);hands.forEach(h=>h.position.y+=lift);
  return {bones,hands,tip:V([0,0,.87]).applyQuaternion(bones[16].quaternion).add(bones[16].position),grip:bones[16].position.clone(),shield:bones[13].position.clone(),normal:V(SHIELD_REST_NORMAL).negate().applyQuaternion(bones[13].quaternion).normalize()};
 }
@@ -127,6 +128,9 @@ const impactSamples=[.47,.50,.47];
 const atTimes=[1.62,3.82,6.02];
 export const AUTHORED_CONTACT_TIMES=atTimes;
 export const AUTHORED_DUEL_DURATION=DUEL_DURATION;
+export const DEATH_START=6.1;
+export const ASH_START=8.6;
+export const ASH_DURATION=2.3;
 /** 접촉 계산은 발 디딜 위치와 몸의 방향만 정한다. 팔꿈치·손목 회전을 강제로 꺾지 않는다. */
 const plans=atTimes.map((at,n)=>{
  const a=knightTransforms(combatPose(at,'attack',impactSamples[n],n===1)),b=knightTransforms(combatPose(at,'block',.22));
@@ -161,5 +165,11 @@ export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
   phase=dt<-.2?'어깨와 몸통을 돌려 베기를 준비합니다':dt<0?n===1?'옆으로 베어 방패를 겨눕니다':'앞발에 체중을 실어 내려 벱니다':dt<.15?blocked?'방패에 막힌 칼날이 되튕깁니다':'공격을 받은 쪽이 몸을 접어 충격을 받습니다':'방패를 유지하며 검을 회수합니다';
   break;
  }
- return {poses,roots,yaws,phase,impact,striker,blocked};
+ const loser=(1-winner) as 0|1,deathTime=Math.max(0,time-DEATH_START);
+ if(time>=DEATH_START){
+  const fallen=sample('Death01',Math.min(clips.Death01.duration,deathTime*1.15));
+  poses[loser]=mix(poses[loser],fallen,smooth(deathTime/.32));
+  phase=time<ASH_START?'치명상을 입은 병사가 힘을 잃고 쓰러집니다':time<ASH_START+ASH_DURATION?'몸과 장비가 재처럼 부서져 바람에 흩어집니다':'먼지가 사라지고 승자가 남습니다';
+ }
+ return {poses,roots,yaws,phase,impact,striker,blocked,loser,deathTime,ash:T.MathUtils.clamp((time-ASH_START)/ASH_DURATION,0,1)};
 }
