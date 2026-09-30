@@ -2,3 +2,7 @@
 .music-cache/
 tools/music/__pycache__/
 .ui-preview/
+# 원본 수목은 빌드 도구로 재생성 가능하며, 배포에는 경량화한 실제 모델을 사용한다.
+public/realm/tree_small_02/model.gltf
+public/realm/tree_small_02/tree_small_02.bin
+.realm-source/

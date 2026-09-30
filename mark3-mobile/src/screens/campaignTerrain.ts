@@ -1,5 +1,10 @@
 import * as THREE from 'three';
+import {mergeVertices} from 'three/examples/jsm/utils/BufferGeometryUtils';
 import type { Ground } from './medievalScene';
+
+const hash=(x:number,z:number)=>{const n=Math.sin(x*127.1+z*311.7)*43758.5453;return n-Math.floor(n);};
+function noise(x:number,z:number){const ix=Math.floor(x),iz=Math.floor(z);let fx=x-ix,fz=z-iz;fx=fx*fx*(3-2*fx);fz=fz*fz*(3-2*fz);
+  return (hash(ix,iz)*(1-fx)+hash(ix+1,iz)*fx)*(1-fz)+(hash(ix,iz+1)*(1-fx)+hash(ix+1,iz+1)*fx)*fz;}
 
 // 같은 월드 좌표는 어느 칸에서 계산하든 같은 높이를 갖는다. 육각형은 규칙에만 남는다.
 export function terrainField(ground: Ground[]) {
@@ -15,14 +20,17 @@ export function terrainField(ground: Ground[]) {
     let mountain=0,flat=0;
     for(const g of nearby(x,z)){
       const d=Math.hypot(x-g.position[0],z-g.position[2]);
-      if(g.known&&g.terrain==='mountain'&&d<2.05){
-        const ridge=.85+.15*Math.sin(x*6.7+z*3.9)*Math.cos(z*5.1-x*2.4);
-        mountain+=Math.pow(Math.max(0,1-d/2.05),1.7)*1.9*ridge;
+      if(g.known&&g.terrain==='mountain'&&d<2.8){
+        const dx=x-g.position[0],dz=z-g.position[2],a=hash(g.position[0],g.position[2])*6.28;
+        const along=dx*Math.cos(a)+dz*Math.sin(a),across=-dx*Math.sin(a)+dz*Math.cos(a);
+        const ridge=.68+.40*noise(x*2.6,z*2.6)+.16*noise(x*7.5,z*7.5);
+        const distance=Math.hypot(along*.7,across*1.18);
+        mountain+=Math.pow(Math.max(0,1-distance/2.15),1.75)*2.7*ridge;
       }
       if(g.castle&&d<1.04)flat=Math.max(flat,1-Math.pow(d/1.04,5));
     }
-    const rolling=.24+.10*Math.sin(x*.65+z*.3)+.07*Math.cos(z*.95-x*.22);
-    const detail=.022*Math.sin(x*8.1+z*4.3)*Math.cos(z*6.1);
+    const rolling=.16+.22*noise(x*.5,z*.5)+.10*noise(x*1.6,z*1.6);
+    const detail=.028*noise(x*9,z*9);
     return rolling+detail*(1-flat)+mountain*(1-flat*.94);
   };
   const color=(x:number,z:number)=>{
@@ -36,16 +44,19 @@ export function terrainField(ground: Ground[]) {
     if(h>1.9)result.lerp(new THREE.Color('#d7d3ba'),Math.min(.7,(h-1.9)*.8));
     return result;
   };
-  return {height,color};
+  const mask=(x:number,z:number)=>{let light=0,desert=0,sum=0;
+    for(const g of nearby(x,z)){const d=Math.hypot(x-g.position[0],z-g.position[2]);if(d>2.1)continue;const w=Math.pow(Math.max(0,1-d/2.1),4);sum+=w;light+=w*(g.seen?1:g.known?.35:.06);desert+=w*(g.known&&g.terrain==='desert'?1:0);}
+    return [sum?light/sum:1,sum?desert/sum:0];};
+  return {height,color,mask};
 }
 
-export function campaignSurface(ground: Ground[], subdivisions=6) {
-  const field=terrainField(ground),positions:number[]=[],colors:number[]=[],indices:number[]=[],faces:number[]=[];
+export function campaignSurface(ground: Ground[], subdivisions=12) {
+  const field=terrainField(ground),positions:number[]=[],colors:number[]=[],indices:number[]=[],faces:number[]=[],uv:number[]=[],masks:number[]=[];
   const vertices=new Map<string,number>();
   const vertex=(x:number,z:number)=>{
     const key=`${Math.round(x*100000)},${Math.round(z*100000)}`;const old=vertices.get(key);if(old!==undefined)return old;
     const id=positions.length/3;vertices.set(key,id);positions.push(x,field.height(x,z),z);
-    const c=field.color(x,z);colors.push(c.r,c.g,c.b);return id;
+    const c=field.color(x,z);colors.push(c.r,c.g,c.b);uv.push(x*.24,z*.24);masks.push(...field.mask(x,z));return id;
   };
   const triangle=(a:number,b:number,c:number,cell:number)=>{indices.push(a,c,b);faces.push(cell);};
   ground.forEach((g,cell)=>{
@@ -62,6 +73,8 @@ export function campaignSurface(ground: Ground[], subdivisions=6) {
   const geometry=new THREE.BufferGeometry();
   geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+  geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  geometry.setAttribute('realmMask',new THREE.Float32BufferAttribute(masks,2));
   geometry.setIndex(indices);geometry.computeVertexNormals();geometry.computeBoundingSphere();
   return {geometry,faces,field};
 }
@@ -90,4 +103,25 @@ export function campaignBorders(ground: Ground[], height:(x:number,z:number)=>nu
   }
   const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));return geometry;
+}
+
+/** 판의 외곽 모서리에서 바깥 풍경을 잇는다. 장식 영역에는 선택할 게임 칸이 없다. */
+export function campaignBackdrop(ground:Ground[]) {
+  const field=terrainField(ground),lookup=new Set(ground.map(g=>`${g.cell.row},${g.cell.col}`));
+  const positions:number[]=[],uv:number[]=[],masks:number[]=[],indices:number[]=[];
+  for(const g of ground)for(let edge=0;edge<6;edge++){
+    const a=Math.PI/6+edge*Math.PI/3,b=a+Math.PI/3,mx=(Math.cos(a)+Math.cos(b))/2,mz=(Math.sin(a)+Math.sin(b))/2;
+    const row=g.cell.row+Math.round(mz*2/1.5),col=g.cell.col+Math.round(mx*2/Math.sqrt(3)-(row%2-g.cell.row%2)*.5);
+    if(lookup.has(`${row},${col}`))continue;
+    for(let k=0;k<6;k++)for(let band=0;band<32;band++){
+      const n=positions.length/3;
+      for(const [along,out] of [[k/6,band],[(k+1)/6,band],[k/6,band+1],[(k+1)/6,band+1]]){
+        const factor=1+out*.14,x=(g.position[0]+Math.cos(a)*(1-along)+Math.cos(b)*along)*factor,z=(g.position[2]+Math.sin(a)*(1-along)+Math.sin(b)*along)*factor;
+        positions.push(x,field.height(x,z),z);uv.push(x*.24,z*.24);const mask=field.mask(x,z);masks.push(mask[0],mask[1]);
+      }
+      indices.push(n,n+2,n+1,n+1,n+2,n+3);
+    }
+  }
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setAttribute('realmMask',new THREE.Float32BufferAttribute(masks,2));geo.setIndex(indices);
+  const smooth=mergeVertices(geo,.0001);geo.dispose();smooth.computeVertexNormals();return smooth;
 }

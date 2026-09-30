@@ -29,11 +29,11 @@ for (const size of [11,21]) {
     assert([...piece.position,...piece.scale].every(Number.isFinite));
     assert(piece.scale.every(v=>v>0));
   }
-  assert(full.pieces.tower.length>0 && full.pieces.roof.length>0);
+  assert(full.pieces.plaster.length>0 && full.pieces.roof.length>0);
   const surface=campaignSurface(full.ground),pos=surface.geometry.getAttribute('position');
   const normals=surface.geometry.getAttribute('normal'),indices=surface.geometry.getIndex()!;
   assert.equal(surface.faces.length,indices.count/3,'모든 삼각형에 선택할 게임 칸이 있어야 한다');
-  assert.equal(surface.faces.length,full.ground.length*6*6*6);
+  assert.equal(surface.faces.length,full.ground.length*6*12*12);
   const unique=new Set<string>();
   for(let i=0;i<pos.count;i++) {
     const key=`${pos.getX(i).toFixed(4)},${pos.getZ(i).toFixed(4)}`;

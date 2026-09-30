@@ -3,7 +3,7 @@ import { terrainField } from './campaignTerrain';
 import { Cell, GameState, isExplored, isVisible, knownCell, NEUTRAL_COLOR, Terrain } from '../engine';
 
 export type V3 = [number, number, number];
-export type Shape = 'box' | 'stone' | 'tower' | 'roof' | 'metal' | 'cone' | 'trunk' | 'rock' | 'flag' | 'shield' | 'foliage';
+export type Shape = 'box' | 'stone' | 'tower' | 'roof' | 'metal' | 'cone' | 'trunk' | 'rock' | 'flag' | 'shield' | 'foliage' | 'plaster' | 'timber' | 'body' | 'limb' | 'helmet';
 export interface Piece { position: V3; scale: V3; color: string; rotation?: V3 }
 export interface Ground extends Piece { cell: Cell; height: number; seen: boolean; known: boolean; terrain: Terrain; castle: boolean; owner: number | null; heraldry: string }
 export interface Mist { position: V3; memory: boolean }
@@ -31,7 +31,7 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
   const minZ = cells.length ? Math.min(...zs) : 0, maxZ = cells.length ? Math.max(...zs) : 0;
   const ox = (minX + maxX) / 2, oz = (minZ + maxZ) / 2;
   const scene: MedievalScene = {
-    ground: [], pieces: { box: [], stone: [], tower: [], roof: [], metal: [], cone: [], trunk: [], rock: [], flag: [], shield: [], foliage: [] },
+    ground: [], pieces: { box: [], stone: [], tower: [], roof: [], metal: [], cone: [], trunk: [], rock: [], flag: [], shield: [], foliage: [], plaster: [], timber: [], body: [], limb: [], helmet: [] },
     mist: [], span: Math.max(maxX - minX, maxZ - minZ) + 2.5,
   };
 
@@ -64,44 +64,26 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
     };
     const box = (px: number, py: number, pz: number, sx: number, sy: number, sz: number, color: string) => add('box', px, py, pz, sx, sy, sz, color);
     const flag = (px: number, base: number, pz: number, height: number) => {
-      add('trunk', px, base + height / 2, pz, 0.018, height, 0.018, '#d1b77c');
-      add('flag', px + 0.18, base + height - 0.16, pz, 0.36, 0.24, 1, heraldry);
-      add('cone', px, base + height + 0.035, pz, 0.045, 0.1, 0.045, '#d6b877');
+      add('trunk', px, base + height / 2, pz, 0.008, height, 0.008, '#b8a17a');
+      add('flag', px + 0.11, base + height - 0.10, pz, 0.22, 0.145, 1, heraldry);
+      add('cone', px, base + height + 0.02, pz, 0.02, 0.05, 0.02, '#c4b18c');
     };
 
     const occupied = castle || stage > 0 || units > 0;
-    // 작은 나무를 불규칙하게 겹쳐 숲의 수관을 만든다. 나무 모양은 매 턴 고정된다.
-    const count=terrain==='forest'?(occupied?10:30):terrain==='plain'&&!occupied?3:0;
-    for(let i=0;i<count;i++){
-      const a=i*2.399+random(index)*2,r=occupied?.70:.15+random(index*17+i)*.68;
-      const tx=Math.cos(a)*r,tz=occupied?-.48-Math.abs(Math.sin(a))*.23:Math.sin(a)*r;
-      const size=.58+random(index*31+i)*.60;
-      add('trunk',tx,.14*size,tz,.023,.28*size,.023,'#564c36');
-      if(i%3===0){
-        add('cone',tx,.34*size,tz,.14*size,.42*size,.14*size,'#31432a');
-        add('cone',tx,.48*size,tz,.11*size,.32*size,.11*size,'#405130');
-      }else{
-        add('foliage',tx,.33*size,tz,.19*size,.24*size,.16*size,i%2?'#4c5b2e':'#667044');
-        add('foliage',tx+.07,.43*size,tz-.025,.14*size,.17*size,.13*size,'#64713c');
-      }
-    }
-    if(terrain==='mountain')for(let i=0;i<5;i++){
-      const a=i*2.4, r=.45+random(index+i)*.34;
-      add('rock',Math.cos(a)*r,.05,Math.sin(a)*r,.11,.12,.14,'#828273',[0,a,0]);
-    }
+    // 수목과 암벽은 RealmModels의 실제 자산으로 그린다.
     if (seen && cell.hasRoad) box(0, 0.014, 0, 0.23, 0.025, 1.65, '#b4a17a');
 
     // 수확한 밭·낮은 돌담·목골 가옥으로 성 밖에도 시대감을 준다. 미탐험 정보는 쓰지 않는다.
     if (!occupied && terrain === 'plain' && random(index*43) > .55) {
       for(let i=0;i<5;i++) box(-.3+i*.13,.02,.08,.065,.025,.65,i%2?'#8f7c50':'#766846');
       for(let i=0;i<5;i++) add('rock',-.4+i*.18,.06,-.36,.12,.10,.08,'#8b8a75');
-      box(.38,.15,.28,.27,.3,.33,'#c0ae84');
+      add('plaster',.38,.15,.28,.27,.3,.33,'#e9e3d5');
       add('roof',.38,.4,.28,.23,.25,.27,'#635044');
       box(.38,.16,.455,.035,.28,.015,'#483f2f');
       box(.38,.21,.455,.27,.028,.015,'#483f2f');
     }
 
-    if (castle || stage > 0) {
+    if (!castle && stage > 0) {
       const complete = castle || stage === 4;
       const stone = '#8d9080', lightStone = '#b6b39a';
       box(0, 0.055, -0.07, 1.14, 0.11, 1.0, '#77786d');
@@ -148,15 +130,29 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
     }
 
     // 성은 단일 탑이 아니라 성 안팎의 작은 시가지로 읽히게 한다.
-    if(castle)for(let i=0;i<17;i++){
-      const a=i*2.399,r=i<5?.24:.58+random(index*41+i)*.17;
+    if(castle){
+      // 내성의 주탑·접견동·예배당은 외벽보다 높고 좁은 비례로 세운다.
+      add('stone',-.16,.36,-.22,.32,.72,.32,'#ddd8c8');
+      add('roof',-.16,.83,-.22,.27,.27,.27,'#b6c0c3');
+      add('plaster',.13,.19,-.23,.30,.38,.25,'#e8dfcc');
+      add('roof',.13,.50,-.23,.27,.28,.23,'#b0b9bc');
+      add('stone',.32,.23,.10,.15,.46,.23,'#ded9cb');
+      add('roof',.32,.58,.10,.14,.26,.20,'#a2adb3');
+      for(const y of [.24,.47,.66])for(const dx of [-.235,-.09])box(dx,y,-.053,.035,.075,.012,'#263337');
+      flag(-.16,.97,-.22,.30);
+    }
+    if(castle)for(let i=0;i<34;i++){
+      const a=i*2.399,r=i<13?.17+random(index*43+i)*.22:.70+random(index*41+i)*.18;
       const px=Math.cos(a)*r,pz=Math.sin(a)*r;
-      if(Math.abs(px)<.15&&pz>.2)continue;
+      if(Math.abs(px)<.15&&pz>.2||i<13&&pz<-.08)continue;
       const hh=.13+random(index*11+i)*.08;
-      box(px,hh/2,pz,.15,hh,.18,i%2?'#b6a783':'#c2b89b');
-      add('roof',px,hh+.065,pz,.14,.13,.16,i%3?'#695647':'#495751');
-      box(px,hh*.53,pz+.092,.015,hh,.008,'#514535');
-      box(px,hh*.65,pz+.094,.15,.013,.008,'#514535');
+      add('plaster',px,hh/2,pz,.13,hh,.17,i%2?'#e5ddc8':'#d5cfbc');
+      add('roof',px,hh+.065,pz,.12,.13,.15,i%3?'#b3a398':'#aab8c0');
+      for(const dx of [-.057,0,.057])add('timber',px+dx,hh*.5,pz+.087,.009,hh,.008,'#756653');
+      for(const yy of [.04,hh*.55,hh])add('timber',px,yy,pz+.088,.13,.008,.008,'#756653');
+      box(px-.025,hh*.68,pz+.092,.026,.035,.008,'#222b29');
+      box(px+.026,.033,pz+.09,.026,.065,.009,'#4b3d2e');
+      if(i%3===0)add('stone',px+.04,hh+.12,pz-.04,.024,.15,.025,'#bcb5a0');
     }
 
     // 한 병력 표시는 소규모 대열로 그린다. 숫자와 실제 규칙의 병력은 바꾸지 않는다.
@@ -168,12 +164,14 @@ export function buildMedievalScene(state: GameState, player: number, watching: b
       const s = .34;
       const part = (shape: Shape, dx: number, y: number, dz: number, sx: number, sy: number, sz: number, color: string, rotation?: V3) =>
         add(shape, ux + dx * s, y * s, uz + dz * s, sx * s, sy * s, sz * s, color, rotation);
-      part('box', -0.045, 0.07, 0, 0.06, 0.14, 0.085, '#343a35');
-      part('box', 0.045, 0.07, 0, 0.06, 0.14, 0.085, '#343a35');
-      part('box', 0, 0.23, 0, 0.17, 0.22, 0.12, heraldry);
-      part('metal', 0, 0.3, 0.015, 0.18, 0.09, 0.13, '#aab6b2');
-      part('rock', 0, 0.415, 0, 0.103, 0.12, 0.095, '#c0c9c5');
-      part('box', 0, 0.415, 0.088, 0.125, 0.025, 0.016, '#26312f');
+      part('limb', -0.037, 0.075, 0, 0.055, 0.15, 0.055, '#3c3c31');
+      part('limb', 0.037, 0.075, 0, 0.055, 0.15, 0.055, '#3c3c31');
+      part('body', 0, 0.245, 0, 0.155, 0.15, 0.105, '#71786f');
+      part('box', 0, 0.23, .052, 0.09, 0.19, 0.016, heraldry);
+      part('limb', -.094, .25, .015, .047,.18,.047,'#72786e',[0,0,-.25]);
+      part('limb', .094, .25, .015, .047,.18,.047,'#72786e',[0,0,.25]);
+      part('helmet', 0, 0.39, 0, 0.055, 0.065, 0.053, '#9da7a2');
+      part('box', 0, 0.415, 0.052, 0.073, 0.014, 0.009, '#26312f');
       part('shield', -0.105, 0.25, 0.09, 0.105, 0.14, 0.045, heraldry);
       part('metal', -0.105, 0.25, 0.135, 0.025, 0.16, 0.012, '#dac99d');
       part('trunk', 0.135, 0.35, 0, 0.012, 0.67, 0.012, '#9a7b4d');

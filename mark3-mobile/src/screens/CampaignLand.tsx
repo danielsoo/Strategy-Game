@@ -2,28 +2,45 @@ import React, {useMemo,useEffect} from 'react';
 import * as THREE from 'three';
 import {ThreeEvent} from '@react-three/fiber';
 import {Ground} from './medievalScene';
-import {campaignSurface,campaignBorders,terrainField} from './campaignTerrain';
+import {campaignSurface,campaignBorders,campaignBackdrop,terrainField} from './campaignTerrain';
+import {useRealmMaterial} from './realmAssets';
 
-export default function CampaignLand({ground,onPick}:{ground:Ground[];onPick:(index:number,event:ThreeEvent<MouseEvent>)=>void}) {
-  const surface=useMemo(()=>campaignSurface(ground),[ground]);
-  const borders=useMemo(()=>campaignBorders(ground,surface.field.height),[ground,surface]);
-  useEffect(()=>()=>{surface.geometry.dispose();borders.dispose();},[surface,borders]);
-  return <group>
-    <mesh geometry={surface.geometry} receiveShadow castShadow onClick={e=>{if(e.faceIndex!=null)onPick(surface.faces[e.faceIndex],e);}}>
-      <meshStandardMaterial vertexColors roughness={.96} onBeforeCompile={shader=>{
-        shader.vertexShader='varying vec3 vLandscape;\n'+shader.vertexShader;
-        shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvLandscape=position;');
-        shader.fragmentShader=`varying vec3 vLandscape;
+function TerrainMaterial(){
+  const grass=useRealmMaterial('grass_ground'),rock=useRealmMaterial('aerial_rocks_02');
+  return <meshStandardMaterial side={THREE.DoubleSide} normalMap={grass.normalMap} normalScale={new THREE.Vector2(.65,.65)} roughnessMap={grass.roughnessMap} roughness={1} onBeforeCompile={shader=>{
+        shader.uniforms.uGrass={value:grass.map};shader.uniforms.uRock={value:rock.map};shader.uniforms.uRockNormal={value:rock.normalMap};
+        shader.vertexShader='varying vec3 vLandscape; varying vec2 vRealm; attribute vec2 realmMask;\n'+shader.vertexShader;
+        shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvLandscape=position;vRealm=realmMask;');
+        shader.fragmentShader=`varying vec3 vLandscape;varying vec2 vRealm;uniform sampler2D uGrass;uniform sampler2D uRock;uniform sampler2D uRockNormal;
           float hashland(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
           float nland(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hashland(i),hashland(i+vec2(1,0)),f.x),mix(hashland(i+vec2(0,1)),hashland(i+vec2(1,1)),f.x),f.y);}
         `+shader.fragmentShader;
         shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
-          float soil=nland(vLandscape.xz*7.0)*.5+nland(vLandscape.xz*24.0)*.32+nland(vLandscape.xz*90.0)*.18;
-          diffuseColor.rgb*=.72+soil*.55;
-          diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.10,1.02,.80),smoothstep(.5,.75,soil)*.38);
+          float soil=nland(vLandscape.xz*.9)*.65+nland(vLandscape.xz*3.0)*.35;
+          float stone=smoothstep(.55,1.55,vLandscape.y+soil*.45);
+          vec3 axis=pow(abs(normalize(cross(dFdx(vLandscape),dFdy(vLandscape)))),vec3(4.0));axis/=max(dot(axis,vec3(1.0)),.001);
+          vec3 turf=texture2D(uGrass,vLandscape.xz*.65).rgb*vec3(.77,1.26,.75);
+          vec3 cliff=texture2D(uRock,vLandscape.yz*.4).rgb*axis.x+texture2D(uRock,vLandscape.xz*.4).rgb*axis.y+texture2D(uRock,vLandscape.xy*.4).rgb*axis.z;
+          cliff=mix(cliff,vec3(dot(cliff,vec3(.2126,.7152,.0722))),.42)*vec3(.92,.98,1.04);
+          stone=max(stone,1.0-axis.y);
+          turf=mix(turf,turf*vec3(1.26,1.01,.65),vRealm.y*.8);
+          diffuseColor.rgb=mix(turf,cliff,stone)*(.84+soil*.28)*mix(vec3(.12,.20,.23),vec3(1.0),vRealm.x);
         `);
-      }}/>
-    </mesh>
+        shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+          vec3 rockNormal=texture2D(uRockNormal,vLandscape.xz*.33+vLandscape.y*.14).xyz*2.0-1.0;
+          normal=normalize(mix(normal,getTangentFrame(-vViewPosition,normal,vLandscape.xz*.33+vLandscape.y*.14)*rockNormal,smoothstep(.65,1.6,vLandscape.y)*.65));
+        `);
+      }}/>;
+}
+
+export default function CampaignLand({ground,onPick}:{ground:Ground[];onPick:(index:number,event:ThreeEvent<MouseEvent>)=>void}) {
+  const surface=useMemo(()=>campaignSurface(ground),[ground]);
+  const borders=useMemo(()=>campaignBorders(ground,surface.field.height),[ground,surface]);
+  const backdrop=useMemo(()=>campaignBackdrop(ground),[ground]);
+  useEffect(()=>()=>{surface.geometry.dispose();borders.dispose();backdrop.dispose();},[surface,borders,backdrop]);
+  return <group>
+    <mesh geometry={backdrop} receiveShadow raycast={()=>{}}><TerrainMaterial/></mesh>
+    <mesh geometry={surface.geometry} receiveShadow castShadow onClick={e=>{if(e.faceIndex!=null)onPick(surface.faces[e.faceIndex],e);}}><TerrainMaterial/></mesh>
     <lineSegments geometry={borders} raycast={()=>{}}><lineBasicMaterial vertexColors transparent opacity={.8} toneMapped={false}/></lineSegments>
   </group>;
 }

@@ -1,7 +1,11 @@
-import React, { useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
+import React, { Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { realm } from './realmTheme';
 import CampaignLand, { TerrainRing } from './CampaignLand';
+import RealmModels from './RealmModels';
+import RealmAtmosphere,{RenderStats} from './RealmAtmosphere';
+import {useRealmMaterial} from './realmAssets';
+import {terrainField} from './campaignTerrain';
 import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Cell, GameState } from '../engine';
@@ -22,13 +26,19 @@ interface Props {
   onCellPress: (c: Cell) => void;
 }
 const NO_RAYCAST = () => {};
-const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield', 'foliage'];
+const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield', 'foliage','plaster','timber','body','limb','helmet'];
+
+function AssetReady({onReady,onPending}:{onReady:()=>void;onPending:()=>void}){useLayoutEffect(()=>{onReady();return onPending;},[onReady,onPending]);return null;}
+function StoneMaterial({asset}:{asset:string}){const maps=useRealmMaterial(asset,asset==='medieval_blocks_05'?4:asset==='grey_roof_tiles'?5:2);return <meshStandardMaterial {...maps} roughness={1} normalScale={new THREE.Vector2(.7,.7)}/>;}
 
 function GableRoof(){
   const geometry=useMemo(()=>{
     const g=new THREE.BufferGeometry();
     g.setAttribute('position',new THREE.Float32BufferAttribute([-.7,-.5,-.7,.7,-.5,-.7,0,.5,-.7,-.7,-.5,.7,.7,-.5,.7,0,.5,.7],3));
-    g.setIndex([0,2,1,3,4,5,0,3,5,0,5,2,1,2,5,1,5,4,0,1,4,0,4,3]);g.computeVertexNormals();return g;
+    g.setIndex([0,2,1,3,4,5,0,3,5,0,5,2,1,2,5,1,5,4,0,1,4,0,4,3]);
+    const flat=g.toNonIndexed(),p=flat.getAttribute('position'),uv:number[]=[];
+    for(let i=0;i<p.count;i++)uv.push((p.getZ(i)+.7)/1.4,(p.getX(i)+.7)/1.4);
+    flat.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));flat.computeVertexNormals();g.dispose();return flat;
   },[]);
   useEffect(()=>()=>geometry.dispose(),[geometry]);return <primitive object={geometry} attach="geometry"/>;
 }
@@ -50,6 +60,9 @@ function TreeCrown() {
 }
 
 function Geometry({ shape }: { shape: Shape | 'hex' }) {
+  if (shape === 'body') return <capsuleGeometry args={[.5,.4,4,8]}/>;
+  if (shape === 'limb') return <cylinderGeometry args={[.5,.4,1,8]}/>;
+  if (shape === 'helmet') return <sphereGeometry args={[1,10,8]}/>;
   if (shape === 'hex') return <cylinderGeometry args={[1, 1, 1, 6]} />;
   if (shape === 'cone') return <coneGeometry args={[1, 1, 9]} />;
   if (shape === 'roof') return <GableRoof/>;
@@ -88,7 +101,7 @@ function Instances({ shape, pieces, onClick }: {
     castShadow={shape !== 'hex' && shape !== 'flag'} receiveShadow
     onClick={onClick} raycast={onClick ? undefined : NO_RAYCAST}>
     <Geometry shape={shape} />
-    <meshStandardMaterial roughness={shape === 'metal' ? 0.45 : 0.95} metalness={shape === 'metal' ? 0.55 : 0}
+    {['stone','roof','plaster','timber'].includes(shape)?<StoneMaterial asset={shape==='roof'?'grey_roof_tiles':shape==='plaster'?'rough_plaster_03':shape==='timber'?'medieval_wood':'medieval_blocks_05'}/>:<meshStandardMaterial roughness={shape === 'metal' ? 0.45 : 0.95} metalness={shape === 'metal' ? 0.55 : 0}
       side={shape === 'flag' ? THREE.DoubleSide : THREE.FrontSide}
       onBeforeCompile={shader => {
         if (shape === 'hex' || shape === 'stone' || shape === 'tower') {
@@ -119,7 +132,7 @@ function Instances({ shape, pieces, onClick }: {
           #include <begin_vertex>
           transformed.z += sin(position.x * 8.0 + uTime * 2.5 + instanceMatrix[3].x) * 0.12 * (position.x + 0.5);
         `);
-      }} />
+      }} />}
   </instancedMesh>;
 }
 
@@ -321,21 +334,27 @@ function camDistance(span: number, fov: number, aspect: number, zoom: number): n
  * 땅을 짚으면 휠을 연달아 굴릴 때 짚은 점이 미끄러졌다. 계산은 도착할 자리로 한다.
  */
 const DEST = new THREE.PerspectiveCamera();
-function destCamera(like: THREE.PerspectiveCamera, span: number, yaw: number, pitch: number, zoom: number, target: V3) {
+function clearTerrain(eye:THREE.Vector3,target:V3,height:(x:number,z:number)=>number){
+  // 산과 카메라의 충돌뿐 아니라 수도를 향한 시선 중간의 능선도 피한다.
+  for(let i=2;i<=12;i++){const t=i/12,x=target[0]+(eye.x-target[0])*t,z=target[2]+(eye.z-target[2])*t;
+    eye.y=Math.max(eye.y,target[1]+(height(x,z)+.13-target[1])/t);}
+}
+function destCamera(like: THREE.PerspectiveCamera, span: number, yaw: number, pitch: number, zoom: number, target: V3,height:(x:number,z:number)=>number) {
   DEST.fov = like.fov;
   DEST.aspect = like.aspect;
   DEST.near = like.near;
   DEST.far = like.far;
   DEST.updateProjectionMatrix();
   const d = camDistance(span, like.fov, like.aspect, zoom);
-  DEST.position.set(target[0] + Math.sin(yaw) * Math.cos(pitch) * d, Math.sin(pitch) * d, target[2] + Math.cos(yaw) * Math.cos(pitch) * d);
+  DEST.position.set(target[0] + Math.sin(yaw) * Math.cos(pitch) * d, target[1]+Math.sin(pitch) * d, target[2] + Math.cos(yaw) * Math.cos(pitch) * d);
+  clearTerrain(DEST.position,target,height);
   DEST.lookAt(target[0], target[1], target[2]);
   DEST.updateMatrixWorld();
   return DEST;
 }
 const RAY = new THREE.Raycaster();
 
-function Rig({ yaw, pitch, span, zoom, target }: { yaw: number; pitch: number; span: number; zoom: number; target: V3 }) {
+function Rig({ yaw, pitch, span, zoom, target,height }: { yaw: number; pitch: number; span: number; zoom: number; target: V3;height:(x:number,z:number)=>number }) {
   const aim = useRef(new THREE.Vector3());
   const desired = useMemo(() => new THREE.Vector3(), []);
   useFrame(({ camera, size }, delta) => {
@@ -344,25 +363,33 @@ function Rig({ yaw, pitch, span, zoom, target }: { yaw: number; pitch: number; s
     const smoothing = 1 - Math.exp(-delta * 12);
     aim.current.lerp(desired.set(...target), smoothing);
     desired.set(aim.current.x + Math.sin(yaw) * Math.cos(pitch) * distance,
-      Math.sin(pitch) * distance, aim.current.z + Math.cos(yaw) * Math.cos(pitch) * distance);
+      aim.current.y+Math.sin(pitch) * distance, aim.current.z + Math.cos(yaw) * Math.cos(pitch) * distance);
+    clearTerrain(desired,[aim.current.x,aim.current.y,aim.current.z],height);
     camera.position.lerp(desired, smoothing);
     camera.lookAt(aim.current);
   });
   return null;
 }
 
-class SceneBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+class SceneBoundary extends React.Component<{ children: React.ReactNode;onFailure?:()=>void }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(){this.props.onFailure?.();}
   render() {
     return this.state.failed ? <View style={styles.fallback}><Text style={styles.subtitle}>3D 화면을 불러오지 못했습니다. 아래 ‘2D 지도’로 전환해 주세요.</Text></View> : this.props.children;
   }
 }
 
 export default function Board3D({ state, player, watching, selected, movable, path, hint, lit, onCellPress }: Props) {
+  const [assetsReady,setAssetsReady]=useState(false);
+  const [renderStats,setRenderStats]=useState<RenderStats|null>(null);
+  const showStats=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('graphics')==='1';
+  const ready=useCallback(()=>setAssetsReady(true),[]);
+  const pending=useCallback(()=>setAssetsReady(false),[]);
   const {width:viewportWidth,height:viewportHeight}=useWindowDimensions();
   const compact=viewportWidth<600 || viewportHeight<500;
   const scene = useMemo(() => buildMedievalScene(state, player, watching), [state, player, watching]);
+  const heightField=useMemo(()=>terrainField(scene.ground),[scene.ground]);
 
   /**
    * 길 위의 칸들을 실제 타일로 바꾼다. 화면에 없는 칸(안개 밖, 깎인 바깥)은
@@ -415,7 +442,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
   const moved = useRef(false);
   const dragDistance = useRef(0);
   const selectedTile = scene.ground.find(t => t.cell.id === selected);
-  const ZMIN = 0.25, ZMAX = 1.7;
+  const ZMIN = 0.075, ZMAX = 1.7;
   /** 판 밖으로 너무 멀리 끌려가지 않게 */
   const clampTarget = (x: number, z: number): V3 => {
     const r = scene.span * 0.62, d = Math.hypot(x, z);
@@ -430,7 +457,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
     const live = cameraRef.current as THREE.PerspectiveCamera | null;
     if (!live) return null;
     const c = cam.current;
-    const dest = destCamera(live, scene.span, c.yaw, c.pitch, zoomRef.current, c.target);
+    const dest = destCamera(live, scene.span, c.yaw, c.pitch, zoomRef.current, c.target,heightField.height);
     const r = el.getBoundingClientRect();
     const ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     RAY.setFromCamera(ndc, dest);
@@ -454,14 +481,18 @@ export default function Board3D({ state, player, watching, selected, movable, pa
   };
   const zoomBy = (amount: number) => zoomAt(amount, null);
   const reset = () => { setYaw(0.12); setPitch(0.88); setZoom(1); zoomRef.current = 1; setTarget([0, 0, 0]); };
-  useEffect(() => { reset(); }, [state.rows, state.cols]);
+  const capital=scene.ground.find(t=>t.known&&t.castle&&t.owner===player);
+  useEffect(() => {
+    if(capital&&!watching){setTarget([capital.position[0],capital.height+.25,capital.position[2]]);setPitch(.86);setZoom(.44);zoomRef.current=.44;}
+    else reset();
+  }, [state.rows, state.cols,capital?.cell.id]);
   const clearPointer = (e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size === 0) rotating.current = false;
   };
   return <View style={styles.container}>
-    <SceneBoundary>
-      <Canvas shadows dpr={[1, compact?1.25:1.5]} camera={{ position: [0, scene.span * 1.8, scene.span * 1.5], fov: 40, near: 0.1, far: 600 }}
+    <SceneBoundary onFailure={ready}>
+      <Canvas shadows dpr={[1, compact?1.5:2]} camera={{ position: [0, scene.span * 1.8, scene.span * 1.5], fov: 40, near: 0.05, far: 600 }}
         gl={{ antialias: true, powerPreference: 'high-performance' }} style={{ touchAction: 'none' }}
         fallback={<View style={styles.fallback}><Text style={styles.subtitle}>WebGL을 지원하는 브라우저에서 3D 지도를 볼 수 있습니다.</Text></View>}
         onContextMenu={e => e.preventDefault()}
@@ -510,24 +541,27 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         onPointerUp={clearPointer} onPointerCancel={clearPointer} onPointerLeave={clearPointer}
         onWheel={e => zoomAt(Math.exp(e.deltaY * 0.0012), groundAt(e.clientX, e.clientY, e.currentTarget as Element))}>
         <CameraBridge into={cameraRef} />
-        <color attach="background" args={['#303e35']} />
-        <hemisphereLight args={['#dde6d6', '#4c493b', 1.4]} />
-        <directionalLight position={[-scene.span * 0.4, scene.span, scene.span * 0.35]} color="#ffe0a6" intensity={2.8}
-          castShadow shadow-mapSize={compact?[1024,1024]:[2048,2048]} shadow-bias={-0.0004} shadow-normalBias={0.04}
+        <color attach="background" args={['#a6b9b7']} />
+        <hemisphereLight args={['#d8e3ec', '#566145', 1.7]} />
+        <directionalLight position={[-scene.span * 0.5, scene.span*.8, scene.span * 0.4]} color="#fff0d9" intensity={3.1}
+          castShadow shadow-mapSize={compact?[2048,2048]:[4096,4096]} shadow-bias={-0.00015} shadow-normalBias={0.012}
           shadow-camera-left={-scene.span * 0.7} shadow-camera-right={scene.span * 0.7}
           shadow-camera-top={scene.span * 0.7} shadow-camera-bottom={-scene.span * 0.7}
           shadow-camera-near={0.1} shadow-camera-far={scene.span * 3} />
         <directionalLight position={[0, 8, -12]} color="#a6c9e5" intensity={0.65} />
-        <Rig yaw={yaw} pitch={pitch} span={scene.span} zoom={zoom} target={target} />
+        <Rig yaw={yaw} pitch={pitch} span={scene.span} zoom={zoom} target={target} height={heightField.height}/>
+        <RealmAtmosphere onStats={showStats?setRenderStats:undefined}/>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.09, 0]} receiveShadow raycast={NO_RAYCAST}>
           <planeGeometry args={[scene.span * 8, scene.span * 8]} />
           <meshStandardMaterial color="#18272c" roughness={1} />
         </mesh>
+        <Suspense fallback={null}>
         <CampaignLand ground={scene.ground} onPick={(index,e) => {
           e.stopPropagation();
           if (moved.current || e.delta > 5) return;
           onCellPress(scene.ground[index].cell);
         }} />
+        <RealmModels ground={scene.ground}/>
         {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}
         {scene.ground.filter(t => movable.has(t.cell.id) || selected === t.cell.id).map(t =>
           <TerrainRing key={t.cell.id} tile={t} ground={scene.ground} selected={selected === t.cell.id} />)}
@@ -539,12 +573,16 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         {turnStops.map(({ tile, turn }) => <TurnBadge key={'b' + tile.cell.id} tile={tile} turn={turn} />)}
         {lit && <DimVeil tiles={scene.ground} lit={lit} />}
         {hintTile && <CoachMarker tile={hintTile} />}
+        <AssetReady onReady={ready} onPending={pending}/>
+        </Suspense>
       </Canvas>
     </SceneBoundary>
-    <View pointerEvents="none" style={[styles.heading,compact&&{top:10,left:12}]}>
+    {!assetsReady&&<View pointerEvents="none" style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center',backgroundColor:'#172322'}]}><Text style={styles.title}>왕국의 풍경을 준비합니다</Text><Text style={styles.subtitle}>성곽 · 수목 · 고해상도 지형 불러오는 중</Text></View>}
+    <View pointerEvents="none" style={[styles.heading,compact&&{top:10,left:12,width:180,padding:8}]}>
       {!compact&&<Text style={styles.eyebrow}>C H R O N I C L E   O F   C R O W N S</Text>}
       <Text style={[styles.title,compact&&{fontSize:16}]}>왕국 연대기</Text>
       {!compact&&<Text style={styles.subtitle}>{watching ? '관전 · 모든 영토 공개' : '정찰한 땅 너머에는 전장의 안개가 깔립니다'}</Text>}
+      {showStats&&renderStats&&<Text testID="render-stats" style={styles.subtitle}>{renderStats.fps} FPS · {renderStats.triangles.toLocaleString()} tris · {renderStats.calls} calls</Text>}
     </View>
     <View style={styles.bottom} pointerEvents="box-none">
       {!compact&&<View pointerEvents="none"><Text style={styles.hint}>끌어서 이동 · 오른쪽 단추·Shift 끌기 / 두 손가락 비틀기 회전 · 휠 / 두 손가락 확대</Text></View>}
@@ -552,6 +590,7 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         <TouchableOpacity accessibilityLabel="지도 축소" style={styles.control} onPress={() => zoomBy(1.2)}><Text style={styles.controlText}>−</Text></TouchableOpacity>
         <TouchableOpacity accessibilityLabel="지도 확대" style={styles.control} onPress={() => zoomBy(1 / 1.2)}><Text style={styles.controlText}>＋</Text></TouchableOpacity>
         <TouchableOpacity accessibilityLabel="카메라 초기화" style={styles.control} onPress={reset}><Text style={styles.smallControl}>전체 보기</Text></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="수도 확대" style={styles.control} onPress={()=>{const home=scene.ground.find(t=>t.known&&t.castle&&t.owner===player);if(home){setTarget([home.position[0],home.height+.3,home.position[2]]);setPitch(1.02);setZoom(.17);zoomRef.current=.17;}}}><Text style={styles.smallControl}>수도</Text></TouchableOpacity>
         {selectedTile && <TouchableOpacity style={styles.control} onPress={() => {
           setTarget([selectedTile.position[0], 0, selectedTile.position[2]]); setZoom(0.28); zoomRef.current = 0.28;
         }}><Text style={styles.smallControl}>선택 확대</Text></TouchableOpacity>}
@@ -563,12 +602,12 @@ export default function Board3D({ state, player, watching, selected, movable, pa
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111e24', overflow: 'hidden', borderRadius: 12, borderWidth: 1, borderColor: '#3c4846' },
-  heading: { position: 'absolute', top: 20, left: 22, right: 16 },
+  heading: { position: 'absolute', top: 20, left: 22, width:350,padding:14,backgroundColor:'rgba(15,27,27,.76)',borderLeftWidth:2,borderLeftColor:'#bda778' },
   eyebrow: { color: '#bda778', fontSize: 9, fontWeight: '600', marginBottom: 5 },
   title: { color: '#eee3c9', fontFamily:realm.serif,fontSize: 23, fontWeight: '700', letterSpacing: 2 },
   subtitle: { color: '#9cadad', fontSize: 11, marginTop: 6 },
   bottom: { position: 'absolute', bottom: 14, left: 8, right: 8, alignItems: 'center', gap: 8 },
-  hint: { color: '#b2c0bc', fontSize: 10, textAlign: 'center' },
+  hint: { color: '#d6ded5', fontSize: 10, textAlign: 'center',backgroundColor:'rgba(15,27,27,.7)',paddingHorizontal:10,paddingVertical:4 },
   controls: { flexDirection: 'row', borderRadius: 8, borderWidth: 1, borderColor: '#6c6955', backgroundColor: 'rgba(18,30,34,0.94)', overflow: 'hidden' },
   control: { minWidth: 44, minHeight: 44, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center' },
   controlText: { color: '#eee0bf', fontSize: 22 },

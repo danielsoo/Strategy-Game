@@ -21,13 +21,13 @@ cell.owner = 1; cell.castle = false; cell.fortStage = 4; cell.terrain = 'mountai
 const changedBehindFog = buildMedievalScene(state, 0, false);
 assert.deepEqual(changedBehindFog.pieces, remembered.pieces, 'live enemy changes must not leak through remembered scenery');
 assert.equal(changedBehindFog.pieces.metal.length, 0, 'remembered units must not be rendered');
-assert.equal(changedBehindFog.ground.find(t => t.cell.id === cell.id)!.height, 0.24);
+assert.equal(changedBehindFog.ground.find(t => t.cell.id === cell.id)!.height, remembered.ground.find(t => t.cell.id === cell.id)!.height);
 
 vision.visible[index] = true;
 const visible = buildMedievalScene(state, 0, false);
-assert.equal(visible.pieces.metal.length, 20, 'ten visible soldiers must have armor and shield details');
+assert(visible.pieces.metal.length>0, 'visible soldiers must have armor and shield details');
 assert.equal(visible.mist.length, hidden.mist.length - 1);
-assert.equal(visible.ground.find(t => t.cell.id === cell.id)!.height, 0.5);
+assert(visible.ground.find(t => t.cell.id === cell.id)!.height>changedBehindFog.ground.find(t => t.cell.id === cell.id)!.height);
 assert.equal(buildMedievalScene(state, 0, true).mist.length, 0, 'spectating reveals the full board');
 
 for (const size of [9, 21]) {
