@@ -3,6 +3,7 @@ import {useFrame} from '@react-three/fiber';
 import type {AttackOutcome} from '../engine';
 import type {Ground,V3} from './medievalScene';
 import type {ArmyAction} from './armyAnimation';
+import {BATTLE_DURATION} from './duelMotion';
 export type BattleCue=AttackOutcome&{sequence:number};
 export interface ArmyTrack {from:V3;to:V3;start:number;duration:number;battle:boolean;defender?:boolean;win?:boolean;formationZ?:number}
 export const animationNow=()=>performance.now()/1000;
@@ -19,9 +20,9 @@ export function visibleMoves(previous:Ground[],next:Ground[]){
 export function sampleTrack(track:ArmyTrack,now:number):{progress:number;action:ArmyAction}{
  const t=Math.max(0,Math.min(1,(now-track.start)/track.duration));
  if(!track.battle)return {progress:t,action:t<1?'walk':'idle'};
- if(track.defender)return {progress:0,action:t<.25?'block':Math.sin((now-track.start)*5.8)>.35?'hit':'block'};
+ if(track.defender)return {progress:0,action:'idle'};
  if(t<.25)return {progress:t/.25*.62,action:'walk'};
- if(t<.82)return {progress:.62,action:'attack'};
+ if(t<.82)return {progress:.62,action:'idle'};
  const finish=Math.max(0,Math.min(1,(t-.82)/.18));
  return {progress:track.win?.62+finish*.38:.62*(1-finish),action:'walk'};
 }
@@ -35,7 +36,7 @@ export function useArmyTimeline(ground:Ground[],battles:BattleCue[]=[]){
   for(const cue of battles){if(cue.sequence<=lastBattle.current)continue;lastBattle.current=cue.sequence;
    const from=old.get(cue.fromId),to=old.get(cue.toId);
    if(!from?.seen||!to?.seen||!cue.result.rounds.length)continue;
-   next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:2.8,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0}});
+   next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:BATTLE_DURATION,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0}});
   }
   const fighting=new Set(next.flatMap(e=>[e.from.cell.id,e.to.cell.id]));
   for(const move of visibleMoves(previous.current,ground))if(!fighting.has(move.from.cell.id)&&!fighting.has(move.to.cell.id))next.push({...move,from:copy(move.from),to:copy(move.to),was:move.was&&copy(move.was),track:{from:move.from.position,to:move.to.position,start,duration:1.5,battle:false}});

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
-export type ArmyAction='idle'|'walk'|'attack'|'block'|'hit';
-export const ACTION_CODE:Record<ArmyAction,number>={idle:0,walk:1,attack:2,block:3,hit:4};
+export type ArmyAction='idle'|'walk';
+export const ACTION_CODE:Record<ArmyAction,number>={idle:0,walk:1};
 /** 원본 정적 메시의 관절 영역을 변형한다. 인스턴스와 그림자가 같은 동작을 사용한다. */
 const rig=`
 uniform float realmTime;
@@ -12,10 +12,7 @@ vec3 realmPose(vec3 p){
  p.x+=.079;
  float mode=realmMotion.x,t=realmTime+realmMotion.y;
  float walking=1.-step(.4,abs(mode-1.));
- float attacking=1.-step(.4,abs(mode-2.));
- float blocking=1.-step(.4,abs(mode-3.));
- float hitting=1.-step(.4,abs(mode-4.));
- float stepCycle=sin(t*7.5),strike=sin(t*5.8),impact=pow(max(0.,sin(t*5.8)),3.);
+ float stepCycle=sin(t*7.5);
  float side=realmEquipment>1.5?1.:realmEquipment>.5?-1.:p.x<0.?-1.:1.;
  // 검과 방패까지 같은 어깨 회전을 적용해 손에서 분리되지 않게 한다.
  float arm=max(step(.5,realmEquipment),smoothstep(.20,.34,abs(p.x))*smoothstep(.76,.88,p.y));
@@ -24,8 +21,6 @@ vec3 realmPose(vec3 p){
  float rest=-side*REALM_REST;
  float armZ=rest+walking*side*stepCycle*.13;
  float armX=walking*side*stepCycle*.48;
- if(side<0.){armZ+=attacking*(-.65+strike*.70);armX+=attacking*(.12+strike*.55);}
- else{armZ+=blocking*.30+attacking*.16;armX-=blocking*.40+attacking*.20;}
  vec3 posed=turnX(turnZ(p-shoulder,armZ),armX)+shoulder;
  p=mix(p,posed,arm);
  float leg=legWeight;
@@ -37,8 +32,6 @@ vec3 realmPose(vec3 p){
  stride=mix(stride,turnX(stride-kneePivot,-max(0.,side*stepCycle)*walking*.65)+kneePivot,knee);
  p=mix(p,stride,leg);
  p.y-=walking*.89*(1.-cos(stepCycle*.62));
- p=turnX(p-vec3(0.,.85,0.),hitting*impact*-.24+attacking*strike*.045)+vec3(0.,.85,0.);
- p.z-=hitting*impact*.10;
  p.y+=sin(t*1.7)*.007*(1.-walking);
  p.x-=.079;
  return p;
@@ -51,7 +44,7 @@ export function animateArmyMaterial(material:THREE.Material,time:{value:number},
   shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','vec3 transformed=realmPose(position);');
   shader.vertexShader=shader.vertexShader.replace('#include <beginnormal_vertex>','#include <beginnormal_vertex>\nobjectNormal=normalize(realmPose(position+normal*.002)-realmPose(position));');
  };
- material.customProgramCacheKey=()=>`realm-joints-v1-${rest}`;
+ material.customProgramCacheKey=()=>`realm-march-v2-${rest}`;
 }
 
 /** UV 경계의 중복 정점을 합쳐 방패 전체를 같은 관절에 묶는다. */

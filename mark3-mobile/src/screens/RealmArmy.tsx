@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {useFrame} from '@react-three/fiber';
 import {animateArmyMaterial,ACTION_CODE} from './armyAnimation';
 import {ArmyTrack,BattleCue,animationNow,sampleTrack,useArmyTimeline} from './armyTimeline';
-import RealmImpact from './RealmImpact';
+import RealmDuel from './RealmDuel';
 import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils';
 import type {Ground,Piece,V3} from './medievalScene';
 import {terrainField} from './campaignTerrain';
@@ -104,7 +104,8 @@ function ArmyBatch({part,places,tracks,ground}:{part:ReturnType<typeof soldier>[
   return <instancedMesh key={places.length} ref={ref} args={[part.geometry,part.material,places.length]} customDepthMaterial={depth} frustumCulled={false} castShadow receiveShadow raycast={()=>{}} dispose={null}/>;
 }
 export default function RealmArmy({ground:live,battles}:{ground:Ground[];battles?:BattleCue[]}){
-  const {ground,tracks,events}=useArmyTimeline(live,battles);
+  const {ground:displayGround,tracks,events}=useArmyTimeline(live,battles);
+  const ground=useMemo(()=>displayGround.map(g=>tracks.get(g.cell.id)?.battle?{...g,cell:{...g.cell,units:0}}:g),[displayGround,tracks]);
   const models=useMemo(()=>Object.fromEntries((['guard','pike','archer','rider'] as ArmyKind[]).map(k=>[k,soldier(k)])) as Record<ArmyKind,ReturnType<typeof soldier>>,[]);
   useEffect(()=>()=>Object.values(models).flat().forEach(p=>{p.geometry.dispose();p.material.dispose();}),[models]);
   const formations=useMemo(()=>{const field=terrainField(ground),out:Record<ArmyKind,Array<Piece&{cellId:string}>>={guard:[],pike:[],archer:[],rider:[]};
@@ -113,5 +114,12 @@ export default function RealmArmy({ground:live,battles}:{ground:Ground[];battles
         out[p.kind].push({cellId:g.cell.id,position:[x,field.height(x,z)+.008,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:cloth});}}
     return out;
   },[ground]);
-  return <group><RealmKnight ground={ground} kind="guard" tracks={tracks}/>{(Object.keys(models) as ArmyKind[]).filter(k=>k!=='guard').flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]} tracks={tracks} ground={live}/>))}{events.filter(e=>e.track.battle).map(e=><RealmImpact key={e.from.cell.id} position={[e.track.from[0]*.2+e.track.to[0]*.8,terrainField(live).height(e.track.from[0]*.2+e.track.to[0]*.8,e.track.from[2]*.2+e.track.to[2]*.8)+.15,e.track.from[2]*.2+e.track.to[2]*.8]} scale={.18} startAt={e.track.start+.7}/>)}</group>;
+  return <group><RealmKnight ground={ground} kind="guard" tracks={tracks}/>{(Object.keys(models) as ArmyKind[]).filter(k=>k!=='guard').flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]} tracks={tracks} ground={live}/>))}{events.filter(e=>e.track.battle).flatMap(e=>{
+    const x=e.track.from[0]*.35+e.track.to[0]*.65,z=e.track.from[2]*.35+e.track.to[2]*.65;
+    const yaw=Math.atan2(e.track.to[0]-e.track.from[0],e.track.to[2]-e.track.from[2])-Math.PI/2;
+    const pairs=Math.min(3,Math.max(1,Math.min(e.from.cell.units,e.to.cell.units)));
+    return Array.from({length:pairs},(_,i)=>{const offset=(i-(pairs-1)/2)*.29,px=x+Math.sin(yaw)*offset,pz=z+Math.cos(yaw)*offset;
+      return <RealmDuel key={e.from.cell.id+'-'+i} startAt={e.track.start+.6} finishWinner={e.track.win?0:1} position={[px,terrainField(live).height(px,pz)+.01,pz]} scale={.17} yaw={yaw} colors={[e.from.heraldry,e.to.heraldry]}/>;
+    });
+  })}</group>;
 }
