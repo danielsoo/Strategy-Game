@@ -6,3 +6,4 @@ tools/music/__pycache__/
 public/realm/tree_small_02/model.gltf
 public/realm/tree_small_02/tree_small_02.bin
 .realm-source/
+.asset-work/

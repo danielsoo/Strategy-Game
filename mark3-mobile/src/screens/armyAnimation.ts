@@ -55,6 +55,8 @@ export function tagKnightEquipment(geometry:THREE.BufferGeometry,sword:boolean){
  for(let i=0;i<p.count;i++){const key=`${p.getX(i).toFixed(4)},${p.getY(i).toFixed(4)},${p.getZ(i).toFixed(4)}`;const old=weld.get(key);if(old!==undefined)join(i,old);else weld.set(key,i);}
  const idx=geometry.getIndex();for(let i=0;i<(idx?.count??p.count);i+=3){const a=idx?idx.getX(i):i,b=idx?idx.getX(i+1):i+1,c=idx?idx.getX(i+2):i+2;join(a,b);join(a,c);}
  const groups=new Map<number,{min:number;max:number}>();for(let i=0;i<p.count;i++){const r=root(i),g=groups.get(r)??{min:Infinity,max:-Infinity};g.min=Math.min(g.min,p.getX(i));g.max=Math.max(g.max,p.getX(i));groups.set(r,g);}
- const weights=new Float32Array(p.count);for(let i=0;i<p.count;i++){const g=groups.get(root(i))!;weights[i]=sword?1:g.min>20&&g.max-g.min>40?2:0;}
+ // glTF 노드 축척을 적용한 브라우저와 원본 단위 모두에서 같은 부품을 고른다.
+ geometry.computeBoundingBox();const height=geometry.boundingBox!.max.y-geometry.boundingBox!.min.y;
+ const weights=new Float32Array(p.count);for(let i=0;i<p.count;i++){const g=groups.get(root(i))!;weights[i]=sword?1:g.min>height*.10&&g.max-g.min>height*.20?2:0;}
  geometry.setAttribute('realmEquipment',new THREE.BufferAttribute(weights,1));
 }

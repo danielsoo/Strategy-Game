@@ -22,7 +22,10 @@ function upperArmRotation(a:Point,b:Point,c:Point){
 }
 
 /** 정적 원본에 관절 가중치를 추가한다. 검·방패는 단일 손뼈에 묶어 휘지 않게 한다. */
-export function buildKnightRig(scene:THREE.Group){
+export function buildKnightRig(scene:THREE.Group,authored=false){
+ const armShoulder=(s:number):Point=>authored?[s*.24,1.35,-.075]:shoulder(s);
+ const armElbow=(s:number):Point=>authored?[s*.425,1.21,-.075]:elbow(s);
+ const armWrist=(s:number):Point=>authored?[s*.565,1.12,.035]:wrist(s);
  scene.updateMatrixWorld(true);const parts:THREE.BufferGeometry[]=[];let material:THREE.MeshStandardMaterial|undefined;
  scene.traverse(o=>{if(!(o as THREE.Mesh).isMesh)return;const m=o as THREE.Mesh,g=m.geometry.clone().applyMatrix4(m.matrixWorld);tagKnightEquipment(g,m.name.endsWith('001'));parts.push(g);material??=(m.material as THREE.MeshStandardMaterial).clone();});
  const geometry=mergeGeometries(parts);parts.forEach(g=>g.dispose());geometry.computeBoundingBox();const box=geometry.boundingBox!,scale=1.75/(box.max.y-box.min.y);
@@ -32,7 +35,7 @@ export function buildKnightRig(scene:THREE.Group){
  // 원본의 편 손가락을 검 손잡이 주위로 말아 쥔다. 손목·손바닥·무기는 이동시키지 않는다.
  const grip=V(wrist(-1)),axis=V(SWORD_REST_DIRECTION).normalize(),finger=V(SWORD_FOREARM);
  finger.addScaledVector(axis,-finger.dot(axis)).normalize();const curl=new THREE.Vector3().crossVectors(axis,finger);
- for(let i=0;i<p.count;i++){
+ for(let i=0;!authored&&i<p.count;i++){
   if(equipment.getX(i)!==0||p.getX(i)>-.56||p.getY(i)<.87||p.getY(i)>1.10)continue;
   const point=new THREE.Vector3().fromBufferAttribute(p,i),reach=point.clone().sub(grip).dot(finger);
   if(reach<=.015)continue;
@@ -45,25 +48,42 @@ export function buildKnightRig(scene:THREE.Group){
   const x=p.getX(i),y=p.getY(i),ax=Math.abs(x),side=x<0?-1:1,arm=side<0?1:4,leg=side<0?9:11;
   let influences:Array<[number,number]>;
   if(equipment.getX(i)>1.5)influences=[[13,1]];
-  else if(equipment.getX(i)>.5)influences=[[3,1]];
+  else if(equipment.getX(i)>.5)influences=[[authored?16:3,1]];
   else if(y>1.46&&ax<.18)influences=[[7,1]];
   else if(ax>.24&&y>.83){
    // 가로 좌표만 쓰면 넓은 어깨 갑옷 끝이 아래팔로 분류되어 접힌다.
-   const origin=V(shoulder(side)),axis=V(wrist(side)).sub(origin),point=new THREE.Vector3(x,y,p.getZ(i));
+   const origin=V(armShoulder(side)),axis=V(armWrist(side)).sub(origin),point=new THREE.Vector3(x,y,p.getZ(i));
    const along=point.sub(origin).dot(axis)/axis.lengthSq();
-   const lower=smooth(.47,.60,along),hand=smooth(.87,1.0,along),armWeight=smooth(.23,.33,ax);
+   const lower=smooth(authored?.52:.47,authored?.67:.60,along),hand=smooth(authored?.90:.87,1.0,along),armWeight=smooth(.23,.33,ax);
    influences=[[0,1-armWeight],[arm,armWeight*(1-lower)],[arm+1,armWeight*lower*(1-hand)],[arm+2,armWeight*lower*hand]];
   }else if(y<.79){const legWeight=1-smooth(.69,.81,y),lower=1-smooth(.40,.50,y),foot=1-smooth(.12,.22,y);influences=[[8,1-legWeight],[leg,legWeight*(1-lower)],[leg+1,legWeight*lower*(1-foot)],[side<0?14:15,legWeight*lower*foot]];}
   else influences=[[y<.9?8:0,1]];
   for(let k=0;k<4;k++){ids.push(influences[k]?.[0]??0);weights.push(influences[k]?.[1]??0);}
  }
  geometry.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(ids,4));geometry.setAttribute('skinWeight',new THREE.Float32BufferAttribute(weights,4));
+ let shieldGeometry:THREE.BufferGeometry|undefined;
+ if(authored){
+  // 편 손을 억지로 구부리는 대신, 손가락 관절로 쥔 원본 애니메이션의 장갑을 사용한다.
+  const index=geometry.getIndex()!,kept:number[]=[];
+  const isHand=(i:number)=>{
+   if(equipment.getX(i)!==0||p.getY(i)<.83||Math.abs(p.getX(i))<.24)return false;
+   const s=p.getX(i)<0?-1:1,axis=V(armWrist(s)).sub(V(armShoulder(s))),point=new THREE.Vector3().fromBufferAttribute(p,i).sub(V(armShoulder(s)));
+   return point.dot(axis)/axis.lengthSq()>.97;
+  };
+  const shieldIndices:number[]=[];
+  for(let i=0;i<index.count;i+=3){const a=index.getX(i),b=index.getX(i+1),c=index.getX(i+2);if(equipment.getX(a)===2)shieldIndices.push(a,b,c);else if(![a,b,c].some(isHand)&&equipment.getX(a)!==1)kept.push(a,b,c);}
+  shieldGeometry=geometry.clone();shieldGeometry.setIndex(shieldIndices);shieldGeometry.translate(-rest[13][0],-rest[13][1],-rest[13][2]);
+  for(const name of ['skinIndex','skinWeight','realmEquipment'])shieldGeometry.deleteAttribute(name);
+  geometry.setIndex(kept);
+ }
  geometry.deleteAttribute('realmEquipment');
- const bones=rest.map((p,i)=>{const b=new THREE.Bone();b.name=`knight-joint-${i}`;b.position.copy(V(p));return b;});
+ const bind=authored?[...rest,[-.609,1.006,-.038] as Point]:rest;
+ if(authored)for(const s of [-1,1]){const i=s<0?1:4;bind[i]=armShoulder(s);bind[i+1]=armElbow(s);bind[i+2]=armWrist(s);}
+ const bones=bind.map((p,i)=>{const b=new THREE.Bone();b.name=`knight-joint-${i}`;b.position.copy(V(p));return b;});
  const mesh=new THREE.SkinnedMesh(geometry,material!);bones.forEach(b=>mesh.add(b));mesh.updateMatrixWorld(true);const skeleton=new THREE.Skeleton(bones);mesh.bind(skeleton);mesh.frustumCulled=false;mesh.castShadow=true;mesh.receiveShadow=true;
  material!.roughness=.55;material!.metalness=.62;
  for(const map of [material!.map,material!.normalMap])if(map)map.anisotropy=8;
- return {mesh,bones,dispose:()=>{geometry.dispose();material!.dispose();skeleton.dispose();}};
+ return {mesh,bones,shieldGeometry,dispose:()=>{geometry.dispose();shieldGeometry?.dispose();material!.dispose();skeleton.dispose();}};
 }
 
 export function poseKnight(rig:ReturnType<typeof buildKnightRig>,pose:FighterPose){

@@ -10,7 +10,8 @@ import {terrainField} from './campaignTerrain';
 import CampaignLand from './CampaignLand';
 import RealmModels from './RealmModels';
 import RealmArmy from './RealmKnight';
-import {DUEL_DURATION,CONTACT_TIMES} from './duelMotion';
+import {DUEL_DURATION} from './duelMotion';
+import {AUTHORED_CONTACT_TIMES as CONTACT_TIMES} from './authoredKnightMotion';
 import RealmDuel,{DuelClock} from './RealmDuel';
 import type {ArmyAction} from './armyAnimation';
 import RealmDaylight from './RealmDaylight';
@@ -49,13 +50,13 @@ export default function RealmArtReview(){
   const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('unit')==='1'?4:0),[angle,setAngle]=useState(.35);
   const clock=useRef<DuelClock>({time:0,paused:false,speed:1,first:0}).current;
   const [closeup,setCloseup]=useState(false),[reviewCut,setReviewCut]=useState(0);
-  const [phase,setPhase]=useState('서로 거리를 좁힙니다'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false);
+  const [phase,setPhase]=useState('방패를 세우고 상대를 살핍니다'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false);
   const [action,setAction]=useState<ArmyAction>('idle');
   const [ready,setReady]=useState(false);
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>팔 관절·갑옷 수정본 4 · 사선베기 / 횡베기</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>대련 동작 5 · 베기·방패 방어</Text></View>
     <View style={styles.tabs}>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</View>{variant===3&&<View style={styles.tabs}>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View>}{variant===4&&<><View style={styles.tabs}>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
@@ -70,7 +71,7 @@ export default function RealmArtReview(){
       ['한 단계',()=>{clock.time=(clock.time+.08)%DUEL_DURATION;clock.paused=true;setPaused(true);}],
     ] as [string,()=>void][]).map(([label,fn])=><TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={fn} style={styles.button}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View><Text style={[styles.note,{paddingHorizontal:16,paddingBottom:8}]}>푸른 원: 아군 · 붉은 원: 적군 — {phase}</Text></>}</>}
     <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle} action={action} clock={clock} onPhase={setPhase} closeup={closeup}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>
-    {!capture&&<View style={styles.footer}><TouchableOpacity accessibilityRole="button" accessibilityLabel="왼쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a-.5)}><Text style={styles.label}>↶ 왼쪽</Text></TouchableOpacity><Text style={styles.note}>{variant===5?'입체 수목 · 풀 · 낙엽과 흙':variant===4?'접근 → 방패 방어 → 반격 → 어깨 피격 → 거리 회복':variant===3?'병사 모델 · 대열과 크기 검토':variant===0?'영주관 · 예배당 · 시장과 시가지':variant===1?'석조 수도원 · 시장 · 골목과 주택':'목조 요새 · 장원 · 변경 마을'}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="오른쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a+.5)}><Text style={styles.label}>오른쪽 ↷</Text></TouchableOpacity></View>}
+    {!capture&&<View style={styles.footer}><TouchableOpacity accessibilityRole="button" accessibilityLabel="왼쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a-.5)}><Text style={styles.label}>↶ 왼쪽</Text></TouchableOpacity><Text style={styles.note}>{variant===5?'입체 수목 · 풀 · 낙엽과 흙':variant===4?'경계 → 베기·방패 방어 → 반격 → 피격·회수':variant===3?'병사 모델 · 대열과 크기 검토':variant===0?'영주관 · 예배당 · 시장과 시가지':variant===1?'석조 수도원 · 시장 · 골목과 주택':'목조 요새 · 장원 · 변경 마을'}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="오른쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a+.5)}><Text style={styles.label}>오른쪽 ↷</Text></TouchableOpacity></View>}
   </View>;
 }
 const styles=StyleSheet.create({page:{flex:1,backgroundColor:'#172521'},header:{padding:16,paddingBottom:8},title:{fontSize:24,color:'#e2d5b7',fontFamily:'serif'},note:{fontSize:12,color:'#a9b4a6',flexShrink:1},tabs:{flexDirection:'row',flexWrap:'wrap',gap:6,paddingHorizontal:16,paddingBottom:12},button:{paddingHorizontal:14,paddingVertical:10,borderWidth:1,borderColor:'#596451'},active:{backgroundColor:'#5a664e'},label:{fontSize:13,color:'#e5dbc4'},footer:{padding:12,flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:12}});
