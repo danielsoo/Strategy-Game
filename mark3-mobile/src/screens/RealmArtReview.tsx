@@ -21,7 +21,7 @@ import {Instances,SHAPES} from './Board3D';
 const names=['왕실 성채','수도원 도시','변경 성','군대 대열','병사 대련','숲과 지면'];
 function SceneReady({onReady}:{onReady:(ready:boolean)=>void}){useEffect(()=>onReady(true),[onReady]);return null;}
 /** 실제 게임과 같은 모델·재질·배치 코드. 저장이나 게임 서버 요청은 하지 않는다. */
-function ReviewScene({variant,angle,action,clock,onPhase}:{variant:number;angle:number;action:ArmyAction;clock:DuelClock;onPhase:(phase:string)=>void}){
+function ReviewScene({variant,angle,action,clock,onPhase,closeup}:{variant:number;angle:number;action:ArmyAction;clock:DuelClock;closeup:boolean;onPhase:(phase:string)=>void}){
   const scene=useMemo(()=>{
     const state=createGameState(2,9,9,makeRng(947));
     state.cells.forEach(c=>{c.units=0;c.castle=false;c.fortStage=0;c.owner=null;c.terrain=variant===5&&c.col<4?'forest':'plain';c.hasRoad=false;});
@@ -33,7 +33,7 @@ function ReviewScene({variant,angle,action,clock,onPhase}:{variant:number;angle:
     if(variant<3)buildSettlement(selected,(shape,x,y,z,sx,sy,sz,color,rotation)=>pieces[shape].push({position:[x,field.height(x,z)+y,z],scale:[sx,sy,sz],color,rotation}));
     return {ground,field,pieces};
   },[variant]);
-  useFrame(({camera,size})=>{const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===3?1.05:variant===4?4.6:variant===5?1.7:2.7)*fit;camera.position.set(Math.sin(angle)*distance,h+(variant===3?.44:variant===4?2.0:variant===5?.5:1.85)*fit,Math.cos(angle)*distance);camera.lookAt(0,h+(variant===3?.055:variant===4?.85:.15),variant===3?.07:0);});
+  useFrame(({camera,size})=>{const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(Math.sin(angle)*distance,h+(variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,Math.cos(angle)*distance);camera.lookAt(0,h+(variant===3?.055:variant===4?(closeup?1.2:.85):.15),variant===3?.07:0);});
   return <>
     <color attach="background" args={['#82958c']}/><fog attach="fog" args={['#82958c',7,18]}/>
     <RealmDaylight/>
@@ -48,6 +48,7 @@ function ReviewScene({variant,angle,action,clock,onPhase}:{variant:number;angle:
 export default function RealmArtReview(){
   const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('unit')==='1'?4:0),[angle,setAngle]=useState(.35);
   const clock=useRef<DuelClock>({time:0,paused:false,speed:1,first:0}).current;
+  const [closeup,setCloseup]=useState(false);
   const [phase,setPhase]=useState('서로 거리를 좁힙니다'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false);
   const [action,setAction]=useState<ArmyAction>('idle');
   const [ready,setReady]=useState(false);
@@ -57,13 +58,16 @@ export default function RealmArtReview(){
     {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>그래픽 작업본 · 실제 3D 렌더링</Text></View>
     <View style={styles.tabs}>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</View>{variant===3&&<View style={styles.tabs}>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View>}{variant===4&&<><View style={styles.tabs}>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
+      ['사선베기',()=>{clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
+      ['횡베기',()=>{clock.time=CONTACT_TIMES[1]-.7;clock.paused=false;setPaused(false);}],
       ['적군 선공',()=>{clock.first=1;clock.time=0;clock.paused=false;setPaused(false);}],
       [paused?'재생':'일시정지',()=>{clock.paused=!clock.paused;setPaused(clock.paused);}],
       [slow?'정상 속도':'느리게 보기',()=>{clock.speed=slow?1:.3;setSlow(!slow);}],
       ['접촉 순간',()=>{clock.time=CONTACT_TIMES[0];clock.paused=true;setPaused(true);}],
+      [closeup?'전체 자세':'손목 확대',()=>setCloseup(!closeup)],
       ['한 단계',()=>{clock.time=(clock.time+.08)%DUEL_DURATION;clock.paused=true;setPaused(true);}],
     ] as [string,()=>void][]).map(([label,fn])=><TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={fn} style={styles.button}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</View><Text style={[styles.note,{paddingHorizontal:16,paddingBottom:8}]}>푸른 원: 아군 · 붉은 원: 적군 — {phase}</Text></>}</>}
-    <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle} action={action} clock={clock} onPhase={setPhase}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>
+    <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle} action={action} clock={clock} onPhase={setPhase} closeup={closeup}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>
     {!capture&&<View style={styles.footer}><TouchableOpacity accessibilityRole="button" accessibilityLabel="왼쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a-.5)}><Text style={styles.label}>↶ 왼쪽</Text></TouchableOpacity><Text style={styles.note}>{variant===5?'입체 수목 · 풀 · 낙엽과 흙':variant===4?'접근 → 방패 방어 → 반격 → 어깨 피격 → 거리 회복':variant===3?'병사 모델 · 대열과 크기 검토':variant===0?'영주관 · 예배당 · 시장과 시가지':variant===1?'석조 수도원 · 시장 · 골목과 주택':'목조 요새 · 장원 · 변경 마을'}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="오른쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a+.5)}><Text style={styles.label}>오른쪽 ↷</Text></TouchableOpacity></View>}
   </View>;
 }

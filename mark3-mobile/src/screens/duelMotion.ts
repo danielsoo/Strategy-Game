@@ -1,12 +1,14 @@
-import {Vector3} from 'three';
+import {Vector3,Quaternion,Euler} from 'three';
 export type Point=[number,number,number];
 export const DUEL_DURATION=6.4;
 export const SWORD_REST_DIRECTION:Point=[.000187,.407555,.74768];
 export const SWORD_LENGTH=Math.hypot(...SWORD_REST_DIRECTION);
+export const SWORD_FOREARM:Point=[-.18,-.15,.03];
 export const BATTLE_DURATION=DUEL_DURATION+1.2;
 export const CONTACT_TIMES=[1.62,3.02,4.42];
 export interface FighterPose {
  root:Point; yaw:number; sword:Point; tip:Point; shield:Point;
+ aimPoint:Point; bladeFraction:number; bladeRoll:number;
  feet:[Point,Point]; twist:number; crouch:number; reaction:number;
 }
 export interface DuelFrame {fighters:[FighterPose,FighterPose]; contact:Point; impact:number; blocked:boolean; phase:string}
@@ -24,7 +26,31 @@ export function worldToLocal(p:Point,actor:FighterPose):Point {
  return [x*c-z*s,p[1]-actor.root[1],x*s+z*c];
 }
 function guard(x:number,yaw:number):FighterPose {
- return {root:[x,0,0],yaw,sword:[-.30,1.13,.34],tip:[-.23,1.84,.65],shield:[.27,1.18,.39],feet:[[-.17,.08,-.15],[.17,.08,.20]],twist:0,crouch:.025,reaction:0};
+ return {root:[x,0,0],yaw,sword:[-.30,1.13,.34],tip:[-.23,1.84,.65],aimPoint:[-.23,1.84,.65],bladeFraction:1,bladeRoll:0,shield:[.27,1.18,.39],feet:[[-.20,.08,-.15],[.20,.08,.20]],twist:0,crouch:.04,reaction:0};
+}
+export function swordShoulder(pose:FighterPose):Point {
+ return v([-.24,.46,0]).applyEuler(new Euler(0,pose.twist,0)).add(v([0,.88-pose.crouch,-pose.reaction])).toArray() as Point;
+}
+/** 손목을 따로 돌리지 않는다. 아래팔·손·검을 한 강체로 풀어 원래 쥐는 각도를 보존한다. */
+export function solveSwordArm(pose:FighterPose){
+ const shoulder=swordShoulder(pose),offset=v(pose.aimPoint).sub(v(shoulder));
+ const distal=v(SWORD_FOREARM).addScaledVector(v(SWORD_REST_DIRECTION),pose.bladeFraction);
+ const length=distal.length(),distance=Math.max(length-.263+.005,Math.min(length+.263-.005,offset.length()));
+ const target=v(shoulder).add(offset.normalize().multiplyScalar(distance));
+ const elbow=jointIK(shoulder,target.toArray() as Point,[-.72,1.04,-.3],.263,length);
+ const axis=target.clone().sub(v(elbow)).normalize();
+ const rotation=new Quaternion().setFromUnitVectors(distal.clone().normalize(),axis);
+ // 방향 벡터의 투영이 0을 지날 때 생기는 180도 뒤집힘을 피한다.
+ rotation.premultiply(new Quaternion().setFromAxisAngle(axis,pose.bladeRoll));
+ const hand=v(elbow).add(v(SWORD_FOREARM).applyQuaternion(rotation));
+ const tip=hand.clone().add(v(SWORD_REST_DIRECTION).applyQuaternion(rotation));
+ return {shoulder,elbow,hand:hand.toArray() as Point,tip:tip.toArray() as Point,rotation};
+}
+/** 손목 위치를 직선으로 끌어당기지 않고 어깨 주위의 호를 따라 칼끝을 이동시킨다. */
+function arcTip(from:Point,to:Point,origin:Point,t:number):Point {
+ const a=v(from).sub(v(origin)),b=v(to).sub(v(origin)),radius=mix(a.length(),b.length(),t);
+ const turn=new Quaternion().setFromUnitVectors(a.clone().normalize(),b.clone().normalize());
+ return a.normalize().applyQuaternion(new Quaternion().slerp(turn,t)).multiplyScalar(radius).add(v(origin)).toArray() as Point;
 }
 /** 두 병사를 같은 시계로 움직여 접촉 전에는 피격 반응이 생기지 않게 한다. */
 export function sampleDuel(seconds:number,first:0|1=0,finishWinner:0|1=first):DuelFrame {
@@ -48,25 +74,30 @@ export function sampleDuel(seconds:number,first:0|1=0,finishWinner:0|1=first):Du
   const retreat=(!blocked?.13:.045)*smooth((t-at)/.25)*(1-smooth((t-at-.32)/.34));
   b.root[0]+=Math.sin(b.yaw)*-retreat;
   b.feet[0][2]-=retreat*.7;b.feet[0][1]+=Math.sin(Math.PI*clamp((t-at)/.35))*(t>=at?.045:0);
-  if(!blocked)a.root[0]+=Math.sin(a.yaw)*.18*wind*(1-recover);
+  const horizontal=n===1;
+  const step=smooth((t-(at-.38))/.38),advance=(blocked?(horizontal?.45:.25):.68)*step*(1-recover);
+  a.root[0]+=Math.sin(a.yaw)*advance;
   contact=localToWorld(blocked?[b.shield[0],b.shield[1],b.shield[2]+.009]:[-.22,1.34,.14],b);
   const target=worldToLocal(contact,a);
-  const chamber:Point=[-.39,1.58,-.04],chamberTip:Point=[-.52,2.14,-.49];
-  const hand:Point=[-.23,1.27,.43];
-  a.sword=lerp(lerp(a.sword,chamber,wind),hand,swing);
-  a.tip=lerp(lerp(a.tip,chamberTip,wind),target,swing);
-  // 실제 검 길이의 길이을 표적에 맞춘다. 팔꿈치는 리그에서 두 뼈 IK로 푼다.
-  if(swing>0){const direction=v(target).sub(v(a.sword)).normalize();const grip=v(target).addScaledVector(direction,-SWORD_LENGTH).toArray() as Point;a.sword=lerp(a.sword,grip,swing);}
-  const rest=guard(0,0);a.sword=lerp(a.sword,rest.sword,recover);a.tip=lerp(a.tip,rest.tip,recover);
-  a.twist=mix(-.13,.12,swing)*wind*(1-recover);
-  a.feet[1][2]+=.13*wind*(1-recover);
-  a.feet[1][1]+=.06*Math.sin(Math.PI*wind)*(1-recover);
+  a.twist=mix(horizontal?-.38:-.25,horizontal?.42:.30,swing)*wind*(1-recover);
+  const chamberTip:Point=horizontal?[-.9,1.35,-.22]:[-.52,2.14,-.49],shoulder=swordShoulder(a);
+  a.aimPoint=arcTip(arcTip(a.aimPoint,chamberTip,shoulder,wind),target,shoulder,swing);
+  if(!blocked&&t>at){const follow=smooth((t-at)/.22)*(1-recover);a.aimPoint=lerp(a.aimPoint,[target[0]+.30,target[1]-.30,target[2]+.06],follow);}
+  a.aimPoint=arcTip(a.aimPoint,guard(0,0).aimPoint,shoulder,recover);
+  a.bladeFraction=mix(1,.70,wind*(1-recover));
+  a.bladeRoll=(horizontal?-.65:.45)*wind*(1-recover);
+  const stepping=t<=at?step:recover;
+  a.feet[1][2]+=.04*Math.sin(Math.PI*stepping);
+  a.feet[0][2]-=.09*Math.sin(Math.PI*stepping);
+  a.feet[1][1]+=.07*Math.sin(Math.PI*clamp(stepping/.6));
+  a.feet[0][1]+=.05*Math.sin(Math.PI*clamp((stepping-.4)/.6));
   a.crouch+=.02*swing*(1-recover);
   impact=t>=at&&t<at+.18?1-(t-at)/.18:0;
-  phase=t<at-.32?'검을 준비하며 방패로 몸을 가립니다':t<at?'상대를 향해 베어 들어갑니다':t<at+.18?blocked?'방패에 접촉 · 충격을 받아냅니다':'어깨 피격 · 발을 옮겨 균형을 잡습니다':n===0?'방어자가 반격을 준비합니다':'검을 거두고 경계를 회복합니다';
+  phase=t<at-.32?'검을 준비하며 방패로 몸을 가립니다':t<at?(horizontal?'몸통 회전으로 횡베기':'어깨에서 내려오는 사선베기'):t<at+.18?blocked?'칼날과 방패 접촉 · 충격을 받아냅니다':'어깨 피격 · 발을 옮겨 균형을 잡습니다':n===0?'방어자가 횡베기 반격을 준비합니다':'검을 거두고 경계를 회복합니다';
  }
  // 접근할 때만 발을 교대로 든다. 공방 중 양발을 함께 흔들지 않는다.
  if(t<.8||t>5.15){const q=t<.8?t/.8:(t-5.15)/1.25;actors.forEach(a=>{a.feet.forEach((f,i)=>{const cycle=clamp(q*2-i);f[1]+=.085*Math.sin(Math.PI*cycle);f[2]+=.12*Math.sin(Math.PI*cycle);});});}
+ actors.forEach(a=>{const arm=solveSwordArm(a);a.sword=arm.hand;a.tip=arm.tip;});
  return {fighters:actors,contact,impact,blocked,phase};
 }
 
