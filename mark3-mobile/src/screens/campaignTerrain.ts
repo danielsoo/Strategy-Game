@@ -27,7 +27,7 @@ export function terrainField(ground: Ground[]) {
         const distance=Math.hypot(along*.7,across*1.18);
         mountain=Math.max(mountain,Math.pow(Math.max(0,1-distance/2.45),1.65)*1.8*ridge);
       }
-      if(g.castle&&d<1.4){const t=Math.max(0,(d-.90)/.50);flat=Math.max(flat,1-t*t*(3-2*t));}
+      if(g.castle&&d<1.65){const t=Math.max(0,(d-1.16)/.49);flat=Math.max(flat,1-t*t*(3-2*t));}
     }
     const rolling=.16+.22*noise(x*.5,z*.5)+.10*noise(x*1.6,z*1.6);
     const detail=.028*noise(x*9,z*9);

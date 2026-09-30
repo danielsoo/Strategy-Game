@@ -28,6 +28,6 @@ export function armyFormation(g:Ground){
     const x=(col-3.5)*.057+(realmRandom(seed+i*3)-.5)*.008;
     const z=(fortified?.99:.22)-row*.07+(kind==='rider'?.06:0);
     return {kind,x:x*Math.cos(yaw)+z*Math.sin(yaw),z:-x*Math.sin(yaw)+z*Math.cos(yaw),
-      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.046+realmRandom(seed+i*11)*.004};
+      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.031+realmRandom(seed+i*11)*.003};
   });
 }

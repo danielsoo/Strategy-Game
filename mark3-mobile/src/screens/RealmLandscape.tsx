@@ -18,17 +18,21 @@ export function landscapeDetails(ground:Ground[]){
     }
   };
   for(const g of ground){if(!g.known)continue;const [x,,z]=g.position,seed=g.cell.row*113+g.cell.col*31;
-    const color=(hex:string)=>new THREE.Color(hex).multiplyScalar(g.seen?1:.28);
+    const color=(hex:string)=>new THREE.Color(hex).multiplyScalar(g.seen?1:.55);
     if(g.castle){const {yaw}=settlementPlan(g),road=color('#8d806b');
       const local=(ax:number,az:number,bx:number,bz:number,w:number)=>strip(x+ax*Math.cos(yaw)+az*Math.sin(yaw),z-ax*Math.sin(yaw)+az*Math.cos(yaw),x+bx*Math.cos(yaw)+bz*Math.sin(yaw),z-bx*Math.sin(yaw)+bz*Math.cos(yaw),w,road);
-      local(0,-.15,0,.9,.072);local(-.82,.64,.82,.64,.045);local(-.60,-.53,-.67,.65,.037);local(.63,-.53,.68,.66,.037);
-    }else if(g.terrain==='plain'&&random(seed)>.32){
+      local(0,-.38,0,1.02,.09);local(-1.1,.68,1.1,.68,.055);
+      local(-.88,-.86,-.90,.91,.06);local(.88,-.86,.90,.91,.06);
+      local(-.30,-.52,-.30,.50,.055);local(.30,-.52,.30,.50,.055);
+      local(-.37,.26,.39,.26,.16);local(-.40,-.18,.40,-.18,.08);
+    }else if(g.terrain==='plain'&&random(seed)>.32&&Math.max(...[[.55,0],[-.55,0],[0,.55],[0,-.55]].map(([dx,dz])=>Math.abs(field.height(x+dx,z+dz)-field.height(x,z))))<.16){
       const angle=random(seed+1)*2.2,co=Math.cos(angle),si=Math.sin(angle);
       for(let plot=0;plot<3;plot++){
-        const ox=(plot-1)*.24,oz=(random(seed+plot*7)-.5)*.30;
-        const width=.15+random(seed+plot*13)*.07,length=.35+random(seed+plot*19)*.19;
-        for(let row=0;row<10;row++){const xx=ox-width/2+row*width/10;
-          strip(x+xx*co-(oz-length/2)*si,z+xx*si+(oz-length/2)*co,x+xx*co-(oz+length/2)*si,z+xx*si+(oz+length/2)*co,width/10*.86,color(plot===0?'#b09b64':plot===1?'#6f7451':'#887452'));}
+        const ox=.22+(plot-1)*.24,oz=(random(seed+plot*7)-.5)*.30;
+        const width=.19+random(seed+plot*13)*.07,length=.35+random(seed+plot*19)*.19;
+        for(let row=0;row<24;row++){const xx=ox-width/2+row*width/24,bend=Math.sin(row*.12+seed)*.035;
+          const tint=color(plot===0?'#b4a376':plot===1?'#87915f':'#a19070').multiplyScalar(row%2?.96:1);
+          strip(x+xx*co-(oz-length/2+bend)*si,z+xx*si+(oz-length/2+bend)*co,x+xx*co-(oz+length/2+bend)*si,z+xx*si+(oz+length/2+bend)*co,width/24*1.12,tint);}
       }
       strip(x-.52*co,z-.52*si,x+.54*co,z+.54*si,.028,color('#9c9277'));
     }
@@ -48,6 +52,8 @@ export default function RealmLandscape({ground}:{ground:Ground[]}){
   const geometry=useMemo(()=>landscapeDetails(ground),[ground]);useEffect(()=>()=>geometry.dispose(),[geometry]);
   return <mesh geometry={geometry} receiveShadow raycast={()=>{}}><meshStandardMaterial {...maps} vertexColors roughness={1} polygonOffset polygonOffsetFactor={-1} side={THREE.DoubleSide} onBeforeCompile={shader=>{
     shader.vertexShader='varying vec3 vEarth;\n'+shader.vertexShader;shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvEarth=position;');
-    shader.fragmentShader='varying vec3 vEarth;\n'+shader.fragmentShader;shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\nfloat grain=fract(sin(dot(floor(vEarth.xz*220.),vec2(12.9898,78.233)))*43758.5453);diffuseColor.rgb*=.82+grain*.27;');
+    shader.fragmentShader='varying vec3 vEarth;\n'+shader.fragmentShader;
+    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>','vec3 earthTex=texture2D(map,vMapUv).rgb;diffuseColor.rgb*=.55+earthTex*.65;');
+    shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#include <color_fragment>\nfloat grain=fract(sin(dot(floor(vEarth.xz*220.),vec2(12.9898,78.233)))*43758.5453);diffuseColor.rgb*=.88+grain*.17;');
   }}/></mesh>;
 }

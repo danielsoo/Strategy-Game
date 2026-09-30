@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createGameState, isExplored, isVisible} from '../src/engine';
 import {makeRng} from '../src/services/combatSystem';
 import {buildMedievalScene} from '../src/screens/medievalScene';
+import {cityLayout} from '../src/screens/realmCityLayout';
 import {campaignSurface,campaignBorders} from '../src/screens/campaignTerrain';
 import * as THREE from 'three';
 
@@ -11,7 +12,7 @@ for (const size of [11,21]) {
   const before=JSON.stringify(state);
   const project=(s:typeof state)=>{
     const scene=buildMedievalScene(s,0,false);
-    return {...scene,ground:scene.ground.map(({cell,...visible})=>visible)};
+    return {...scene,cities:scene.ground.flatMap(cityLayout),ground:scene.ground.map(({cell,...visible})=>visible)};
   };
   const first=project(state);
   assert.deepEqual(first,project(state),'동일한 판에서 장식이 바뀌면 안 된다');
@@ -29,7 +30,7 @@ for (const size of [11,21]) {
     assert([...piece.position,...piece.scale].every(Number.isFinite));
     assert(piece.scale.every(v=>v>0));
   }
-  assert(full.pieces.plaster.length>0 && full.pieces.roof.length>0);
+  assert(full.ground.flatMap(cityLayout).some(p=>p.asset==='caro_market'));
   const surface=campaignSurface(full.ground),pos=surface.geometry.getAttribute('position');
   const normals=surface.geometry.getAttribute('normal'),indices=surface.geometry.getIndex()!;
   assert.equal(surface.faces.length,indices.count/3,'모든 삼각형에 선택할 게임 칸이 있어야 한다');

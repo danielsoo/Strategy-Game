@@ -20,7 +20,7 @@ function TerrainMaterial(){
           float stone=smoothstep(.95,1.8,vLandscape.y+soil*.25);
           vec3 axis=pow(abs(normalize(cross(dFdx(vLandscape),dFdy(vLandscape)))),vec3(4.0));axis/=max(dot(axis,vec3(1.0)),.001);
           float meadow=smoothstep(.35,.7,nland(vLandscape.xz*.48)+nland(vLandscape.xz*2.7)*.18);
-          vec3 turf=texture2D(uGrass,vLandscape.xz*.65).rgb*mix(vec3(.81,1.03,.70),vec3(1.12,1.04,.78),meadow);
+          vec3 turf=texture2D(uGrass,vLandscape.xz*.65).rgb*mix(vec3(.80,1.25,.83),vec3(1.07,1.14,.83),meadow);
           turf=mix(turf,turf*vec3(.68,.71,.55),vRealm.z*.72);
           vec3 cliff=texture2D(uRock,vLandscape.yz*.4).rgb*axis.x+texture2D(uRock,vLandscape.xz*.4).rgb*axis.y+texture2D(uRock,vLandscape.xy*.4).rgb*axis.z;
           cliff=mix(cliff,vec3(dot(cliff,vec3(.2126,.7152,.0722))),.42)*vec3(.92,.98,1.04);

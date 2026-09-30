@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet, useWindowDimensions, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, useWindowDimensions, TouchableOpacity, ActivityIndicator, Linking } from 'react-native';
 import RealmBackdrop from './RealmBackdrop';
 import { realm } from './realmTheme';
 
@@ -26,6 +26,7 @@ export default function RealmMenu({children,inMatch,onSettings}:{children:React.
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="설정 열기" onPress={onSettings} style={s.settings}><Text style={s.settingsText}>설정</Text></TouchableOpacity></View>
       {children}
       <Text style={s.footnote}>왕국의 기억 · 오케스트라 주제곡</Text>
+      <TouchableOpacity accessibilityRole="link" accessibilityLabel="그래픽 출처" onPress={()=>Linking.openURL('/realm/credits.html')} style={{minHeight:44,justifyContent:'center'}}><Text style={{color:realm.muted,fontSize:11}}>그래픽 출처</Text></TouchableOpacity>
     </View>
   </ScrollView></View>;
 }
