@@ -31,10 +31,12 @@ self.addEventListener('fetch', (e) => {
   const isPage = req.mode === 'navigate' || url.pathname === '/' || url.pathname.endsWith('.html');
   if (isPage) {
     e.respondWith(
-      fetch(req)
+      fetch(req, {cache: 'no-store'})
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('/', copy));
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('/', copy));
+          }
           return res;
         })
         .catch(() => caches.match('/').then((r) => r || Response.error()))
