@@ -12,7 +12,7 @@ export default function RealmFortifications({ground}:{ground:Ground[]}){
  const geometry=useMemo(()=>{
   const pieces:THREE.BufferGeometry[]=[],field=terrainField(ground);
   for(const tile of ground){if(!tile.known||!tile.castle)continue;
-   const {yaw}=settlementPlan(tile),co=Math.cos(yaw),si=Math.sin(yaw);
+   const {yaw,kind}=settlementPlan(tile),co=Math.cos(yaw),si=Math.sin(yaw);
    const add=(shape:THREE.BufferGeometry,x:number,y:number,z:number,sx:number,sy:number,sz:number,a=0)=>{
     const wx=tile.position[0]+x*co+z*si,wz=tile.position[2]-x*si+z*co;
     const matrix=new THREE.Matrix4().compose(new THREE.Vector3(wx,field.height(wx,wz)+y,wz),new THREE.Quaternion().setFromEuler(new THREE.Euler(0,yaw+a,0)),new THREE.Vector3(sx,sy,sz));
@@ -23,7 +23,8 @@ export default function RealmFortifications({ground}:{ground:Ground[]}){
     g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));pieces.push(g);
    };
    const box=(x:number,y:number,z:number,w:number,h:number,d:number,a=0)=>add(new THREE.BoxGeometry(),x,y,z,w,h,d,a);
-   const points=Array.from({length:10},(_,i)=>{const a=Math.PI/2+i*Math.PI*2/10;return [Math.cos(a)*.94,Math.sin(a)*.86] as const;});
+   const sides=kind==='citadel'?10:kind==='abbey'?8:7;
+   const points=Array.from({length:sides},(_,i)=>{const a=Math.PI/2+i*Math.PI*2/sides;return [Math.cos(a)*.94,Math.sin(a)*.86] as const;});
    for(let i=0;i<points.length;i++){
     const [ax,az]=points[i],[bx,bz]=points[(i+1)%points.length],length=Math.hypot(bx-ax,bz-az),angle=-Math.atan2(bz-az,bx-ax);
     const segment=(lo:number,hi:number)=>{const t=(lo+hi)/2;box(ax+(bx-ax)*t,.115,az+(bz-az)*t,length*(hi-lo),.23,.065,angle);};
@@ -37,6 +38,7 @@ export default function RealmFortifications({ground}:{ground:Ground[]}){
     for(let k=0;k<8;k++){const a=k*Math.PI/4;box(ax+Math.cos(a)*.09,.367,az+Math.sin(a)*.09,.042,.065,.038,-a);}
    }
    // 성내 높은 주탑이 멀리서도 도시의 중심으로 읽히게 한다.
+   if(kind==='abbey')continue;
    const kx=-.12,kz=-.21;
    box(kx,.22,kz,.29,.44,.26);
    for(const dx of [-.145,.145])for(const dz of [-.13,.13]){
