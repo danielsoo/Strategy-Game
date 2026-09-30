@@ -52,7 +52,7 @@ export default function CampaignLand({ground,onPick}:{ground:Ground[];onPick:(in
   useEffect(()=>()=>{surface.geometry.dispose();borders.dispose();backdrop.dispose();},[surface,borders,backdrop]);
   return <group>
     <mesh geometry={backdrop} receiveShadow raycast={()=>{}}><TerrainMaterial/></mesh>
-    <mesh geometry={surface.geometry} receiveShadow castShadow onClick={e=>{if(e.faceIndex!=null)onPick(surface.faces[e.faceIndex],e);}}><TerrainMaterial/></mesh>
+    <mesh geometry={surface.geometry} receiveShadow onClick={e=>{if(e.faceIndex!=null)onPick(surface.faces[e.faceIndex],e);}}><TerrainMaterial/></mesh>
     <lineSegments geometry={borders} raycast={()=>{}}><lineBasicMaterial vertexColors transparent opacity={.8} toneMapped={false}/></lineSegments>
   </group>;
 }
