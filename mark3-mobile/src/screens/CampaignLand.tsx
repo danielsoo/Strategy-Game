@@ -9,21 +9,23 @@ function TerrainMaterial(){
   const grass=useRealmMaterial('grass_ground'),rock=useRealmMaterial('aerial_rocks_02');
   return <meshStandardMaterial side={THREE.DoubleSide} normalMap={grass.normalMap} normalScale={new THREE.Vector2(.65,.65)} roughnessMap={grass.roughnessMap} roughness={1} onBeforeCompile={shader=>{
         shader.uniforms.uGrass={value:grass.map};shader.uniforms.uRock={value:rock.map};shader.uniforms.uRockNormal={value:rock.normalMap};
-        shader.vertexShader='varying vec3 vLandscape; varying vec2 vRealm; attribute vec2 realmMask;\n'+shader.vertexShader;
+        shader.vertexShader='varying vec3 vLandscape; varying vec3 vRealm; attribute vec3 realmMask;\n'+shader.vertexShader;
         shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvLandscape=position;vRealm=realmMask;');
-        shader.fragmentShader=`varying vec3 vLandscape;varying vec2 vRealm;uniform sampler2D uGrass;uniform sampler2D uRock;uniform sampler2D uRockNormal;
+        shader.fragmentShader=`varying vec3 vLandscape;varying vec3 vRealm;uniform sampler2D uGrass;uniform sampler2D uRock;uniform sampler2D uRockNormal;
           float hashland(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
           float nland(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(hashland(i),hashland(i+vec2(1,0)),f.x),mix(hashland(i+vec2(0,1)),hashland(i+vec2(1,1)),f.x),f.y);}
         `+shader.fragmentShader;
         shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>',`#include <color_fragment>
           float soil=nland(vLandscape.xz*.9)*.65+nland(vLandscape.xz*3.0)*.35;
-          float stone=smoothstep(.55,1.55,vLandscape.y+soil*.45);
+          float stone=smoothstep(.95,1.8,vLandscape.y+soil*.25);
           vec3 axis=pow(abs(normalize(cross(dFdx(vLandscape),dFdy(vLandscape)))),vec3(4.0));axis/=max(dot(axis,vec3(1.0)),.001);
-          vec3 turf=texture2D(uGrass,vLandscape.xz*.65).rgb*vec3(.77,1.26,.75);
+          float meadow=smoothstep(.35,.7,nland(vLandscape.xz*.48)+nland(vLandscape.xz*2.7)*.18);
+          vec3 turf=texture2D(uGrass,vLandscape.xz*.65).rgb*mix(vec3(.81,1.03,.70),vec3(1.12,1.04,.78),meadow);
+          turf=mix(turf,turf*vec3(.68,.71,.55),vRealm.z*.72);
           vec3 cliff=texture2D(uRock,vLandscape.yz*.4).rgb*axis.x+texture2D(uRock,vLandscape.xz*.4).rgb*axis.y+texture2D(uRock,vLandscape.xy*.4).rgb*axis.z;
           cliff=mix(cliff,vec3(dot(cliff,vec3(.2126,.7152,.0722))),.42)*vec3(.92,.98,1.04);
-          stone=max(stone,1.0-axis.y);
-          turf=mix(turf,turf*vec3(1.26,1.01,.65),vRealm.y*.8);
+          stone=max(stone,smoothstep(.35,.85,1.0-axis.y));
+          turf=mix(turf,vec3(.39,.32,.21)*(texture2D(uRock,vLandscape.xz*.8).rgb+.4),vRealm.y*.95);
           diffuseColor.rgb=mix(turf,cliff,stone)*(.84+soil*.28)*mix(vec3(.12,.20,.23),vec3(1.0),vRealm.x);
         `);
         shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>

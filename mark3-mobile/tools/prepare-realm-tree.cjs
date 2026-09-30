@@ -3,8 +3,10 @@ const fs=require('node:fs'),path=require('node:path');
 const {MeshoptSimplifier}=require('meshoptimizer');
 async function main(){
  await MeshoptSimplifier.ready;
- const root=path.join(__dirname,'../public/realm/tree_small_02');
- const originals=path.join(__dirname,'../.realm-source/tree_small_02');
+ const asset=process.argv[2]||'tree_small_02';
+ if(!['tree_small_02','pine_sapling_small','shrub_01'].includes(asset))throw new Error('Unknown vegetation asset');
+ const root=path.join(__dirname,'../public/realm',asset);
+ const originals=path.join(__dirname,'../.realm-source',asset);
  const source=JSON.parse(fs.readFileSync(path.join(originals,'model.gltf'),'utf8'));
  const bin=fs.readFileSync(path.join(originals,source.buffers[0].uri));
  const components={SCALAR:1,VEC2:2,VEC3:3,VEC4:4};
@@ -24,7 +26,7 @@ async function main(){
    return {...p,attributes,indices:append(simple,'SCALAR')};
  })}));
  output.buffers=[{uri:'campaign-tree.bin',byteLength:bytes}];
- output.materials=output.materials.map(m=>({...m,alphaMode:'OPAQUE'}));
+ output.materials=output.materials.map(m=>({...m,alphaMode:m.alphaMode||'OPAQUE'}));
  fs.writeFileSync(path.join(root,'campaign-tree.bin'),Buffer.concat(chunks));fs.writeFileSync(path.join(root,'campaign-tree.gltf'),JSON.stringify(output));
  console.log('campaign tree:',total,'triangles,',bytes,'bytes');
 }

@@ -23,15 +23,15 @@ export function terrainField(ground: Ground[]) {
       if(g.known&&g.terrain==='mountain'&&d<2.8){
         const dx=x-g.position[0],dz=z-g.position[2],a=hash(g.position[0],g.position[2])*6.28;
         const along=dx*Math.cos(a)+dz*Math.sin(a),across=-dx*Math.sin(a)+dz*Math.cos(a);
-        const ridge=.68+.40*noise(x*2.6,z*2.6)+.16*noise(x*7.5,z*7.5);
+        const ridge=.82+.24*noise(x*1.7,z*1.7)+.05*noise(x*5,z*5);
         const distance=Math.hypot(along*.7,across*1.18);
-        mountain+=Math.pow(Math.max(0,1-distance/2.15),1.75)*2.7*ridge;
+        mountain=Math.max(mountain,Math.pow(Math.max(0,1-distance/2.45),1.65)*1.8*ridge);
       }
-      if(g.castle&&d<1.04)flat=Math.max(flat,1-Math.pow(d/1.04,5));
+      if(g.castle&&d<1.4){const t=Math.max(0,(d-.90)/.50);flat=Math.max(flat,1-t*t*(3-2*t));}
     }
     const rolling=.16+.22*noise(x*.5,z*.5)+.10*noise(x*1.6,z*1.6);
     const detail=.028*noise(x*9,z*9);
-    return rolling+detail*(1-flat)+mountain*(1-flat*.94);
+    return rolling+detail*(1-flat)+mountain*(1-flat);
   };
   const color=(x:number,z:number)=>{
     const result=new THREE.Color(0,0,0);let sum=0;
@@ -44,9 +44,9 @@ export function terrainField(ground: Ground[]) {
     if(h>1.9)result.lerp(new THREE.Color('#d7d3ba'),Math.min(.7,(h-1.9)*.8));
     return result;
   };
-  const mask=(x:number,z:number)=>{let light=0,desert=0,sum=0;
-    for(const g of nearby(x,z)){const d=Math.hypot(x-g.position[0],z-g.position[2]);if(d>2.1)continue;const w=Math.pow(Math.max(0,1-d/2.1),4);sum+=w;light+=w*(g.seen?1:g.known?.35:.06);desert+=w*(g.known&&g.terrain==='desert'?1:0);}
-    return [sum?light/sum:1,sum?desert/sum:0];};
+  const mask=(x:number,z:number)=>{let light=0,desert=0,forest=0,sum=0;
+    for(const g of nearby(x,z)){const d=Math.hypot(x-g.position[0],z-g.position[2]);if(d>2.1)continue;const w=Math.pow(Math.max(0,1-d/2.1),4);sum+=w;light+=w*(g.seen?1:g.known?.35:.06);desert+=w*(g.known&&g.terrain==='desert'?1:0);forest+=w*(g.known&&g.terrain==='forest'?1:0);}
+    return [sum?light/sum:1,sum?desert/sum:0,sum?forest/sum:0];};
   return {height,color,mask};
 }
 
@@ -56,7 +56,7 @@ export function campaignSurface(ground: Ground[], subdivisions=12) {
   const vertex=(x:number,z:number)=>{
     const key=`${Math.round(x*100000)},${Math.round(z*100000)}`;const old=vertices.get(key);if(old!==undefined)return old;
     const id=positions.length/3;vertices.set(key,id);positions.push(x,field.height(x,z),z);
-    const c=field.color(x,z);colors.push(c.r,c.g,c.b);uv.push(x*.24,z*.24);masks.push(...field.mask(x,z));return id;
+    const c=field.color(x,z);colors.push(c.r,c.g,c.b);uv.push(x*.65,z*.65);masks.push(...field.mask(x,z));return id;
   };
   const triangle=(a:number,b:number,c:number,cell:number)=>{indices.push(a,c,b);faces.push(cell);};
   ground.forEach((g,cell)=>{
@@ -74,7 +74,7 @@ export function campaignSurface(ground: Ground[], subdivisions=12) {
   geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
   geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
   geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
-  geometry.setAttribute('realmMask',new THREE.Float32BufferAttribute(masks,2));
+  geometry.setAttribute('realmMask',new THREE.Float32BufferAttribute(masks,3));
   geometry.setIndex(indices);geometry.computeVertexNormals();geometry.computeBoundingSphere();
   return {geometry,faces,field};
 }
@@ -117,11 +117,11 @@ export function campaignBackdrop(ground:Ground[]) {
       const n=positions.length/3;
       for(const [along,out] of [[k/6,band],[(k+1)/6,band],[k/6,band+1],[(k+1)/6,band+1]]){
         const factor=1+out*.14,x=(g.position[0]+Math.cos(a)*(1-along)+Math.cos(b)*along)*factor,z=(g.position[2]+Math.sin(a)*(1-along)+Math.sin(b)*along)*factor;
-        positions.push(x,field.height(x,z),z);uv.push(x*.24,z*.24);const mask=field.mask(x,z);masks.push(mask[0],mask[1]);
+        positions.push(x,field.height(x,z),z);uv.push(x*.65,z*.65);masks.push(...field.mask(x,z));
       }
       indices.push(n,n+2,n+1,n+1,n+2,n+3);
     }
   }
-  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setAttribute('realmMask',new THREE.Float32BufferAttribute(masks,2));geo.setIndex(indices);
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.setAttribute('realmMask',new THREE.Float32BufferAttribute(masks,3));geo.setIndex(indices);
   const smooth=mergeVertices(geo,.0001);geo.dispose();smooth.computeVertexNormals();return smooth;
 }

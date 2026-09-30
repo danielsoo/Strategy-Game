@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createGameState } from '../src/engine';
 import { makeRng } from '../src/services/combatSystem';
 import { buildMedievalScene } from '../src/screens/medievalScene';
+import {armyFormation,settlementPlan} from '../src/screens/realmLayout';
 
 const state = createGameState(2, 9, 9, makeRng(42));
 const cell = state.cells.find(c => !c.offMap)!;
@@ -21,11 +22,16 @@ cell.owner = 1; cell.castle = false; cell.fortStage = 4; cell.terrain = 'mountai
 const changedBehindFog = buildMedievalScene(state, 0, false);
 assert.deepEqual(changedBehindFog.pieces, remembered.pieces, 'live enemy changes must not leak through remembered scenery');
 assert.equal(changedBehindFog.pieces.metal.length, 0, 'remembered units must not be rendered');
+assert(changedBehindFog.ground.every(g=>armyFormation(g).length===0),'unseen army formations must not leak');
 assert.equal(changedBehindFog.ground.find(t => t.cell.id === cell.id)!.height, remembered.ground.find(t => t.cell.id === cell.id)!.height);
 
 vision.visible[index] = true;
 const visible = buildMedievalScene(state, 0, false);
-assert(visible.pieces.metal.length>0, 'visible soldiers must have armor and shield details');
+assert(visible.ground.some(g=>armyFormation(g).length>0), 'visible armies must have formations');
+assert.equal(new Set(armyFormation(visible.ground.find(g=>g.cell.id===cell.id)!).map(p=>p.kind)).size,4,'large armies include four distinct silhouettes');
+const architecture=visible.ground.find(g=>g.cell.id===cell.id)!;
+const beforeConquest=settlementPlan(architecture);
+assert.deepEqual(settlementPlan({...architecture,owner:1}),beforeConquest,'conquest must not reconstruct regional architecture');
 assert.equal(visible.mist.length, hidden.mist.length - 1);
 assert(visible.ground.find(t => t.cell.id === cell.id)!.height>changedBehindFog.ground.find(t => t.cell.id === cell.id)!.height);
 assert.equal(buildMedievalScene(state, 0, true).mist.length, 0, 'spectating reveals the full board');

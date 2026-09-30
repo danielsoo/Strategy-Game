@@ -5,6 +5,7 @@ import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader';
 import {Ground,Piece,V3} from './medievalScene';
 import {terrainField} from './campaignTerrain';
 import {useRealmAssetRoot} from './realmAssets';
+import {settlementPlan} from './realmLayout';
 
 const ignore=()=>{};
 const random=(n:number)=>{const a=Math.sin(n*127.1+311.7)*43758.5453;return a-Math.floor(a);};
@@ -55,7 +56,7 @@ function Forest({parts,trees}:{parts:Part[];trees:Piece[]}){
   const [near,setNear]=useState<number[]>([]),last=useRef(''),tick=useRef(0);
   useFrame(({camera,size,clock})=>{if(clock.elapsedTime-tick.current<.3)return;tick.current=clock.elapsedTime;
     const candidates=trees.map((p,i)=>({i,d:camera.position.distanceTo(new THREE.Vector3(...p.position)),h:p.scale[1]}))
-      .filter(p=>p.h/Math.max(.1,p.d)*size.height>29).sort((a,b)=>a.d-b.d).slice(0,36).map(p=>p.i);
+      .filter(p=>p.h/Math.max(.1,p.d)*size.height>29).sort((a,b)=>a.d-b.d).slice(0,18).map(p=>p.i);
     const key=candidates.join(',');if(key!==last.current){last.current=key;setNear(candidates);}
   });
   const targets=useMemo(()=>bakeTree(parts,gl),[parts,gl]);
@@ -79,27 +80,35 @@ function Forest({parts,trees}:{parts:Part[];trees:Piece[]}){
 
 export default function RealmModels({ground}:{ground:Ground[]}){
   const root=useRealmAssetRoot();
-  const [fort,tree,rock]=useLoader(GLTFLoader,[`${root}modular_fort_01/model.gltf`,'/realm/tree_small_02/campaign-tree.gltf',`${root}rock_face_01/model.gltf`]);
+  const [fort,tree,rock,pine,shrub]=useLoader(GLTFLoader,[`${root}modular_fort_01/model.gltf`,'/realm/tree_small_02/campaign-tree.gltf',`${root}rock_face_01/model.gltf`,'/realm/pine_sapling_small/campaign-tree.gltf','/realm/shrub_01/campaign-tree.gltf']);
   const models=useMemo(()=>{
     const named=(name:string)=>{const obj=fort.scene.getObjectByName(`modular_fort_01_${name}`);if(!obj)throw new Error(`성곽 모듈 누락: ${name}`);const parts=partsOf(obj);if(name.startsWith('wall'))parts.forEach(p=>p.geometry.rotateY(Math.PI/2));return parts;};
-    return {wall:named('wall_thin_straight_01'),gate:named('wall_thin_gate_01'),tower:named('tower_round'),tree:partsOf(tree.scene,true),rock:partsOf(rock.scene)};
-  },[fort,tree,rock]);
+    return {wall:named('wall_thin_straight_01'),gate:named('wall_thin_gate_01'),tower:named('tower_round'),tree:partsOf(tree.scene,true),rock:partsOf(rock.scene),pine:partsOf(pine.scene.getObjectByName('pine_sapling_small_a')!,true),shrub:partsOf(shrub.scene,true)};
+  },[fort,tree,rock,pine,shrub]);
   useEffect(()=>()=>Object.values(models).flat().forEach(p=>{p.geometry.dispose();(Array.isArray(p.material)?p.material:[p.material]).forEach(m=>m.dispose());}),[models]);
   const places=useMemo(()=>{
-    const field=terrainField(ground),out:{wall:Piece[];gate:Piece[];tower:Piece[];tree:Piece[];rock:Piece[]}={wall:[],gate:[],tower:[],tree:[],rock:[]};
+    const field=terrainField(ground),out:{wall:Piece[];gate:Piece[];tower:Piece[];tree:Piece[];rock:Piece[];pine:Piece[];shrub:Piece[]}={wall:[],gate:[],tower:[],tree:[],rock:[],pine:[],shrub:[]};
     ground.forEach((g,i)=>{if(!g.known)return;const [x,,z]=g.position;
       const put=(kind:keyof typeof out,dx:number,dz:number,scale:V3,yaw=0)=>out[kind].push({position:[x+dx,field.height(x+dx,z+dz)-.015,z+dz],scale,rotation:[0,yaw,0],color:g.seen?'#ffffff':'#68747b'});
       if(g.castle){
-        put('wall',0,-.57,[1.22,.40,.115]);put('gate',0,.51,[.45,.49,.12]);
-        put('wall',-.415,.51,[.40,.40,.115]);put('wall',.415,.51,[.40,.40,.115]);
-        put('wall',-.59,-.03,[1.1,.4,.115],Math.PI/2);put('wall',.59,-.03,[1.1,.4,.115],Math.PI/2);
-        for(const dx of [-.59,.59])for(const dz of [-.57,.51])put('tower',dx,dz,[.24,.59,.24]);
+        const plan=settlementPlan(g),{outline,yaw,wallHeight:h}=plan;
+        const place=(kind:'wall'|'gate'|'tower',dx:number,dz:number,scale:V3,angle=0)=>put(kind,dx*Math.cos(yaw)+dz*Math.sin(yaw),-dx*Math.sin(yaw)+dz*Math.cos(yaw),scale,angle+yaw);
+        outline.forEach(([ax,az],j)=>{const [bx,bz]=outline[(j+1)%outline.length],length=Math.hypot(bx-ax,bz-az),angle=-Math.atan2(bz-az,bx-ax);
+          if(j===0){const gap=.24,part=(length-gap)/2;for(const side of [-1,1]){const t=.5+side*(gap+part)/(2*length);place('wall',ax+(bx-ax)*t,az+(bz-az)*t,[part,h,.06],angle);}place('gate',(ax+bx)/2,(az+bz)/2,[gap,h*1.22,.075],angle);}
+          else place('wall',(ax+bx)/2,(az+bz)/2,[length+.012,h,.06],angle);
+          if(plan.kind!=='abbey'&&(plan.kind==='citadel'||j%2===0))place('tower',ax,az,[.13,h*1.35,.13]);
+        });
+        if(plan.kind==='march')place('tower',-.19,-.24,[.25,.49,.25]);
       }
       const occupied=g.castle||g.cell.fortStage>0&&g.seen;
-      const count=g.terrain==='forest'?(occupied?9:36):g.terrain==='plain'?5:g.terrain==='mountain'?5:0;
-      for(let j=0;j<count;j++){const a=j*2.399+random(i)*5,r=occupied?.85:.13+Math.sqrt(random(i*93+j))*.76;const dx=Math.cos(a)*r,dz=Math.sin(a)*r;
-        const s=.36+random(i*31+j)*.32;put('tree',dx,dz,[s,s,s],random(i*59+j)*6.28);}
-      if(g.terrain==='mountain')for(let j=0;j<3;j++){const a=j*2.4+i*.8,r=.18+j*.18;put('rock',Math.cos(a)*r,Math.sin(a)*r,[.8,.22+random(i+j)*.28,.7],a);}
+      const count=g.terrain==='forest'?(occupied?6:30+Math.floor(random(i)*20)):g.terrain==='plain'?2:g.terrain==='mountain'?7:1;
+      for(let j=0;j<count;j++){const a=random(i*153+j*13)*6.28,r=occupied?.99:.13+Math.sqrt(random(i*93+j))*.73;const dx=Math.cos(a)*r,dz=Math.sin(a)*r;
+        const kind=g.terrain==='desert'?'shrub':g.terrain==='mountain'||random(i*7+j)>.62?'pine':'tree';
+        const s=kind==='shrub'?.10:kind==='pine'?.22+random(i*31+j)*.27:.22+random(i*31+j)*.25;
+        put(kind,dx,dz,[s*(.8+random(j)*.3),s,s],random(i*59+j)*6.28);
+        if(!occupied&&j%7===0)put('shrub',dx+.09,dz-.06,[.10,.10,.10],a);
+      }
+      if(g.terrain==='mountain')for(let j=0;j<2;j++){const a=j*2.4+i*.8,r=.18+j*.18;put('rock',Math.cos(a)*r,Math.sin(a)*r,[.36,.10+random(i+j)*.16,.34],a);}
     });
     // 플레이 영역 바깥에도 같은 수목을 이어 붙인다. 배치는 게임 정보와 독립적이다.
     const extent=Math.max(...ground.map(g=>Math.hypot(g.position[0],g.position[2])))*1.7;
@@ -114,5 +123,7 @@ export default function RealmModels({ground}:{ground:Ground[]}){
   return <group>
     {(['wall','gate','tower','rock'] as const).flatMap(kind=>models[kind].map((part,i)=><MeshBatch key={kind+i} part={part} places={places[kind]}/>))}
     <Forest parts={models.tree} trees={places.tree}/>
+    <Forest parts={models.pine} trees={places.pine}/>
+    <Forest parts={models.shrub} trees={places.shrub}/>
   </group>;
 }

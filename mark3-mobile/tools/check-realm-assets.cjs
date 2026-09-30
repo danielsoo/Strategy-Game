@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const root=path.join(__dirname,'../public/realm');
-for(const relative of ['modular_fort_01/model.gltf','mobile/modular_fort_01/model.gltf','rock_face_01/model.gltf','mobile/rock_face_01/model.gltf','tree_small_02/campaign-tree.gltf']){
+for(const relative of ['modular_fort_01/model.gltf','mobile/modular_fort_01/model.gltf','rock_face_01/model.gltf','mobile/rock_face_01/model.gltf','tree_small_02/campaign-tree.gltf','pine_sapling_small/campaign-tree.gltf','shrub_01/campaign-tree.gltf']){
  const filename=path.join(root,relative),g=JSON.parse(fs.readFileSync(filename));
  for(const entry of [...g.buffers,...g.images])assert(fs.existsSync(path.resolve(path.dirname(filename),entry.uri)),`누락된 자산: ${entry.uri}`);
  for(const view of g.bufferViews)assert((view.byteOffset||0)+view.byteLength<=g.buffers[view.buffer].byteLength,'모델 버퍼 범위 초과');

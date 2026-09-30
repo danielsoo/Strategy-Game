@@ -3,6 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet, useWindowDimensions } from 'r
 import { realm } from './realmTheme';
 import CampaignLand, { TerrainRing } from './CampaignLand';
 import RealmModels from './RealmModels';
+import RealmArmy from './RealmArmy';
+import RealmLandscape from './RealmLandscape';
 import RealmAtmosphere,{RenderStats} from './RealmAtmosphere';
 import {useRealmMaterial} from './realmAssets';
 import {terrainField} from './campaignTerrain';
@@ -26,7 +28,7 @@ interface Props {
   onCellPress: (c: Cell) => void;
 }
 const NO_RAYCAST = () => {};
-const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield', 'foliage','plaster','timber','body','limb','helmet'];
+export const SHAPES: Shape[] = ['box', 'stone', 'tower', 'roof', 'metal', 'cone', 'trunk', 'rock', 'flag', 'shield', 'foliage','plaster','timber','body','limb','helmet','hipRoof'];
 
 function AssetReady({onReady,onPending}:{onReady:()=>void;onPending:()=>void}){useLayoutEffect(()=>{onReady();return onPending;},[onReady,onPending]);return null;}
 function StoneMaterial({asset}:{asset:string}){const maps=useRealmMaterial(asset,asset==='medieval_blocks_05'?4:asset==='grey_roof_tiles'?5:2);return <meshStandardMaterial {...maps} roughness={1} normalScale={new THREE.Vector2(.7,.7)}/>;}
@@ -60,6 +62,7 @@ function TreeCrown() {
 }
 
 function Geometry({ shape }: { shape: Shape | 'hex' }) {
+  if (shape === 'hipRoof') return <coneGeometry args={[.71,1,4,1,false,Math.PI/4]}/>;
   if (shape === 'body') return <capsuleGeometry args={[.5,.4,4,8]}/>;
   if (shape === 'limb') return <cylinderGeometry args={[.5,.4,1,8]}/>;
   if (shape === 'helmet') return <sphereGeometry args={[1,10,8]}/>;
@@ -75,7 +78,7 @@ function Geometry({ shape }: { shape: Shape | 'hex' }) {
 }
 
 /** 수천 개의 지형 장식을 종류별로 묶어 그린다. */
-function Instances({ shape, pieces, onClick }: {
+export function Instances({ shape, pieces, onClick }: {
   shape: Shape | 'hex'; pieces: Piece[]; onClick?: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const ref = useRef<THREE.InstancedMesh>(null);
@@ -101,7 +104,7 @@ function Instances({ shape, pieces, onClick }: {
     castShadow={shape !== 'hex' && shape !== 'flag'} receiveShadow
     onClick={onClick} raycast={onClick ? undefined : NO_RAYCAST}>
     <Geometry shape={shape} />
-    {['stone','roof','plaster','timber'].includes(shape)?<StoneMaterial asset={shape==='roof'?'grey_roof_tiles':shape==='plaster'?'rough_plaster_03':shape==='timber'?'medieval_wood':'medieval_blocks_05'}/>:<meshStandardMaterial roughness={shape === 'metal' ? 0.45 : 0.95} metalness={shape === 'metal' ? 0.55 : 0}
+    {['stone','roof','hipRoof','plaster','timber','tower'].includes(shape)?<StoneMaterial asset={shape==='roof'||shape==='hipRoof'?'grey_roof_tiles':shape==='plaster'?'rough_plaster_03':shape==='timber'?'medieval_wood':'medieval_blocks_05'}/>:<meshStandardMaterial roughness={shape === 'metal' ? 0.45 : 0.95} metalness={shape === 'metal' ? 0.55 : 0}
       side={shape === 'flag' ? THREE.DoubleSide : THREE.FrontSide}
       onBeforeCompile={shader => {
         if (shape === 'hex' || shape === 'stone' || shape === 'tower') {
@@ -542,8 +545,8 @@ export default function Board3D({ state, player, watching, selected, movable, pa
         onWheel={e => zoomAt(Math.exp(e.deltaY * 0.0012), groundAt(e.clientX, e.clientY, e.currentTarget as Element))}>
         <CameraBridge into={cameraRef} />
         <color attach="background" args={['#a6b9b7']} />
-        <hemisphereLight args={['#d8e3ec', '#566145', 1.7]} />
-        <directionalLight position={[-scene.span * 0.5, scene.span*.8, scene.span * 0.4]} color="#fff0d9" intensity={3.1}
+        <hemisphereLight args={['#d8e3ec', '#434935', 1.1]} />
+        <directionalLight position={[-scene.span * 0.5, scene.span*.8, scene.span * 0.4]} color="#fff0d9" intensity={2.7}
           castShadow shadow-mapSize={compact?[2048,2048]:[4096,4096]} shadow-bias={-0.00015} shadow-normalBias={0.012}
           shadow-camera-left={-scene.span * 0.7} shadow-camera-right={scene.span * 0.7}
           shadow-camera-top={scene.span * 0.7} shadow-camera-bottom={-scene.span * 0.7}
@@ -562,6 +565,8 @@ export default function Board3D({ state, player, watching, selected, movable, pa
           onCellPress(scene.ground[index].cell);
         }} />
         <RealmModels ground={scene.ground}/>
+        <RealmLandscape ground={scene.ground}/>
+        <RealmArmy ground={scene.ground}/>
         {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}
         {scene.ground.filter(t => movable.has(t.cell.id) || selected === t.cell.id).map(t =>
           <TerrainRing key={t.cell.id} tile={t} ground={scene.ground} selected={selected === t.cell.id} />)}

@@ -4,6 +4,8 @@ Poly Haven의 CC0 1.0 자산을 게임에 포함했습니다. PC는 2K, 작은 �
 
 - 성곽: [Modular Fort 01](https://polyhaven.com/a/modular_fort_01)
 - 수목: [Tree Small 02](https://polyhaven.com/a/tree_small_02)
+- 소나무: [Pine Sapling Small](https://polyhaven.com/a/pine_sapling_small)
+- 관목: [Shrub 01](https://polyhaven.com/a/shrub_01)
 - 암벽: [Rock Face 01](https://polyhaven.com/a/rock_face_01)
 - 지면: [Grass Ground](https://polyhaven.com/a/grass_ground)
 - 산악 재질: [Aerial Rocks 02](https://polyhaven.com/a/aerial_rocks_02)
@@ -20,3 +22,5 @@ Poly Haven의 CC0 1.0 자산을 게임에 포함했습니다. PC는 2K, 작은 �
 `kingdom-view.png`는 이 게임의 실제 브라우저 렌더링을 캡처한 메인 화면 배경입니다. 생성 콘셉트 이미지가 아닙니다.
 
 재생성: `python tools/fetch-realm-assets.py`, `node tools/prepare-realm-tree.cjs`.
+
+추가 식생: `python tools/fetch-realm-diversity.py`, `node tools/prepare-realm-tree.cjs pine_sapling_small`, `node tools/prepare-realm-tree.cjs shrub_01`. 3종 도시 평면과 4종 병력 모델은 프로젝트에서 직접 작성한 형상이다.
