@@ -13,8 +13,8 @@ export function buildDuelContacts(rig:AuthoredRig){
    const key=`${p.getX(i)},${p.getY(i)},${p.getZ(i)}`;if(!seen.has(key)){seen.add(key);ids.push(i);}
   }parts.push({mesh,ids});
  });
- const shieldPoints=parts.find(p=>p.mesh===rig.shield)!.ids.map(i=>new T.Vector3().fromBufferAttribute(rig.shield.geometry.getAttribute('position'),i));
- const hull=new ConvexHull().setFromPoints(shieldPoints),planes=hull.faces.map(f=>new T.Plane(f.normal.clone(),-f.constant));
+ const shieldPoints=parts.find(p=>p.mesh===rig.shield)?.ids.map(i=>new T.Vector3().fromBufferAttribute(rig.shield.geometry.getAttribute('position'),i))??[];
+ const hull=shieldPoints.length?new ConvexHull().setFromPoints(shieldPoints):null,planes=hull?.faces.map(f=>new T.Plane(f.normal.clone(),-f.constant))??[];
  const inverse=new T.Matrix4(),relative=new T.Matrix4(),point=new T.Vector3();
  return {parts,planes,
   groundLift:(root:T.Vector3,yaw:number,height:(x:number,z:number)=>number)=>{
@@ -41,12 +41,13 @@ export function segmentShield(a:T.Vector3,b:T.Vector3,planes:T.Plane[],padding=.
 const bladeSamples=[[-.035,0,.085],[.035,0,.085],[-.025,0,.58],[.025,0,.58],[-.02,0,.75],[.02,0,.75],[0,0,.87]];
 /** 칼날 양쪽 날과 가운데 선분을 모두 검사한다. */
 export function bladeShield(rig:AuthoredRig,shield:AuthoredRig,shape:DuelContacts,padding=.014){
+ if(!shield.shield.visible||!shape.planes.length)return null;
  const inverse=new T.Matrix4().copy(shield.shield.matrixWorld).invert().multiply(rig.sword.matrixWorld),points=bladeSamples.map(p=>new T.Vector3().fromArray(p).applyMatrix4(inverse));
  for(const [a,b] of [[0,2],[2,4],[4,6],[1,3],[3,5],[5,6],[0,1],[2,3],[4,5]]){
   const t=segmentShield(points[a],points[b],shape.planes,padding);if(t!==null)return points[a].clone().lerp(points[b],t).applyMatrix4(shield.shield.matrixWorld);
  }return null;
 }
-function armorSpheres(rig:AuthoredRig){
+export function armorSpheres(rig:AuthoredRig){
  return [[8,0,.17],[0,.25,.205],[7,.07,.135]].map(([bone,dy,radius])=>({center:new T.Vector3(0,dy,0).applyMatrix4(rig.bones[bone].matrixWorld),radius:radius*rig.mesh.getWorldScale(new T.Vector3()).x}));
 }
 /** 상대의 흉갑·골반·투구를 감싼 보호 부피. 마지막 타격도 갑옷 표면에서 멈춘다. */

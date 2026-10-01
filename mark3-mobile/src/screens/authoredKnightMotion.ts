@@ -13,14 +13,16 @@ const rests={1:restPose(data.rests['1']),2:restPose(data.rests['2'])};
 const clips=data.clips;
 type Clip=keyof typeof clips;
 /** 원본 골격의 월드 회전을 T 자세에 대한 변화량으로 표준화한다. */
-function sample(name:Clip,time:number):Pose{
+export function sampleKnightClip(name:Clip,time:number):Pose{
  const c=clips[name],r=rests[c.version as 1|2],f=Math.min(c.frames.length-1,Math.max(0,time*data.fps)),i=Math.floor(f),j=Math.min(i+1,c.frames.length-1),t=f-i;
  return Array.from({length:17},(_,b)=>{const a=c.frames[i],z=c.frames[j],k=b*7;return {
   p:V(a.slice(k,k+3)).lerp(V(z.slice(k,k+3)),t).sub(r[b].p),
   q:Q(a.slice(k+3,k+7)).slerp(Q(z.slice(k+3,k+7)),t).multiply(r[b].q.clone().invert())
  };});
 }
-const mix=(a:Pose,b:Pose,t:number):Pose=>a.map((p,i)=>({p:p.p.clone().lerp(b[i].p,t),q:p.q.clone().slerp(b[i].q,t)}));
+const sample=sampleKnightClip;
+export const mixKnightPoses=(a:Pose,b:Pose,t:number):Pose=>a.map((p,i)=>({p:p.p.clone().lerp(b[i].p,t),q:p.q.clone().slerp(b[i].q,t)}));
+const mix=mixKnightPoses;
 const smooth=(n:number)=>{n=T.MathUtils.clamp(n,0,1);return n*n*(3-2*n);};
 const S=(s:number)=>V([s*.24,1.35,-.075]),E=(s:number)=>V([s*.425,1.21,-.075]),W=(s:number)=>V([s*.565,1.12,.035]);
 const H=(s:number)=>V([s*.135,.83,0]),K=(s:number)=>V([s*.14,.45,.01]),F=(s:number)=>V([s*.145,.08,0]);

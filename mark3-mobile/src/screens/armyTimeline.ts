@@ -3,9 +3,9 @@ import {useFrame} from '@react-three/fiber';
 import type {AttackOutcome} from '../engine';
 import type {Ground,V3} from './medievalScene';
 import type {ArmyAction} from './armyAnimation';
-import {BATTLE_DURATION} from './duelMotion';
+import {createBattleReplay,fighterKind,BattleReplay} from './battleReplay';
 export type BattleCue=AttackOutcome&{sequence:number};
-export interface ArmyTrack {from:V3;to:V3;start:number;duration:number;battle:boolean;defender?:boolean;win?:boolean;formationZ?:number}
+export interface ArmyTrack {from:V3;to:V3;start:number;duration:number;battle:boolean;defender?:boolean;win?:boolean;formationZ?:number;replay?:BattleReplay}
 export const animationNow=()=>performance.now()/1000;
 const copy=(g:Ground):Ground=>({...g,position:[...g.position],cell:{...g.cell}});
 export function visibleMoves(previous:Ground[],next:Ground[]){
@@ -36,7 +36,8 @@ export function useArmyTimeline(ground:Ground[],battles:BattleCue[]=[]){
   for(const cue of battles){if(cue.sequence<=lastBattle.current)continue;lastBattle.current=cue.sequence;
    const from=old.get(cue.fromId),to=old.get(cue.toId);
    if(!from?.seen||!to?.seen||!cue.result.rounds.length)continue;
-   next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:BATTLE_DURATION,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0}});
+   const replay=createBattleReplay(cue.result,[fighterKind(from.cell.neutral),fighterKind(to.cell.neutral)]);
+   next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:replay.duration+.6,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0,replay}});
   }
   const fighting=new Set(next.flatMap(e=>[e.from.cell.id,e.to.cell.id]));
   for(const move of visibleMoves(previous.current,ground))if(!fighting.has(move.from.cell.id)&&!fighting.has(move.to.cell.id))next.push({...move,from:copy(move.from),to:copy(move.to),was:move.was&&copy(move.was),track:{from:move.from.position,to:move.to.position,start,duration:1.5,battle:false}});

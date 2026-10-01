@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import {useFrame} from '@react-three/fiber';
 import {animateArmyMaterial,ACTION_CODE} from './armyAnimation';
 import {ArmyTrack,BattleCue,animationNow,sampleTrack,useArmyTimeline} from './armyTimeline';
-import RealmDuel from './RealmDuel';
+import RealmBattle from './RealmBattle';
 import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils';
 import type {Ground,Piece,V3} from './medievalScene';
 import {terrainField} from './campaignTerrain';
@@ -110,17 +110,14 @@ export default function RealmArmy({ground:live,battles}:{ground:Ground[];battles
   const models=useMemo(()=>Object.fromEntries((['guard','pike','archer','rider'] as ArmyKind[]).map(k=>[k,soldier(k)])) as Record<ArmyKind,ReturnType<typeof soldier>>,[]);
   useEffect(()=>()=>Object.values(models).flat().forEach(p=>{p.geometry.dispose();p.material.dispose();}),[models]);
   const formations=useMemo(()=>{const field=terrainField(ground),out:Record<ArmyKind,Array<Piece&{cellId:string}>>={guard:[],pike:[],archer:[],rider:[]};
-    for(const g of ground){const cloth=new THREE.Color(g.heraldry).lerp(new THREE.Color('#9b957d'),.55).getStyle();
+    for(const g of ground){if(g.cell.neutral)continue;const cloth=new THREE.Color(g.heraldry).lerp(new THREE.Color('#9b957d'),.55).getStyle();
       for(const p of armyFormation(g)){const x=g.position[0]+p.x,z=g.position[2]+p.z;
         out[p.kind].push({cellId:g.cell.id,position:[x,field.height(x,z)+.008,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:cloth});}}
     return out;
   },[ground]);
-  return <group><RealmKnight ground={ground} kind="guard" tracks={tracks}/>{(Object.keys(models) as ArmyKind[]).filter(k=>k!=='guard').flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]} tracks={tracks} ground={live}/>))}{events.filter(e=>e.track.battle).flatMap(e=>{
+  return <group><RealmKnight ground={ground} kind="guard" tracks={tracks}/><RealmKnight ground={ground} profile="mercenary" tracks={tracks}/><RealmKnight ground={ground} profile="bandit" tracks={tracks}/>{(Object.keys(models) as ArmyKind[]).filter(k=>k!=='guard').flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]} tracks={tracks} ground={live}/>))}{events.filter(e=>e.track.battle).flatMap(e=>{
     const x=e.track.from[0]*.35+e.track.to[0]*.65,z=e.track.from[2]*.35+e.track.to[2]*.65;
     const yaw=Math.atan2(e.track.to[0]-e.track.from[0],e.track.to[2]-e.track.from[2])-Math.PI/2;
-    const pairs=Math.min(3,Math.max(1,Math.min(e.from.cell.units,e.to.cell.units)));
-    return Array.from({length:pairs},(_,i)=>{const offset=(i-(pairs-1)/2)*.29,px=x+Math.sin(yaw)*offset,pz=z+Math.cos(yaw)*offset;
-      return <RealmDuel key={e.from.cell.id+'-'+i} startAt={e.track.start+.6} finishWinner={e.track.win?0:1} position={[px,contactField.height(px,pz)+.01,pz]} surfaceHeight={contactField.surfaceHeight} scale={.17} yaw={yaw} colors={[e.from.heraldry,e.to.heraldry]}/>;
-    });
+    return e.track.replay?[<RealmBattle key={e.from.cell.id+'-'+e.track.start} plan={e.track.replay} startAt={e.track.start+.6} position={[x,contactField.height(x,z)+.01,z]} surfaceHeight={contactField.surfaceHeight} scale={.17} yaw={yaw} colors={[e.from.heraldry,e.to.heraldry]}/>]:[];
   })}</group>;
 }

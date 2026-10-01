@@ -15,7 +15,7 @@ import Board3D from './Board3D';
 import RealmMenu from './RealmMenu';
 import RealmHUD from './RealmHUD';
 import type {BattleCue} from './armyTimeline';
-import {BATTLE_DURATION} from './duelMotion';
+import {battleReplayDuration} from './battleReplay';
 import type {AttackOutcome} from '../engine';
 import { realm } from './realmTheme';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
@@ -511,7 +511,7 @@ export default function GameScreen() {
   const [motionEpoch,setMotionEpoch]=useState(0);
   const [pendingCombat,setPendingCombat]=useState<DetailedCombatResult|null>(null);
   const [battleCues,setBattleCues]=useState<BattleCue[]>([]),battleSequence=useRef(0);
-  useEffect(()=>{if(!pendingCombat)return;const timer=setTimeout(()=>{setCombat(pendingCombat);setPendingCombat(null);},BATTLE_DURATION*1000);return()=>clearTimeout(timer);},[pendingCombat]);
+  useEffect(()=>{if(!pendingCombat)return;const timer=setTimeout(()=>{setCombat(pendingCombat);setPendingCombat(null);},(battleReplayDuration(pendingCombat)+.6)*1000);return()=>clearTimeout(timer);},[pendingCombat]);
   const queueBattle=(outcome:AttackOutcome,s:GameState)=>{
     const from=s.cells.find(c=>c.id===outcome.fromId),to=s.cells.find(c=>c.id===outcome.toId);
     if(!from||!to||!outcome.result.rounds.length||!isVisible(s,PLAYER,from)||!isVisible(s,PLAYER,to))return;
