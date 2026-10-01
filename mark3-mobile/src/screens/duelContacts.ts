@@ -62,9 +62,8 @@ function weaponArmor(attacker:AuthoredRig,defender:AuthoredRig,shape:DuelContact
 export function resolveDuelContacts(rigs:AuthoredRig[],shapes:DuelContacts[],frame:ContactFrame,height:(x:number,z:number)=>number){
  const groups=rigs.map(r=>r.mesh.parent as T.Group),update=(i:number)=>{groups[i].position.copy(frame.roots[i]);groups[i].rotation.y=frame.yaws[i];groups[i].updateMatrixWorld(true);};
  rigs.forEach((r,i)=>{
-  const settle=T.MathUtils.smoothstep(frame.deathTime,.65,1.9);
-  // 팔과 방패 위에서 수평으로 뜨지 않도록, 낙하 후 뒤꿈치도 바닥을 향해 내려간다.
-  r.mesh.rotation.x=i===frame.loser?.23*settle:0;
+  // 착지 후 시신을 추가로 회전시키면 바닥 보정이 몸 전체를 다시 들어 올린다.
+  r.mesh.rotation.x=0;
   poseAuthoredKnight(r,frame.poses[i]);update(i);
  });
  rigs.forEach((r,i)=>{frame.roots[i].y+=shapes[i].groundLift(frame.roots[i],frame.yaws[i],height);update(i);});

@@ -129,6 +129,10 @@ const atTimes=[1.62,3.82,6.02];
 export const AUTHORED_CONTACT_TIMES=atTimes;
 export const AUTHORED_DUEL_DURATION=DUEL_DURATION;
 export const DEATH_START=6.1;
+// 다리가 내려오는 원본 동작까지 재생한 뒤 자세를 유지한다.
+// 이후에는 몸 전체를 추가 회전하거나 들어 올리지 않고 먼지만 움직인다.
+export const DEATH_LAND_SAMPLE=clips.Death01.duration;
+export const DEATH_LANDED_AT=DEATH_START+DEATH_LAND_SAMPLE/1.15;
 export const ASH_START=8.6;
 export const ASH_DURATION=2.3;
 /** 접촉 계산은 발 디딜 위치와 몸의 방향만 정한다. 팔꿈치·손목 회전을 강제로 꺾지 않는다. */
@@ -171,7 +175,7 @@ export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
  }
  const loser=(1-winner) as 0|1,deathTime=Math.max(0,time-DEATH_START);
  if(time>=DEATH_START){
-  const fallen=sample('Death01',Math.min(clips.Death01.duration,deathTime*1.15));
+  const fallen=sample('Death01',Math.min(DEATH_LAND_SAMPLE,deathTime*1.15));
   poses[loser]=mix(poses[loser],fallen,smooth(deathTime/.32));
   // 쓰러질 때 검 팔을 몸 바깥으로 열어 방패와 칼을 겹쳐 쥐지 않는다.
   const spread=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0).applyQuaternion(poses[loser][2].q),-.45*smooth(deathTime/.24));
