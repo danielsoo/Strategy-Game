@@ -19,7 +19,7 @@ export function buildDuelContacts(rig:AuthoredRig){
   groundLift:(root:T.Vector3,yaw:number,height:(x:number,z:number)=>number)=>{
    rig.mesh.updateMatrixWorld(true);rig.mesh.skeleton.update();inverse.copy(rig.mesh.matrixWorld).invert();let lift=-Infinity;
    const c=Math.cos(yaw),s=Math.sin(yaw);
-   for(const part of parts){relative.multiplyMatrices(inverse,part.mesh.matrixWorld);for(const id of part.ids){
+   for(const part of parts){relative.multiplyMatrices(inverse,part.mesh.matrixWorld).premultiply(rig.mesh.matrix);for(const id of part.ids){
     part.mesh.getVertexPosition(id,point);point.applyMatrix4(relative);
     const x=root.x+point.x*c+point.z*s,z=root.z-point.x*s+point.z*c;
     lift=Math.max(lift,height(x,z)+.006-(root.y+point.y));
@@ -61,7 +61,12 @@ function weaponArmor(attacker:AuthoredRig,defender:AuthoredRig,shape:DuelContact
 /** 팔·손목을 꺾지 않고 두 사람의 간격으로 상대 장비 관통을 막는다. */
 export function resolveDuelContacts(rigs:AuthoredRig[],shapes:DuelContacts[],frame:ContactFrame,height:(x:number,z:number)=>number){
  const groups=rigs.map(r=>r.mesh.parent as T.Group),update=(i:number)=>{groups[i].position.copy(frame.roots[i]);groups[i].rotation.y=frame.yaws[i];groups[i].updateMatrixWorld(true);};
- rigs.forEach((r,i)=>{poseAuthoredKnight(r,frame.poses[i]);update(i);});
+ rigs.forEach((r,i)=>{
+  const settle=T.MathUtils.smoothstep(frame.deathTime,.65,1.9);
+  // 팔과 방패 위에서 수평으로 뜨지 않도록, 낙하 후 뒤꿈치도 바닥을 향해 내려간다.
+  r.mesh.rotation.x=i===frame.loser?.23*settle:0;
+  poseAuthoredKnight(r,frame.poses[i]);update(i);
+ });
  rigs.forEach((r,i)=>{frame.roots[i].y+=shapes[i].groundLift(frame.roots[i],frame.yaws[i],height);update(i);});
  // 칼이 방패의 두께를 통과하는 접근·접촉·회수 전 구간을 보정한다.
  const active=frame.striker,away=active===0?-1:1;
