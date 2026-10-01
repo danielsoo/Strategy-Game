@@ -138,7 +138,9 @@ const plans=atTimes.map((at,n)=>{
  const point=a.grip.clone().lerp(a.tip,.65),targetX=-target.x;
  const yaw=Math.asin(T.MathUtils.clamp(targetX/Math.hypot(point.x,point.z),-.95,.95))-Math.atan2(point.x,point.z);
  const rotated=point.clone().applyAxisAngle(V([0,1,0]),yaw);
- return {yaw,distance:rotated.z+target.z+[.044,.049,.075][n]};
+ // 칼날 중간점만 맞추면 비스듬한 검 끝이 방패 안에 들어간다.
+ // 전체 날의 접촉 거리만큼 접근을 줄이고 남은 오차는 실제 장비 충돌로 보정한다.
+ return {yaw,distance:rotated.z+target.z+[.364,.349,.635][n]};
 });
 export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
  const time=T.MathUtils.clamp(seconds,0,AUTHORED_DUEL_DURATION),poses:[Pose,Pose]=[combatPose(time),combatPose(time)],roots=[V([-.9,0,0]),V([.9,0,0])],yaws=[Math.PI/2,-Math.PI/2];
@@ -150,7 +152,8 @@ export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
   const wind=smooth((dt+lead)/lead),release=smooth((dt-.15)/.69),strength=wind*(1-release),hit=impactSamples[n];
   blocked=n<2;
   // 제작된 준비 동작을 읽고, 막힌 베기는 접촉 프레임에서 멈춘 뒤 되튕긴다.
-  const clipTime=dt<=0?hit*(dt+lead)/lead:blocked?hit-.025*smooth(dt/.12):hit+Math.min(.18,dt);
+  // 명중 뒤에도 칼을 자기 방패 안으로 끝까지 휘두르지 않고 같은 궤도로 회수한다.
+  const clipTime=dt<=0?hit*(dt+lead)/lead:hit-.025*smooth(dt/.12);
   poses[striker]=mix(combatPose(time,'attack',clipTime,n===1),combatPose(time),release);
   const braceTime=dt<0?.22*smooth((dt+lead-.08)/.35):.22+Math.min(.18,dt);
   if(blocked)poses[defender]=mix(combatPose(time,'block',braceTime),combatPose(time),release);
@@ -161,6 +164,7 @@ export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
   }
   yaws[striker]+=plans[n].yaw*strength;
   roots[striker].x+=(striker===0?1:-1)*(1.8-plans[n].distance)*strength;
+  if(n===2)roots[striker].x-=(striker===0?1:-1)*.16*smooth(dt/.16)*(1-release);
   impact=dt>=0&&dt<.08?1-dt/.08:0;
   phase=dt<-.2?'어깨와 몸통을 돌려 베기를 준비합니다':dt<0?n===1?'옆으로 베어 방패를 겨눕니다':'앞발에 체중을 실어 내려 벱니다':dt<.15?blocked?'방패에 막힌 칼날이 되튕깁니다':'공격을 받은 쪽이 몸을 접어 충격을 받습니다':'방패를 유지하며 검을 회수합니다';
   break;
@@ -169,6 +173,9 @@ export function sampleAuthoredDuel(seconds:number,first:0|1=0,winner:0|1=first){
  if(time>=DEATH_START){
   const fallen=sample('Death01',Math.min(clips.Death01.duration,deathTime*1.15));
   poses[loser]=mix(poses[loser],fallen,smooth(deathTime/.32));
+  // 쓰러질 때 검 팔을 몸 바깥으로 열어 방패와 칼을 겹쳐 쥐지 않는다.
+  const spread=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0).applyQuaternion(poses[loser][2].q),-.45*smooth(deathTime/.24));
+  for(const j of [5,6,7])poses[loser][j].q.premultiply(spread);
   phase=time<ASH_START?'치명상을 입은 병사가 힘을 잃고 쓰러집니다':time<ASH_START+ASH_DURATION?'몸과 장비가 재처럼 부서져 바람에 흩어집니다':'먼지가 사라지고 승자가 남습니다';
  }
  return {poses,roots,yaws,phase,impact,striker,blocked,loser,deathTime,ash:T.MathUtils.clamp((time-ASH_START)/ASH_DURATION,0,1)};

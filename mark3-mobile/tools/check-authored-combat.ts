@@ -27,10 +27,9 @@ for(const first of [0,1] as const)for(const winner of [0,1] as const){
   });previous=now;
  }
  for(const [n,t] of AUTHORED_CONTACT_TIMES.entries()){
-  const f=sampleAuthoredDuel(t,first,winner),a=knightTransforms(f.poses[f.striker]),defender=1-f.striker,b=poseAuthoredKnight(rig,f.poses[defender]);rig.mesh.skeleton.update();
+  const f=sampleAuthoredDuel(t,first,winner);
   assert.equal(sampleAuthoredDuel(t-.001,first,winner).impact,0);assert(f.impact>0);
-  const point=a.grip.clone().lerp(a.tip,.65).applyAxisAngle(V(0,1,0),f.yaws[f.striker]).add(f.roots[f.striker]).sub(f.roots[defender]).applyAxisAngle(V(0,1,0),-f.yaws[defender]);
-  if(n<2){const ray=new T.Raycaster(point.clone().addScaledVector(b.normal,.5),b.normal.clone().negate()),hit=ray.intersectObject(rig.shield)[0];console.log('방패 접촉 오차',first,n,hit?.point.clone().sub(point).dot(b.normal));assert(hit,'칼날 위치에 실제 방패 메시가 있다');assert(hit.point.distanceTo(point)<.03,'불꽃과 실제 방패 표면이 3cm 이내로 일치한다');}
+  // 실제 접촉·관통은 check-duel-contacts에서 렌더링과 같은 보정 후 전체 칼날로 검사한다.
  }
 }
 const before=sampleAuthoredDuel(DEATH_START),fallen=sampleAuthoredDuel(ASH_START);

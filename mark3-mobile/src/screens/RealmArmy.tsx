@@ -104,6 +104,7 @@ function ArmyBatch({part,places,tracks,ground}:{part:ReturnType<typeof soldier>[
   return <instancedMesh key={places.length} ref={ref} args={[part.geometry,part.material,places.length]} customDepthMaterial={depth} frustumCulled={false} castShadow receiveShadow raycast={()=>{}} dispose={null}/>;
 }
 export default function RealmArmy({ground:live,battles}:{ground:Ground[];battles?:BattleCue[]}){
+  const contactField=useMemo(()=>terrainField(live),[live]);
   const {ground:displayGround,tracks,events}=useArmyTimeline(live,battles);
   const ground=useMemo(()=>displayGround.map(g=>tracks.get(g.cell.id)?.battle?{...g,cell:{...g.cell,units:0}}:g),[displayGround,tracks]);
   const models=useMemo(()=>Object.fromEntries((['guard','pike','archer','rider'] as ArmyKind[]).map(k=>[k,soldier(k)])) as Record<ArmyKind,ReturnType<typeof soldier>>,[]);
@@ -119,7 +120,7 @@ export default function RealmArmy({ground:live,battles}:{ground:Ground[];battles
     const yaw=Math.atan2(e.track.to[0]-e.track.from[0],e.track.to[2]-e.track.from[2])-Math.PI/2;
     const pairs=Math.min(3,Math.max(1,Math.min(e.from.cell.units,e.to.cell.units)));
     return Array.from({length:pairs},(_,i)=>{const offset=(i-(pairs-1)/2)*.29,px=x+Math.sin(yaw)*offset,pz=z+Math.cos(yaw)*offset;
-      return <RealmDuel key={e.from.cell.id+'-'+i} startAt={e.track.start+.6} finishWinner={e.track.win?0:1} position={[px,terrainField(live).height(px,pz)+.01,pz]} scale={.17} yaw={yaw} colors={[e.from.heraldry,e.to.heraldry]}/>;
+      return <RealmDuel key={e.from.cell.id+'-'+i} startAt={e.track.start+.6} finishWinner={e.track.win?0:1} position={[px,contactField.height(px,pz)+.01,pz]} surfaceHeight={contactField.surfaceHeight} scale={.17} yaw={yaw} colors={[e.from.heraldry,e.to.heraldry]}/>;
     });
   })}</group>;
 }

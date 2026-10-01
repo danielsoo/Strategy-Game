@@ -47,7 +47,15 @@ export function terrainField(ground: Ground[]) {
   const mask=(x:number,z:number)=>{let light=0,desert=0,forest=0,sum=0;
     for(const g of nearby(x,z)){const d=Math.hypot(x-g.position[0],z-g.position[2]);if(d>2.1)continue;const w=Math.pow(Math.max(0,1-d/2.1),4);sum+=w;light+=w*(g.seen?1:g.known?.35:.06);desert+=w*(g.known&&g.terrain==='desert'?1:0);forest+=w*(g.known&&g.terrain==='forest'?1:0);}
     return [sum?light/sum:1,sum?desert/sum:0,sum?forest/sum:0];};
-  return {height,color,mask};
+  // CampaignLand의 18분할 삼각 격자와 같은 면을 보간한다. 연속 노이즈 높이와
+  // 렌더링된 삼각형 사이의 작은 차이도 누운 병사에게는 관통으로 보인다.
+  const heights=new Map<string,number>(),origin=ground[0]?.position??[0,0,0],n=18,dx=Math.sqrt(3)/2/n;
+  const vertexHeight=(u:number,v:number)=>{const key=`${u},${v}`;let h=heights.get(key);if(h===undefined){h=height(origin[0]+u*dx,origin[2]+(v+u*.5)/n);heights.set(key,h);}return h;};
+  const surfaceHeight=(x:number,z:number)=>{
+    const u=(x-origin[0])/dx,v=(z-origin[2])*n-u*.5,i=Math.floor(u),j=Math.floor(v),a=u-i,b=v-j;
+    return a+b<=1?vertexHeight(i,j)*(1-a-b)+vertexHeight(i+1,j)*a+vertexHeight(i,j+1)*b:vertexHeight(i+1,j+1)*(a+b-1)+vertexHeight(i+1,j)*(1-b)+vertexHeight(i,j+1)*(1-a);
+  };
+  return {height,surfaceHeight,color,mask};
 }
 
 export function campaignSurface(ground: Ground[], subdivisions=12) {
