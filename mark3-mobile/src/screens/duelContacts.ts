@@ -1,6 +1,7 @@
 import * as T from 'three';
 import {ConvexHull} from 'three/examples/jsm/math/ConvexHull';
-import {AuthoredRig,poseAuthoredKnight,sampleAuthoredDuel} from './authoredKnightMotion';
+import {AuthoredRig,poseAuthoredKnight,sampleAuthoredDuel,DEATH_LANDED_AT,DEATH_START} from './authoredKnightMotion';
+import {settleCorpse} from './groundedCorpse';
 
 export type ContactFrame=ReturnType<typeof sampleAuthoredDuel>;
 /** 실제로 그리는 정점만 사용한다. 삭제한 원본 검·손 정점은 검사하지 않는다. */
@@ -67,6 +68,14 @@ export function resolveDuelContacts(rigs:AuthoredRig[],shapes:DuelContacts[],fra
   poseAuthoredKnight(r,frame.poses[i]);update(i);
  });
  rigs.forEach((r,i)=>{frame.roots[i].y+=shapes[i].groundLift(frame.roots[i],frame.yaws[i],height);update(i);});
+ const rest=T.MathUtils.smoothstep(frame.deathTime,1.05,DEATH_LANDED_AT-DEATH_START);
+ if(rest>0){
+  const i=frame.loser;
+  for(let pass=0;pass<3;pass++){
+   settleCorpse(rigs[i],shapes[i].parts,rest,frame.roots[i],frame.yaws[i],height);
+   frame.roots[i].y+=shapes[i].groundLift(frame.roots[i],frame.yaws[i],height);update(i);
+  }
+ }
  // 칼이 방패의 두께를 통과하는 접근·접촉·회수 전 구간을 보정한다.
  const active=frame.striker,away=active===0?-1:1;
  const overlap=()=>bladeShield(rigs[0],rigs[1],shapes[1])||bladeShield(rigs[1],rigs[0],shapes[0])||weaponArmor(rigs[0],rigs[1],shapes[0])||weaponArmor(rigs[1],rigs[0],shapes[1]);
