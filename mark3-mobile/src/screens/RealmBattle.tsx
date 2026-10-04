@@ -10,11 +10,12 @@ import {ASH_START,ASH_DURATION,DEATH_START} from './authoredKnightMotion';
 import {buildKnightAsh} from './knightAsh';
 import type {DuelClock} from './RealmDuel';
 import type {Point} from './duelMotion';
+import {WEAPONS} from './battleWeapons';
 
 /** Bounded representative formations; equipment and casualties follow the resolved combat log. */
 export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale=1,yaw=0,surfaceHeight,colors=['#3e89db','#bf473c'],onPhase}:{plan:BattleReplay;clock?:DuelClock;startAt?:number;position?:Point;scale?:number;yaw?:number;surfaceHeight?:(x:number,z:number)=>number;colors?:[string,string];onPhase?:(s:string)=>void}){
  const asset=useLoader(GLTFLoader,'/realm/knight/knight.gltf');
- const actors=useMemo(()=>plan.actors.map(a=>{const rig=buildFighter(asset.scene,a.kind,colors[a.side]);return {rig,shape:buildDuelContacts(rig),ash:buildKnightAsh(rig,650)};}),[asset,plan]);
+ const actors=useMemo(()=>plan.actors.map(a=>{const rig=buildFighter(asset.scene,a.kind,colors[a.side],a.weapon);return {rig,shape:buildDuelContacts(rig),ash:buildKnightAsh(rig,650)};}),[asset,plan]);
  const movement=useMemo(()=>bakeBattleMovement(plan),[plan]),groups=useRef<Array<T.Group|null>>([]),markers=useRef<Array<T.Group|null>>([]),root=useRef<T.Group>(null),lastPhase=useRef('');
  const sparks=useMemo(()=>{const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(new Float32Array(plan.actors.length*12*6),3));return g;},[plan]),spark=useRef<T.LineSegments>(null);
  useEffect(()=>()=>{actors.forEach(a=>{a.ash.dispose();a.rig.dispose();});sparks.dispose();},[actors,sparks]);
@@ -41,9 +42,10 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
   const names=[0,1].map(side=>FIGHTER_NAMES[plan.actors.find(a=>a.side===side)?.kind??'knight']);
   const result=plan.outcome==='stalemate'?'교착 · 양측 이탈':plan.outcome==='attacker-win'?'공격측 승리':'방어측 승리';
   const active=frame.actions.find(a=>a?.role==='attack')?.exchange;
+  const weapon=WEAPONS[active?plan.actors[active.attacker].weapon??'sword':'sword'];
   const dying=plan.actors.find(a=>a.heavyDeath&&time>=a.deathAt&&time<a.deathAt+2.2);
-  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.move==='shove'?'밀쳐내기':`${active.counterOf!==undefined?'반격 · ':''}${active.heavy?'강공격 · ':''}${active.cut==='horizontal'?'횡베기':'사선베기'}`} · ${active.move==='shove'?'뒤로 물러나 균형 회복':active.defense==='shield'?'방패 방어':active.defense==='parry'?(active.heavy?'강공격 패링 · 공격자 경직':'패링 · 검 쳐내기'):active.defense==='dodge'?'옆걸음 회피':active.heavy&&active.fatal?'치명타 · 쓰러짐':'피격'}`:dying?'강공격 치명타 · 힘을 잃고 쓰러집니다':'간격 조절';
-  const heavyPhase=active?.heavy?time<active.at?'머리 위로 검을 들어 강타 준비':active.defense==='parry'||active.defense==='shield'?time<active.at+.22?'무릎을 굽혀 충격을 버팁니다':active.defense==='parry'?'검을 옆으로 흘려내며 반격 준비':'방패를 밀어 올려 간격 회복':actionLabel:actionLabel;
+  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.move==='shove'?'밀쳐내기':`${active.counterOf!==undefined?'반격 · ':''}${active.heavy?'강공격 · ':''}${weapon.name==='검'?(active.cut==='horizontal'?'횡베기':'사선베기'):weapon.action}`} · ${active.move==='shove'?'뒤로 물러나 균형 회복':active.defense==='shield'?'방패 방어':active.defense==='parry'?(active.heavy?'강공격 패링 · 공격자 경직':'패링 · 무기 쳐내기'):active.defense==='dodge'?'옆걸음 회피':active.heavy&&active.fatal?'치명타 · 쓰러짐':'피격'}`:dying?'강공격 치명타 · 힘을 잃고 쓰러집니다':'간격 조절';
+  const heavyPhase=active?.heavy?time<active.at?(weapon.name==='창'?'창을 거두어 찌르기 준비':weapon.name+' 강타 준비'):active.defense==='parry'||active.defense==='shield'?time<active.at+.22?'무릎을 굽혀 충격을 버팁니다':active.defense==='parry'?'공격을 옆으로 흘려내며 반격 준비':'방패를 밀어 올려 간격 회복':actionLabel:actionLabel;
   const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${dying?actionLabel:time>plan.finish?result:time<1.8&&!active?'접근 중':heavyPhase} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
   if(label!==lastPhase.current){lastPhase.current=label;onPhase?.(label);}
  });

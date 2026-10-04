@@ -55,7 +55,7 @@ export function settleCorpse(rig:AuthoredRig,parts:{mesh:T.Mesh;ids:number[]}[],
  // Released equipment rests on the ground independently of the body.
  for(const equipment of [rig.sword,rig.shield]){
   let lowest=Infinity;
-  for(const part of parts){if(part.mesh!==equipment&&part.mesh.parent!==equipment)continue;
+  for(const part of parts){let ancestor:T.Object3D|null=part.mesh;while(ancestor&&ancestor!==equipment)ancestor=ancestor.parent;if(!ancestor)continue;
    const relative=new T.Matrix4().multiplyMatrices(inverse,part.mesh.matrixWorld);
    for(const id of part.ids){part.mesh.getVertexPosition(id,point);point.applyMatrix4(relative);lowest=Math.min(lowest,gap(point));}
   }

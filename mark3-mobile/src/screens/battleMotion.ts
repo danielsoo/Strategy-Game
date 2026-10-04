@@ -3,9 +3,36 @@ import {AuthoredPose,combatPose,sampleKnightClip,mixKnightPoses,sampleAuthoredDu
 import type {BattleFrame,Combatant} from './battleReplay';
 import {attackPhase} from './battleReplay';
 import {heavyAttackPose,heavyDefensePose} from './heavyCombatMotion';
+import {WEAPONS} from './battleWeapons';
 const smooth=(n:number)=>{n=T.MathUtils.clamp(n,0,1);return n*n*(3-2*n);};
 function heavyImpactPose(guard:AuthoredPose,weight:number){const open=sampleKnightClip('Walk_Loop',.38);for(const j of [8,9,10])guard[j]=open[j];return mixKnightPoses(guard,sampleKnightClip('Hit_Chest',.24),weight*.85);}
 export function fighterPose(actor:Combatant,time:number,action:BattleFrame['actions'][number],moving:number|boolean):AuthoredPose{
+ const pose=baseFighterPose(actor,time,action,moving),weapon=actor.weapon??'sword';
+ const held=1-smooth((time-actor.deathAt)/.45);
+ if(weapon==='sword'||!held)return pose;
+ if(WEAPONS[weapon].twoHanded){pose[2].q.slerp(new T.Quaternion(),.65*held);pose[4].q.slerp(new T.Quaternion(),.45*held);}
+ const dt=action?attackPhase(action.exchange,time):-.65;
+ const parryWeight=action?.role==='defend'&&action.exchange.defense==='parry'?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
+ if(weapon==='spear'){
+  const attack=action?.role==='attack'&&action.exchange.move!=='shove';
+  const extend=attack?smooth((dt+.25)/.25)*(1-smooth((dt-.06)/.35)):0;
+  // The thrust is a compact forward drive and withdrawal, never a sword slash.
+  const thrust=attack?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
+  pose.weaponPose={wrist:new T.Vector3(-.11,1.18-.10*parryWeight,-.13+extend*.19),direction:new T.Vector3(.18+.27*parryWeight,.65-.50*thrust-.45*parryWeight,1).normalize(),support:.22};
+ }else if(WEAPONS[weapon].twoHanded){
+  const attacking=action?.role==='attack'&&action.exchange.move!=='shove',load=attacking?smooth((dt+.65)/.3)*(1-smooth((dt+.20)/.20)):0,follow=attacking?smooth(dt/.18)*(1-smooth((dt-.22)/.26)):0;
+  const blocked=action?.exchange.defense==='shield'||action?.exchange.defense==='parry';
+  const wrist=new T.Vector3(0,1.20,.11).lerp(new T.Vector3(-.015,1.60,.03),load);wrist.y+=follow*(blocked?.08:-.16);wrist.z-=blocked?follow*.10:0;
+  const swingDirection=new T.Vector3(.15,.18,1).lerp(new T.Vector3(.05,.86,-.50),load).lerp(blocked?new T.Vector3(.2,.8,.35):new T.Vector3(.15,-.62,.78),follow).normalize();
+  const engaged=attacking?smooth((dt+.65)/.18)*(1-smooth((dt-.20)/.28)):0;
+  const direction=new T.Vector3(.15,.75,.65).normalize().lerp(swingDirection,engaged).normalize();
+  pose.weaponPose={wrist,direction,support:-.18};
+  if(parryWeight){pose.weaponPose.wrist!.lerp(new T.Vector3(-.06,1.20,.13),parryWeight);pose.weaponPose.direction!.lerp(new T.Vector3(.65,.75,.40).normalize(),parryWeight).normalize();pose.weaponPose.support=-.18+.38*parryWeight;}
+ }
+ if(pose.weaponPose?.wrist){pose.weaponPose.wrist.add(pose[0].p.clone().multiplyScalar(.9));if(weapon==='spear')pose.weaponPose.wrist.y-=pose[0].p.y*.9*parryWeight;if(held<1)pose.weaponPose.weight=held;}
+ return pose;
+}
+function baseFighterPose(actor:Combatant,time:number,action:BattleFrame['actions'][number],moving:number|boolean):AuthoredPose{
  if(time>=actor.deathAt){
   const dt=time-actor.deathAt,f=sampleAuthoredDuel(DEATH_START+dt);
   if(actor.heavyDeath&&dt<.65){const guard=actor.kind==='knight'?combatPose(actor.deathAt):sampleKnightClip('Sword_Idle',(actor.deathAt+actor.id*.17)%1.6666),shock=heavyImpactPose(guard,1);return mixKnightPoses(shock,f.poses[f.loser],smooth(dt/.65));}

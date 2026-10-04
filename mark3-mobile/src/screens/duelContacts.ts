@@ -2,6 +2,7 @@ import * as T from 'three';
 import {ConvexHull} from 'three/examples/jsm/math/ConvexHull';
 import {AuthoredRig,poseAuthoredKnight,sampleAuthoredDuel,DEATH_LANDED_AT,DEATH_START} from './authoredKnightMotion';
 import {settleCorpse} from './groundedCorpse';
+import {weaponKind,weaponSegments} from './battleWeapons';
 
 export type ContactFrame=ReturnType<typeof sampleAuthoredDuel>;
 /** 실제로 그리는 정점만 사용한다. 삭제한 원본 검·손 정점은 검사하지 않는다. */
@@ -42,6 +43,17 @@ const bladeSamples=[[-.035,0,.085],[.035,0,.085],[-.025,0,.58],[.025,0,.58],[-.0
 /** 칼날 양쪽 날과 가운데 선분을 모두 검사한다. */
 export function bladeShield(rig:AuthoredRig,shield:AuthoredRig,shape:DuelContacts,padding=.014){
  if(!shield.shield.visible||!shape.planes.length)return null;
+ if(weaponKind(rig.sword)!=='sword'){
+  const transform=new T.Matrix4().copy(shield.shield.matrixWorld).invert().multiply(rig.sword.matrixWorld);
+  if(weaponKind(rig.sword)==='axe'){
+   // A broad double head must not lose its clearance in one frame when its
+   // edge turns tangent to the shield. The rounded envelope stays continuous.
+   const center=new T.Vector3(0,0,.66).applyMatrix4(transform);
+   if(segmentShield(center,center,shape.planes,padding+.33)!==null)return center.applyMatrix4(shield.shield.matrixWorld);
+  }
+  for(const line of weaponSegments(rig.sword)){line.start.applyMatrix4(transform);line.end.applyMatrix4(transform);const t=segmentShield(line.start,line.end,shape.planes,padding+.012);if(t!==null)return line.at(t,new T.Vector3()).applyMatrix4(shield.shield.matrixWorld);}
+  return null;
+ }
  const inverse=new T.Matrix4().copy(shield.shield.matrixWorld).invert().multiply(rig.sword.matrixWorld),points=bladeSamples.map(p=>new T.Vector3().fromArray(p).applyMatrix4(inverse));
  for(const [a,b] of [[0,2],[2,4],[4,6],[1,3],[3,5],[5,6],[0,1],[2,3],[4,5]]){
   const t=segmentShield(points[a],points[b],shape.planes,padding);if(t!==null)return points[a].clone().lerp(points[b],t).applyMatrix4(shield.shield.matrixWorld);

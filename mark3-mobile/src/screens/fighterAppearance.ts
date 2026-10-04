@@ -1,10 +1,13 @@
 import * as T from 'three';
 import {buildAuthoredKnight} from './authoredKnightMotion';
 import type {FighterKind} from './battleReplay';
+import {WeaponKind,WEAPONS} from './battleWeapons';
 
 /** Shared anatomical rig, separate equipment, silhouettes and material sets. */
-export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa'){
- const rig=buildAuthoredKnight(scene),extras:T.Mesh[]=[],materials:T.MeshStandardMaterial[]=[],ownedTextures:T.Texture[]=[];
+export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weapon:WeaponKind='sword'){
+ const rig=buildAuthoredKnight(scene,weapon),extras:T.Mesh[]=[],materials:T.MeshStandardMaterial[]=[],ownedTextures:T.Texture[]=[];
+ const hasShield=kind==='knight'&&!WEAPONS[weapon].twoHanded;
+ if(!hasShield){rig.shield.visible=false;rig.shield.removeFromParent();}
  const material=(hex:string,metalness=0,roughness=.92)=>{const m=new T.MeshStandardMaterial({color:hex,metalness,roughness});materials.push(m);return m;};
  const cloth=material(kind==='bandit'?'#4b4435':'#71604c'),leather=material('#33251e',0,.82),steel=material('#686c68',.55,.57),skin=material(kind==='bandit'?'#96715a':'#ba8c6b',0,.85),hair=material('#292018'),eye=material('#171716');
  const add=(g:T.BufferGeometry,m:T.Material,bone:number,p:[number,number,number],scale:[number,number,number]=[1,1,1])=>{const mesh=new T.Mesh(g,m);mesh.position.fromArray(p);mesh.scale.fromArray(scale);mesh.castShadow=true;mesh.receiveShadow=true;rig.bones[bone].add(mesh);extras.push(mesh);return mesh;};
@@ -56,5 +59,5 @@ export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa'){
    add(new T.BoxGeometry(.23,.07,.012),leather,7,[0,.014,.080]);
   }
  }
- return {...rig,kind,hasShield:kind==='knight',dispose:()=>{extras.forEach(m=>m.geometry.dispose());materials.forEach(m=>m.dispose());ownedTextures.forEach(t=>t.dispose());rig.dispose();}};
+ return {...rig,kind,weapon,hasShield,dispose:()=>{extras.forEach(m=>m.geometry.dispose());materials.forEach(m=>m.dispose());ownedTextures.forEach(t=>t.dispose());rig.dispose();}};
 }

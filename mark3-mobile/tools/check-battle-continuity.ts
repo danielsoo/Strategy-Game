@@ -6,7 +6,7 @@ import {buildDuelContacts} from '../src/screens/duelContacts';
 import {poseBattleActors} from '../src/screens/battleContacts';
 import {bakeBattleMovement,attackLead,attackRecovery} from '../src/screens/battleReplay';
 import {exampleBattle} from '../src/screens/battleExamples';
-const example=Number(process.argv[2]??0),plan=exampleBattle(example),movement=bakeBattleMovement(plan),actors=plan.actors.map(a=>{const rig=buildFighter(testKnightScene(),a.kind);new T.Group().add(rig.mesh);return {rig,shape:buildDuelContacts(rig)};});
+const example=Number(process.argv[2]??0),plan=exampleBattle(example),movement=bakeBattleMovement(plan),actors=plan.actors.map(a=>{const rig=buildFighter(testKnightScene(),a.kind,undefined,a.weapon);new T.Group().add(rig.mesh);return {rig,shape:buildDuelContacts(rig)};});
 let previous:T.Vector3[][]|undefined;
 const jumps:{time:number;actor:number;root:number;hip:number}[]=[];
 for(let tick=0;tick<=Math.ceil(Math.min(plan.duration,Number(process.argv[3]??plan.duration))*60);tick++){

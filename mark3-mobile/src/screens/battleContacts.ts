@@ -5,8 +5,9 @@ import {buildFighter} from './fighterAppearance';
 import {buildDuelContacts,bladeShield,armorSpheres} from './duelContacts';
 import {poseAuthoredKnight,DEATH_START,DEATH_LANDED_AT} from './authoredKnightMotion';
 import {settleCorpse} from './groundedCorpse';
+import {weaponPoint,parryPoint,animateFlail,WEAPONS} from './battleWeapons';
 export type BattleActor={rig:ReturnType<typeof buildFighter>;shape:ReturnType<typeof buildDuelContacts>};
-const v=(z:number)=>new T.Vector3(0,0,z);
+
 /** Shield corners leave empty space inside its box; a shove must touch the mesh. */
 export function shieldSurfacePoint(rig:BattleActor['rig'],world:T.Vector3){
  const mesh=rig.shield,geometry=mesh.geometry,positions=geometry.getAttribute('position'),index=geometry.index,local=mesh.worldToLocal(world.clone()),triangle=new T.Triangle(),point=new T.Vector3(),nearest=new T.Vector3();let distance=Infinity;
@@ -17,7 +18,7 @@ export function shieldSurfacePoint(rig:BattleActor['rig'],world:T.Vector3){
  return nearest.applyMatrix4(mesh.matrixWorld);
 }
 export function swordContact(a:BattleActor,b:BattleActor,scale=1){
- const line=new T.Line3(v(.10).applyMatrix4(a.rig.sword.matrixWorld),v(.85).applyMatrix4(a.rig.sword.matrixWorld)),other=new T.Line3(v(.10).applyMatrix4(b.rig.sword.matrixWorld),v(.85).applyMatrix4(b.rig.sword.matrixWorld));
+ const line=new T.Line3(weaponPoint(a.rig.sword,.10).applyMatrix4(a.rig.sword.matrixWorld),weaponPoint(a.rig.sword,.85).applyMatrix4(a.rig.sword.matrixWorld)),other=new T.Line3(parryPoint(b.rig.sword,.10).applyMatrix4(b.rig.sword.matrixWorld),parryPoint(b.rig.sword,.85).applyMatrix4(b.rig.sword.matrixWorld));
  let best:T.Vector3|null=null,distance=Infinity;
  for(let i=0;i<=20;i++){const pa=line.at(i/20,new T.Vector3()),pb=other.closestPointToPoint(pa,true,new T.Vector3()),d=pa.distanceTo(pb);if(d<distance){distance=d;best=pa.lerp(pb,.5);}}
  return distance<.06*scale?best:null;
@@ -25,7 +26,20 @@ export function swordContact(a:BattleActor,b:BattleActor,scale=1){
 /** Shared by WebGL rendering and headless geometry regression tests. */
 function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:BattleActor[],height:(x:number,z:number)=>number,scale=1,yaw=0,align=true){
  const groups=actors.map(a=>a.rig.mesh.parent as T.Group),ground=(i:number)=>{const a=actors[i],g=groups[i];g.position.y+=a.shape.groundLift(g.position,g.rotation.y,height);g.updateMatrixWorld(true);};
- actors.forEach(({rig},i)=>{const p=frame.positions[i],g=groups[i];g.position.set(p.x,0,p.z);g.rotation.y=p.yaw;rig.mesh.rotation.x=0;poseAuthoredKnight(rig,fighterPose(plan.actors[i],time,frame.actions[i],p.moving));g.updateMatrixWorld(true);ground(i);});
+ actors.forEach(({rig},i)=>{const p=frame.positions[i],g=groups[i];g.position.set(p.x,0,p.z);g.rotation.y=p.yaw;rig.mesh.rotation.x=0;poseAuthoredKnight(rig,fighterPose(plan.actors[i],time,frame.actions[i],p.moving));animateFlail(rig.sword,frame.actions[i]?.role==='attack'?attackPhase(frame.actions[i]!.exchange,time):null,time,time>=plan.actors[i].deathAt);g.updateMatrixWorld(true);ground(i);});
+ // Meet the incoming height with the hands, not a vertical jump of the body.
+ // Polearms receive blows on the forward haft, safely ahead of the torso.
+ for(const e of plan.exchanges){
+  if(e.defense!=='parry'||!WEAPONS[plan.actors[e.target].weapon??'sword'].twoHanded||frame.actions[e.target]?.exchange!==e)continue;
+  const dt=attackPhase(e,time),weight=T.MathUtils.smoothstep(dt,-.5,-.06)*(1-T.MathUtils.smoothstep(dt,.08,.38));if(!weight)continue;
+  const a=actors[e.attacker].rig,b=actors[e.target].rig,p=fighterPose(plan.actors[e.target],time,frame.actions[e.target],frame.positions[e.target].moving);
+  if(!p.weaponPose?.wrist)continue;
+  for(let pass=0;pass<3;pass++){
+   const incoming=weaponPoint(a.sword,.52).applyMatrix4(a.sword.matrixWorld),guard=parryPoint(b.sword,.52).applyMatrix4(b.sword.matrixWorld);
+   p.weaponPose.wrist.y+=T.MathUtils.clamp((incoming.y-guard.y)/scale,-.3,.3)*weight;
+   poseAuthoredKnight(b,p);groups[e.target].updateMatrixWorld(true);ground(e.target);
+  }
+ }
  const touches=new Map<number,T.Vector3>();
  const partners=new Map<number,number>();
  for(const e of plan.exchanges)if(e.defense==='parry'&&Math.abs(time-e.at)<.12&&frame.actions[e.attacker]?.exchange===e&&frame.actions[e.target]?.exchange===e){partners.set(e.attacker,e.target);partners.set(e.target,e.attacker);}
@@ -48,16 +62,16 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
    ga.position.add(shift);ga.updateMatrixWorld(true);
    }continue;
   }
-  const blade=v(.52).applyMatrix4(a.rig.sword.matrixWorld);let target:T.Vector3;
+  const blade=weaponPoint(a.rig.sword,.52).applyMatrix4(a.rig.sword.matrixWorld);let target:T.Vector3;
   if(event.defense==='shield'){
    b.rig.shield.geometry.computeBoundingBox();target=b.rig.shield.geometry.boundingBox!.getCenter(new T.Vector3()).applyMatrix4(b.rig.shield.matrixWorld);const toward=ga.getWorldPosition(new T.Vector3()).sub(gb.getWorldPosition(new T.Vector3()));toward.y=0;target.addScaledVector(toward.normalize(),.03*scale);
   }else if(event.defense==='parry'){
-   const start=v(.12).applyMatrix4(b.rig.sword.matrixWorld),end=v(.80).applyMatrix4(b.rig.sword.matrixWorld);
+   const start=parryPoint(b.rig.sword,.12).applyMatrix4(b.rig.sword.matrixWorld),end=parryPoint(b.rig.sword,.80).applyMatrix4(b.rig.sword.matrixWorld);
    const t=Math.abs(end.y-start.y)>.01?T.MathUtils.clamp((blade.y-start.y)/(end.y-start.y),0,1):.5;target=start.lerp(end,t);
   }else target=new T.Vector3(0,.23,0).applyMatrix4(b.rig.bones[0].matrixWorld);
   const center=ga.getWorldPosition(new T.Vector3()),edge=blade.clone().sub(center),aim=target.clone().sub(center);
   const turn=Math.atan2(Math.sin(Math.atan2(aim.x,aim.z)-Math.atan2(edge.x,edge.z)),Math.cos(Math.atan2(aim.x,aim.z)-Math.atan2(edge.x,edge.z)));
-  ga.rotation.y+=T.MathUtils.clamp(turn,-.75,.75);ga.updateMatrixWorld(true);blade.copy(v(.52).applyMatrix4(a.rig.sword.matrixWorld));
+  ga.rotation.y+=T.MathUtils.clamp(turn,-.75,.75);ga.updateMatrixWorld(true);blade.copy(weaponPoint(a.rig.sword,.52).applyMatrix4(a.rig.sword.matrixWorld));
   const shift=target.sub(blade).divideScalar(scale).applyAxisAngle(new T.Vector3(0,1,0),-yaw),weight=T.MathUtils.smoothstep(dt,-.5,-.02)*(1-T.MathUtils.smoothstep(dt,.08,.36));
   shift.y=0;if(shift.length()>.75)shift.setLength(.75);ga.position.addScaledVector(shift,weight);ga.updateMatrixWorld(true);
  }
@@ -79,7 +93,7 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
  if(align)for(let pass=0;pass<3;pass++)for(const e of plan.exchanges){
   const dt=attackPhase(e,time);if(e.defense!=='parry'||dt<-.5||dt>.36)continue;
   if(frame.actions[e.attacker]?.exchange!==e||frame.actions[e.target]?.exchange!==e)continue;
-  const a=actors[e.attacker],b=actors[e.target],blade=v(.52).applyMatrix4(a.rig.sword.matrixWorld),lo=v(.12).applyMatrix4(b.rig.sword.matrixWorld),hi=v(.8).applyMatrix4(b.rig.sword.matrixWorld);
+  const a=actors[e.attacker],b=actors[e.target],blade=weaponPoint(a.rig.sword,.52).applyMatrix4(a.rig.sword.matrixWorld),lo=parryPoint(b.rig.sword,.12).applyMatrix4(b.rig.sword.matrixWorld),hi=parryPoint(b.rig.sword,.8).applyMatrix4(b.rig.sword.matrixWorld);
   const along=Math.abs(hi.y-lo.y)>.01?T.MathUtils.clamp((blade.y-lo.y)/(hi.y-lo.y),0,1):.5;
   const correction=lo.lerp(hi,along).sub(blade).divideScalar(scale).applyAxisAngle(new T.Vector3(0,1,0),-yaw);correction.y=0;
   if(correction.length()>.5)correction.setLength(.5);
@@ -94,7 +108,7 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
   if(i===j||time>=plan.actors[i].deathAt||time>=plan.actors[j].deathAt)continue;
   const away=groups[i].position.clone().sub(groups[j].position);away.y=0;away.normalize();
   for(let pass=0;pass<40;pass++){
-   const line=new T.Line3(v(.10).applyMatrix4(actors[i].rig.sword.matrixWorld),v(.85).applyMatrix4(actors[i].rig.sword.matrixWorld));
+   const line=new T.Line3(weaponPoint(actors[i].rig.sword,.10).applyMatrix4(actors[i].rig.sword.matrixWorld),weaponPoint(actors[i].rig.sword,.85).applyMatrix4(actors[i].rig.sword.matrixWorld));
    const hit=armorSpheres(actors[j].rig).find(s=>line.closestPointToPoint(s.center,true,new T.Vector3()).distanceTo(s.center)<s.radius+.01*scale);
    if(!hit)break;touches.set(i,line.closestPointToPoint(hit.center,true,new T.Vector3()));clearWeapon(i,j,away,.012);
   }
@@ -117,7 +131,7 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
  if(align)for(const e of plan.exchanges){
   if(!e.fatal||Math.abs(time-e.at)>.001)continue;
   const a=actors[e.attacker],b=actors[e.target],g=groups[e.attacker],spheres=armorSpheres(b.rig);
-  const gap=()=>{const blade=new T.Line3(v(.1).applyMatrix4(a.rig.sword.matrixWorld),v(.85).applyMatrix4(a.rig.sword.matrixWorld));return Math.min(...spheres.map(s=>blade.closestPointToPoint(s.center,true,new T.Vector3()).distanceTo(s.center)-s.radius));};
+  const gap=()=>{const blade=new T.Line3(weaponPoint(a.rig.sword,.1).applyMatrix4(a.rig.sword.matrixWorld),weaponPoint(a.rig.sword,.85).applyMatrix4(a.rig.sword.matrixWorld));return Math.min(...spheres.map(s=>blade.closestPointToPoint(s.center,true,new T.Vector3()).distanceTo(s.center)-s.radius));};
   if(gap()<.06*scale)continue;
   const base=g.rotation.y;let best=base,score=Infinity;
   for(let step=-20;step<=20;step++){
@@ -154,6 +168,17 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
     const p=sample.positions[i],position=actors[i].rig.mesh.parent!.position;
     paths[i].push({at,offset:new T.Vector3(position.x-p.x,0,position.z-p.z),turn:actors[i].rig.mesh.parent!.rotation.y-p.yaw});
    }
+  }
+  // Broad heads need clearance during recovery as well as at impact. Bake those
+  // stance corrections ahead of time so the feet travel into them gradually.
+  if(plan.actors.length===2&&plan.actors.some(a=>a.weapon&&a.weapon!=='sword')){
+   const extras:Footstep[][]=actors.map(()=>[]);
+   const times=[...new Set(plan.exchanges.flatMap(e=>[-.40,-.25,-.12,.10,.20,.30,.42].map(dt=>e.at+dt)))].sort((a,b)=>a-b);
+   for(const at of times){const sample=movement.sample(at),positions=sample.positions.map((p,i)=>{const o=footOffset(paths[i],at);return {...p,x:p.x+o.x,z:p.z+o.z,yaw:p.yaw+footTurn(paths[i],at)};});
+    solveBattlePose(plan,at,{...sample,positions},actors,height,scale,yaw,false);
+    actors.forEach((a,i)=>{if(at>=plan.actors[i].deathAt)return;const p=sample.positions[i],g=a.rig.mesh.parent!;extras[i].push({at,offset:new T.Vector3(g.position.x-p.x,0,g.position.z-p.z),turn:g.rotation.y-p.yaw});});
+   }
+   paths.forEach((p,i)=>{p.push(...extras[i]);p.sort((a,b)=>a.at-b.at);});
   }
   // Contact corrections are part of locomotion too: freezing navigation alone
   // still made attackers skate after a dodging opponent through these offsets.

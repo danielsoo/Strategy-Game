@@ -4,6 +4,7 @@ import type {AttackOutcome} from '../engine';
 import type {Ground,V3} from './medievalScene';
 import type {ArmyAction} from './armyAnimation';
 import {createBattleReplay,fighterKind,BattleReplay} from './battleReplay';
+import {FIELD_WEAPONS} from './battleWeapons';
 export type BattleCue=AttackOutcome&{sequence:number};
 export interface ArmyTrack {from:V3;to:V3;start:number;duration:number;battle:boolean;defender?:boolean;win?:boolean;formationZ?:number;replay?:BattleReplay}
 export const animationNow=()=>performance.now()/1000;
@@ -36,7 +37,8 @@ export function useArmyTimeline(ground:Ground[],battles:BattleCue[]=[]){
   for(const cue of battles){if(cue.sequence<=lastBattle.current)continue;lastBattle.current=cue.sequence;
    const from=old.get(cue.fromId),to=old.get(cue.toId);
    if(!from?.seen||!to?.seen||!cue.result.rounds.length)continue;
-   const replay=createBattleReplay(cue.result,[fighterKind(from.cell.neutral),fighterKind(to.cell.neutral)]);
+   const kinds=[fighterKind(from.cell.neutral),fighterKind(to.cell.neutral)] as const;
+   const replay=createBattleReplay(cue.result,[...kinds],10,[FIELD_WEAPONS[kinds[0]],FIELD_WEAPONS[kinds[1]]]);
    next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:replay.duration+.6,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0,replay}});
   }
   const fighting=new Set(next.flatMap(e=>[e.from.cell.id,e.to.cell.id]));

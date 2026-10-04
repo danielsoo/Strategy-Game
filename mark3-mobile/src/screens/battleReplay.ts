@@ -1,9 +1,10 @@
 import type {DetailedCombatResult} from '../services/combatSystem';
+import {WeaponKind,WEAPONS} from './battleWeapons';
 export type FighterKind='knight'|'mercenary'|'bandit';
 export const FIGHTER_NAMES:Record<FighterKind,string>={knight:'기사',mercenary:'용병',bandit:'도적'};
 export const fighterKind=(neutral?:string):FighterKind=>neutral==='bandit'?'bandit':neutral==='mercenary'?'mercenary':'knight';
 export type Defense='shield'|'parry'|'dodge'|'hit';
-export type Combatant={id:number;side:0|1;kind:FighterKind;low:number;high:number;deathAt:number;heavyDeath?:boolean};
+export type Combatant={id:number;side:0|1;kind:FighterKind;weapon?:WeaponKind;low:number;high:number;deathAt:number;heavyDeath?:boolean};
 export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal';move?:'cut'|'shove';counterOf?:number;heavy?:boolean};
 export const COMBAT_PACE=1.35;
 export const ATTACK_LEAD=.65/COMBAT_PACE,ATTACK_RECOVERY=.48/COMBAT_PACE;
@@ -19,10 +20,10 @@ const defense=(kind:FighterKind,n:number):Defense=>kind==='knight'?(n%5===3?'dod
 // Local, reproducible choreography variation. This never consumes the combat RNG.
 const choice=(n:number)=>{let x=Math.imul(n+17,0x45d9f3b);x=Math.imul(x^(x>>>16),0x45d9f3b);return (x^(x>>>16))>>>0;};
 /** Animation consumes the resolved log; it never rolls damage or modifies the game state. */
-export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKind,FighterKind]=['knight','knight'],limit=10):BattleReplay{
+export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKind,FighterKind]=['knight','knight'],limit=10,weapons?:[WeaponKind[],WeaponKind[]]):BattleReplay{
  const first=result.rounds[0],initial:[number,number]=first?[first.attackerUnits+first.attackerLosses,first.defenderUnits+first.defenderLosses]:[result.attackerSurvivors,result.defenderSurvivors];
  const actors:Combatant[]=[],exchanges:Exchange[]=[],stages:ReplayStage[]=[{at:0,counts:initial,morale:[100,100],round:0}];
- for(const side of [0,1] as const){const count=Math.min(limit,initial[side]);for(let i=0;i<count;i++)actors.push({id:actors.length,side,kind:kinds[side],low:Math.floor(i*initial[side]/count),high:Math.floor((i+1)*initial[side]/count),deathAt:Infinity});}
+ for(const side of [0,1] as const){const count=Math.min(limit,initial[side]);for(let i=0;i<count;i++)actors.push({id:actors.length,side,kind:kinds[side],weapon:weapons?.[side][i%weapons[side].length]??'sword',low:Math.floor(i*initial[side]/count),high:Math.floor((i+1)*initial[side]/count),deathAt:Infinity});}
  const formationLane=(a:Combatant)=>{const side=actors.filter(b=>b.side===a.side);return side.indexOf(a)-(side.length-1)/2;};
  let start=1.8,serial=0;
  const addStage=(counts:[number,number],morale:[number,number],round:number)=>{
@@ -68,6 +69,7 @@ export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKin
  const retime=(t:number)=>t+holds.filter(at=>at<t).length*(HEAVY_RECOVERY-ATTACK_RECOVERY);
  for(const e of exchanges){const old=e.at;e.at=retime(old);if(e.counterOf!==undefined)e.counterOf=retime(e.counterOf);if(e.fatal)actors[e.target].deathAt=e.at+.10;}
  stages.forEach(s=>s.at=retime(s.at));
+ for(const e of exchanges){const target=actors[e.target];if(e.defense==='shield'&&WEAPONS[target.weapon??'sword'].twoHanded)e.defense='parry';if(e.defense==='parry'&&target.weapon==='flail')e.defense='dodge';}
  const finish=retime(start),deathEnd=Math.max(0,...actors.filter(a=>Number.isFinite(a.deathAt)).map(a=>a.deathAt+7.1));
  return {actors,exchanges:exchanges.sort((a,b)=>a.at-b.at||a.attacker-b.attacker),stages,initial,final,outcome:result.outcome,reason:result.reason,finish,duration:Math.max(finish+2.8,deathEnd)};
 }
@@ -107,7 +109,8 @@ export function bakeBattleMovement(plan:BattleReplay){
    const enemy=old[target],partners=assignments.get(target)!,slot=partners.indexOf(a.id),angle=(a.side===0?-Math.PI/2:Math.PI/2)+(slot===0?0:(slot%2?1:-1)*Math.ceil(slot/2)*1.10);
    const own=alive.filter(b=>b.side===a.side).length,other=alive.length-own;
    const mobile=own>=other||actions[a.id]?.role==='attack';
-   let gx=mobile?enemy.x+Math.sin(angle)*1.58:p.x,gz=mobile?enemy.z+Math.cos(angle)*1.58:p.z;
+   const reach=WEAPONS[a.weapon??'sword'].reach;
+   let gx=mobile?enemy.x+Math.sin(angle)*reach:p.x,gz=mobile?enemy.z+Math.cos(angle)*reach:p.z;
    const action=actions[a.id];if(action?.exchange.move==='shove'){
     const dt=time-action.exchange.at,awayX=p.x-enemy.x,awayZ=p.z-enemy.z,n=Math.hypot(awayX,awayZ)||1;
     if(action.role==='attack'){gx=enemy.x+awayX/n*1.02;gz=enemy.z+awayZ/n*1.02;}
