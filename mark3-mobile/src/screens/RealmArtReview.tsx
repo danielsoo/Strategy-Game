@@ -15,7 +15,7 @@ import {AUTHORED_CONTACT_TIMES as CONTACT_TIMES,DEATH_START,ASH_START} from './a
 import RealmDuel,{DuelClock} from './RealmDuel';
 import RealmBattle from './RealmBattle';
 import {BATTLE_EXAMPLES,exampleBattle} from './battleExamples';
-import {BattleReplay,bakeBattleMovement} from './battleReplay';
+import {BattleReplay,bakeBattleMovement,attackLead,attackRecovery} from './battleReplay';
 import type {ArmyAction} from './armyAnimation';
 import RealmDaylight from './RealmDaylight';
 import RealmGrass from './RealmGrass';
@@ -42,7 +42,7 @@ function ReviewScene({variant,angle,action,clock,onPhase,closeup,battle}:{varian
   const combatCenter=useMemo(()=>{const positions=movement.sample(1.8).positions;return positions.reduce((p,a)=>({x:p.x+a.x/positions.length,z:p.z+a.z/positions.length}),{x:0,z:0});},[movement]);
   // A camera that follows the pair's moving midpoint makes a planted attacker
   // appear to slide with the dodge. Keep the battlefield frame fixed for review.
-  useFrame(({camera,size})=>{const center=variant===6?combatCenter:{x:0,z:0};const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===6?(closeup?(battle.actors.length===2?4:4.8):Math.max(5.8,battle.actors.length*.83)):variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(center.x+Math.sin(angle)*distance,h+(variant===6?(closeup?2.4:5):variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,center.z+Math.cos(angle)*distance);camera.lookAt(center.x,h+(variant===6?(closeup?(battle.actors.some(a=>a.weapon==='halberd'||a.weapon==='spear'||a.weapon==='axe')?1.3:1):.65):variant===3?.055:variant===4?(closeup?1.2:.85):.15),center.z+(variant===3?.07:0));});
+  useFrame(({camera,size})=>{const center=variant===6?combatCenter:{x:0,z:0};const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===6?(closeup?(battle.actors.length===2?(battle.actors.some(a=>a.weapon==='halberd')?4.8:4):4.8):Math.max(5.8,battle.actors.length*.83)):variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(center.x+Math.sin(angle)*distance,h+(variant===6?(closeup?2.4:5):variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,center.z+Math.cos(angle)*distance);camera.lookAt(center.x,h+(variant===6?(closeup?(battle.actors.some(a=>a.weapon==='halberd'||a.weapon==='spear'||a.weapon==='axe')?1.3:1):.65):variant===3?.055:variant===4?(closeup?1.2:.85):.15),center.z+(variant===3?.07:0));});
   return <>
     <color attach="background" args={['#82958c']}/><fog attach="fog" args={['#82958c',variant===6?18:7,variant===6?40:18]}/>
     <RealmDaylight/>
@@ -67,7 +67,7 @@ export default function RealmArtReview(){
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 9 · 날 방향 · 타격 궤적 · 전투 중심 수정':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 10 · 전신 연동 · 무기별 파지와 타격':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
     <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
@@ -87,7 +87,9 @@ export default function RealmArtReview(){
      ['처음부터',()=>{clock.time=0;clock.paused=false;setPaused(false);}],
      [paused?'재생':'일시정지',()=>{clock.paused=!clock.paused;setPaused(clock.paused);}],
      [slow?'정상 속도':'느리게 보기',()=>{clock.speed=slow?1:.3;setSlow(!slow);}],
+     ['공격 준비',()=>{const e=battle.exchanges[0];clock.time=e?e.at-attackLead(e)*.4:0;clock.paused=true;setPaused(true);}],
      ['첫 교전',()=>{clock.time=battle.exchanges[0]?.at??0;clock.paused=true;setPaused(true);}],
+     ['공격 회수',()=>{const e=battle.exchanges[0];clock.time=e?e.at+attackRecovery(e)*.55:0;clock.paused=true;setPaused(true);}],
      ['다음 공방',()=>{clock.time=battle.exchanges.find(e=>e.at>clock.time+.03)?.at??battle.exchanges[0]?.at??0;clock.paused=true;setPaused(true);}],
      ['강공격 패링',()=>{clock.time=Math.max(0,(reactionTimes['강공격 패링']??0)-.85);clock.paused=false;setPaused(false);}],
      ['강공격 회피',()=>{clock.time=Math.max(0,(reactionTimes['강공격 회피']??0)-1);clock.paused=false;setPaused(false);}],

@@ -49,8 +49,8 @@ for(const index of [5,6,7,8,9,10]){
   for(const [i,a] of actors.entries()){
    if(plan.actors[i].weapon==='sword'||t>=plan.actors[i].deathAt)continue;
    const inverse=a.rig.bones[0].matrixWorld.clone().invert();
-   for(const hand of a.rig.hands){const p=hand.geometry.getAttribute('position'),matrix=inverse.clone().multiply(hand.matrixWorld);
-    for(let n=0;n<p.count;n+=3){checked++;if(a.body.containsPoint(new T.Vector3().fromBufferAttribute(p,n).applyMatrix4(matrix))){inside++;worstFrame=`${index} ${i} ${t}`;}}
+   for(const [side,hand] of a.rig.hands.entries()){const p=hand.geometry.getAttribute('position'),matrix=inverse.clone().multiply(hand.matrixWorld);
+    for(let n=0;n<p.count;n+=3){checked++;if(a.body.containsPoint(new T.Vector3().fromBufferAttribute(p,n).applyMatrix4(matrix))){inside++;worstFrame=`${index} ${i} ${t} hand ${side} point ${new T.Vector3().fromBufferAttribute(p,n).applyMatrix4(matrix).toArray()}`;}}
    }
   }
  }
