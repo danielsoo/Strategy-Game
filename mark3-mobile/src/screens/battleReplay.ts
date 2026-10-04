@@ -4,12 +4,14 @@ export const FIGHTER_NAMES:Record<FighterKind,string>={knight:'기사',mercenary
 export const fighterKind=(neutral?:string):FighterKind=>neutral==='bandit'?'bandit':neutral==='mercenary'?'mercenary':'knight';
 export type Defense='shield'|'parry'|'dodge'|'hit';
 export type Combatant={id:number;side:0|1;kind:FighterKind;low:number;high:number;deathAt:number};
-export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal'};
+export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal';move?:'cut'|'shove';counterOf?:number};
 export const COMBAT_PACE=1.35;
 export const ATTACK_LEAD=.65/COMBAT_PACE,ATTACK_RECOVERY=.48/COMBAT_PACE;
 export type ReplayStage={at:number;counts:[number,number];morale:[number,number];round:number};
 export type BattleReplay={actors:Combatant[];exchanges:Exchange[];stages:ReplayStage[];initial:[number,number];final:[number,number];outcome:DetailedCombatResult['outcome'];reason:DetailedCombatResult['reason'];finish:number;duration:number};
-const defense=(kind:FighterKind,n:number):Defense=>kind==='knight'?'shield':kind==='bandit'?'dodge':n%4===3?'dodge':'parry';
+const defense=(kind:FighterKind,n:number):Defense=>kind==='knight'?(n%5===3?'dodge':'shield'):kind==='bandit'?'dodge':n%3===2?'dodge':'parry';
+// Local, reproducible choreography variation. This never consumes the combat RNG.
+const choice=(n:number)=>{let x=Math.imul(n+17,0x45d9f3b);x=Math.imul(x^(x>>>16),0x45d9f3b);return (x^(x>>>16))>>>0;};
 /** Animation consumes the resolved log; it never rolls damage or modifies the game state. */
 export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKind,FighterKind]=['knight','knight'],limit=10):BattleReplay{
  const first=result.rounds[0],initial:[number,number]=first?[first.attackerUnits+first.attackerLosses,first.defenderUnits+first.defenderLosses]:[result.attackerSurvivors,result.defenderSurvivors];
@@ -27,21 +29,25 @@ export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKin
    busy.set(killer.id,wave+1);victim.deathAt=at+.10;end=Math.max(end,at+.6);
    exchanges.push({at,attacker:killer.id,target:victim.id,defense:'hit',fatal:true});
   }
-  // Short bursts retain the initiative for two cuts, then invite a counter. Each
-  // lane has its own cadence; the whole army no longer waits for the other side.
+  // Initiative follows the previous encounter: a parry or sidestep opens a
+  // counter, while a blocked cut can keep the attacker pressing. No two-hit turns.
   for(let beat=0;beat<3;beat++)for(const attacker of alive){
    const lane=alive.filter(a=>a.side===attacker.side).indexOf(attacker);
-   const initiative=Math.floor(((round-1)*3+beat+lane)/2)%2;
-   if(attacker.side!==initiative)continue;
    const at=start+.42+beat*.87+(lane%3)*.045;
    if(at+ATTACK_RECOVERY>=attacker.deathAt)continue;
    const targets=alive.filter(a=>a.side!==attacker.side&&at+ATTACK_RECOVERY<a.deathAt);if(!targets.length)continue;
    const target=targets.sort((a,b)=>Math.abs(formationLane(a)-formationLane(attacker))-Math.abs(formationLane(b)-formationLane(attacker))||a.id-b.id)[0];
+   const previous=exchanges.filter(e=>e.at<at&&!e.fatal&&((e.attacker===attacker.id&&e.target===target.id)||(e.attacker===target.id&&e.target===attacker.id))).sort((a,b)=>b.at-a.at)[0];
+   const roll=choice(round*97+beat*23+Math.min(attacker.id,target.id)*13);
+   const next=previous?(previous.defense==='parry'||previous.defense==='dodge'?previous.target:previous.move==='shove'?previous.attacker:roll%4===0?previous.target:previous.attacker):undefined;
+   if(previous?attacker.id!==next:attacker.side!==lane%2)continue;
    // A single sword cannot attack and parry two different blows at once.
    const clashes=(id:number)=>exchanges.some(e=>(e.attacker===id||e.target===id)&&Math.abs(e.at-at)<ATTACK_LEAD+ATTACK_RECOVERY);
    if(clashes(attacker.id))continue;
    const occupied=clashes(target.id);
-   exchanges.push({at,attacker:attacker.id,target:target.id,defense:occupied?'hit':defense(target.kind,serial++),fatal:false,cut:beat%2?'horizontal':'diagonal'});
+   const counter=previous&&(previous.defense==='parry'||previous.defense==='dodge')&&previous.target===attacker.id;
+   const shove=!occupied&&previous!==undefined&&roll%4===1;
+   exchanges.push({at,attacker:attacker.id,target:target.id,defense:occupied||shove?'hit':defense(target.kind,serial++),fatal:false,move:shove?'shove':'cut',counterOf:counter?previous.at:undefined,cut:roll%2?'horizontal':'diagonal'});
   }
   stages.push({at:end,counts,morale,round});start=end+.06;
  };
@@ -82,12 +88,19 @@ export function bakeBattleMovement(plan:BattleReplay){
    const own=alive.filter(b=>b.side===a.side).length,other=alive.length-own;
    const mobile=own>=other||actions[a.id]?.role==='attack';
    let gx=mobile?enemy.x+Math.sin(angle)*1.58:p.x,gz=mobile?enemy.z+Math.cos(angle)*1.58:p.z;
-   const action=actions[a.id];if(action?.role==='defend'&&action.exchange.defense==='dodge'){
+   const action=actions[a.id];if(action?.exchange.move==='shove'){
+    const dt=time-action.exchange.at,awayX=p.x-enemy.x,awayZ=p.z-enemy.z,n=Math.hypot(awayX,awayZ)||1;
+    if(action.role==='attack'){gx=enemy.x+awayX/n*1.02;gz=enemy.z+awayZ/n*1.02;}
+    else {const push=smooth(dt/.20)*(1-smooth((dt-.20)/.30));gx=p.x+awayX/n*.9*push;gz=p.z+awayZ/n*.9*push;}
+   }
+   if(action?.role==='defend'&&action.exchange.defense==='dodge'){
     const w=smooth((time-(action.exchange.at-.45))/.4)*(1-smooth((time-action.exchange.at-.1)/.38));gx+=Math.cos(angle)*.85*w;gz-=Math.sin(angle)*.85*w;
    }
    const dx=gx-p.x,dz=gz-p.z,d=Math.hypot(dx,dz),speed=a.kind==='knight'?1.45:1.85,step=Math.min(d,speed/fps);
    if(d>.035){p.x+=dx/d*step;p.z+=dz/d*step;if(step>.012)p.moving+=.2;}
-   const wanted=Math.atan2(enemy.x-p.x,enemy.z-p.z),delta=Math.atan2(Math.sin(wanted-p.yaw),Math.cos(wanted-p.yaw));p.yaw+=Math.max(-.16,Math.min(.16,delta));
+   const wanted=Math.atan2(enemy.x-p.x,enemy.z-p.z),delta=Math.atan2(Math.sin(wanted-p.yaw),Math.cos(wanted-p.yaw));
+   const committed=action?.role==='attack'&&action.exchange.defense==='dodge'&&time>action.exchange.at-.16&&time<action.exchange.at+.20;
+   if(!committed)p.yaw+=Math.max(-.16,Math.min(.16,delta));
   }
   // Body clearance includes friendly troops and fallen bodies until dissolution.
   for(let pass=0;pass<3;pass++)for(let i=0;i<positions.length;i++)for(let j=i+1;j<positions.length;j++){

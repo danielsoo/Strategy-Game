@@ -55,6 +55,7 @@ function ReviewScene({variant,angle,action,clock,onPhase,closeup,battle}:{varian
 export default function RealmArtReview(){
   const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('battle')==='1'?6:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('unit')==='1'?4:0),[angle,setAngle]=useState(.35);
   const [example,setExample]=useState(0),battle=useMemo(()=>exampleBattle(example),[example]);
+  const reactionTimes:Record<string,number|undefined>={'패링 보기':battle.exchanges.find(e=>e.defense==='parry')?.at,'밀쳐내기 보기':battle.exchanges.find(e=>e.move==='shove')?.at,'회피 보기':battle.exchanges.find(e=>e.defense==='dodge')?.at};
   const clock=useRef<DuelClock>({time:0,paused:false,speed:1,first:0}).current;
   const [closeup,setCloseup]=useState(false),[reviewCut,setReviewCut]=useState(0);
   const [phase,setPhase]=useState('방패를 세우고 상대를 살핍니다'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false);
@@ -63,7 +64,7 @@ export default function RealmArtReview(){
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 2 · 연속 베기 · 반격 · 자연스러운 이동':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 3 · 패링 반격 · 밀쳐내기 · 옆걸음 회피':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
     <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
@@ -85,11 +86,14 @@ export default function RealmArtReview(){
      [slow?'정상 속도':'느리게 보기',()=>{clock.speed=slow?1:.3;setSlow(!slow);}],
      ['첫 교전',()=>{clock.time=battle.exchanges[0]?.at??0;clock.paused=true;setPaused(true);}],
      ['다음 공방',()=>{clock.time=battle.exchanges.find(e=>e.at>clock.time+.03)?.at??battle.exchanges[0]?.at??0;clock.paused=true;setPaused(true);}],
+     ['패링 보기',()=>{clock.time=(battle.exchanges.find(e=>e.defense==='parry')?.at??0)-.35;clock.paused=false;setPaused(false);}],
+     ['밀쳐내기 보기',()=>{clock.time=(battle.exchanges.find(e=>e.move==='shove')?.at??0)-.4;clock.paused=false;setPaused(false);}],
+     ['회피 보기',()=>{clock.time=(battle.exchanges.find(e=>e.defense==='dodge')?.at??0)-.4;clock.paused=false;setPaused(false);}],
      ['전투 결과',()=>{clock.time=battle.duration-.4;clock.paused=true;setPaused(true);}],
      [closeup?'전장 전체':'가까이 보기',()=>setCloseup(!closeup)],
      ['이전 단계',()=>{clock.time=Math.max(0,clock.time-.08);clock.paused=true;setPaused(true);}],
      ['한 단계',()=>{clock.time=Math.min(battle.duration,clock.time+.08);clock.paused=true;setPaused(true);}],
-    ] as [string,()=>void][]).map(([label,fn])=><TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} style={styles.button} onPress={fn}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow><Text style={[styles.note,{paddingHorizontal:16,paddingBottom:8}]}>{phase} · 게임 전투 엔진의 고정 시드 결과 재생</Text></>}
+    ] as [string,()=>void][]).filter(([label])=>!(label in reactionTimes)||reactionTimes[label]!==undefined).map(([label,fn])=><TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} style={styles.button} onPress={fn}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow><Text style={[styles.note,{paddingHorizontal:16,paddingBottom:8}]}>{phase} · 게임 전투 엔진의 고정 시드 결과 재생</Text></>}
     <View style={{flex:1,minHeight:0,overflow:'hidden'}}>{!ready&&<View style={[StyleSheet.absoluteFill,{alignItems:'center',justifyContent:'center'}]}><Text style={styles.note}>왕국의 건축과 풍경을 불러오고 있습니다</Text></View>}<Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.005,far:80}} gl={{antialias:true,toneMapping:THREE.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><ReviewScene variant={variant} angle={angle} action={action} clock={clock} onPhase={setPhase} closeup={closeup} battle={battle}/><SceneReady onReady={setReady}/></Suspense></Canvas></View>
     {!capture&&<View style={styles.footer}><TouchableOpacity accessibilityRole="button" accessibilityLabel="왼쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a-.5)}><Text style={styles.label}>↶ 왼쪽</Text></TouchableOpacity><Text style={styles.note}>{variant===6?'기사: 방패 · 용병: 검 받아치기 · 도적: 회피':variant===5?'입체 수목 · 풀 · 낙엽과 흙':variant===4?'베기·방어 → 반격 → 쓰러짐 → 먼지 소멸':variant===3?'병사 모델 · 대열과 크기 검토':variant===0?'영주관 · 예배당 · 시장과 시가지':variant===1?'석조 수도원 · 시장 · 골목과 주택':'목조 요새 · 장원 · 변경 마을'}</Text><TouchableOpacity accessibilityRole="button" accessibilityLabel="오른쪽에서 보기" style={styles.button} onPress={()=>setAngle(a=>a+.5)}><Text style={styles.label}>오른쪽 ↷</Text></TouchableOpacity></View>}
   </View>;

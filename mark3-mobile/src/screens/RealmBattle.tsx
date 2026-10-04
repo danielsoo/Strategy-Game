@@ -32,7 +32,7 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
    if(markers.current[i])markers.current[i]!.visible=deadTime<0;
    g.visible=ashTime<ASH_DURATION+2.1;
   });
-  for(const event of plan.exchanges){const dt=time-event.at;if(dt<0||dt>.10||event.defense==='dodge')continue;
+  for(const event of plan.exchanges){const dt=time-event.at;if(dt<0||dt>.10||event.defense==='dodge'||event.move==='shove')continue;
    const contact=contacts.get(event.attacker)?.clone();
    if(!contact||!root.current)continue;root.current.worldToLocal(contact);
    for(let k=0;k<12;k++)for(let end=0;end<2;end++){const angle=k*2.399,r=dt*2+end*.025;vertices.setXYZ(sparkCount++,contact.x+Math.cos(angle)*r,contact.y+Math.sin(angle*2)*r,contact.z+Math.sin(angle)*r);}
@@ -41,7 +41,7 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
   const names=[0,1].map(side=>FIGHTER_NAMES[plan.actors.find(a=>a.side===side)?.kind??'knight']);
   const result=plan.outcome==='stalemate'?'교착 · 양측 이탈':plan.outcome==='attacker-win'?'공격측 승리':'방어측 승리';
   const active=frame.actions.find(a=>a?.role==='attack')?.exchange;
-  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.cut==='horizontal'?'횡베기':'사선베기'} · ${active.defense==='shield'?'방패 방어':active.defense==='parry'?'검 받아치기':active.defense==='dodge'?'회피':'피격'}`:'간격 조절';
+  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.move==='shove'?'밀쳐내기':`${active.counterOf!==undefined?'반격 · ':''}${active.cut==='horizontal'?'횡베기':'사선베기'}`} · ${active.move==='shove'?'뒤로 물러나 균형 회복':active.defense==='shield'?'방패 방어':active.defense==='parry'?'패링 · 검 쳐내기':active.defense==='dodge'?'옆걸음 회피':'피격'}`:'간격 조절';
   const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${time>plan.finish?result:time<1.8?'접근 중':actionLabel} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
   if(label!==lastPhase.current){lastPhase.current=label;onPhase?.(label);}
  });

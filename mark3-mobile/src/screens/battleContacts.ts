@@ -7,6 +7,15 @@ import {poseAuthoredKnight,DEATH_START,DEATH_LANDED_AT} from './authoredKnightMo
 import {settleCorpse} from './groundedCorpse';
 export type BattleActor={rig:ReturnType<typeof buildFighter>;shape:ReturnType<typeof buildDuelContacts>};
 const v=(z:number)=>new T.Vector3(0,0,z);
+/** Shield corners leave empty space inside its box; a shove must touch the mesh. */
+export function shieldSurfacePoint(rig:BattleActor['rig'],world:T.Vector3){
+ const mesh=rig.shield,geometry=mesh.geometry,positions=geometry.getAttribute('position'),index=geometry.index,local=mesh.worldToLocal(world.clone()),triangle=new T.Triangle(),point=new T.Vector3(),nearest=new T.Vector3();let distance=Infinity;
+ for(let k=0;k<(index?.count??positions.count);k+=3){
+  triangle.a.fromBufferAttribute(positions,index?index.getX(k):k);triangle.b.fromBufferAttribute(positions,index?index.getX(k+1):k+1);triangle.c.fromBufferAttribute(positions,index?index.getX(k+2):k+2);
+  triangle.closestPointToPoint(local,point);const d=point.distanceToSquared(local);if(d<distance){distance=d;nearest.copy(point);}
+ }
+ return nearest.applyMatrix4(mesh.matrixWorld);
+}
 export function swordContact(a:BattleActor,b:BattleActor,scale=1){
  const line=new T.Line3(v(.10).applyMatrix4(a.rig.sword.matrixWorld),v(.85).applyMatrix4(a.rig.sword.matrixWorld)),other=new T.Line3(v(.10).applyMatrix4(b.rig.sword.matrixWorld),v(.85).applyMatrix4(b.rig.sword.matrixWorld));
  let best:T.Vector3|null=null,distance=Infinity;
@@ -30,6 +39,15 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
   const dt=(time-event.at)*COMBAT_PACE;if(dt<-.5||dt>.36||time>=plan.actors[event.attacker].deathAt||event.defense==='dodge')continue;
   const a=actors[event.attacker],b=actors[event.target],ga=groups[event.attacker],gb=groups[event.target];
   if(frame.actions[event.attacker]?.role!=='attack'||frame.actions[event.attacker]?.exchange!==event)continue;
+  if(event.move==='shove'){
+   for(let pass=0;pass<6;pass++){
+   const hand=a.rig.hasShield?new T.Box3().setFromObject(a.rig.shield).getCenter(new T.Vector3()):a.rig.hands[1].getWorldPosition(new T.Vector3());
+   const chest=new T.Vector3(0,.22,.16).applyMatrix4(b.rig.bones[0].matrixWorld);
+   if(b.rig.hasShield)chest.copy(shieldSurfacePoint(b.rig,hand));
+   const shift=chest.sub(hand).divideScalar(scale).applyAxisAngle(new T.Vector3(0,1,0),-yaw);shift.y=0;if(shift.length()>.65)shift.setLength(.65);
+   ga.position.add(shift);ga.updateMatrixWorld(true);
+   }continue;
+  }
   const blade=v(.52).applyMatrix4(a.rig.sword.matrixWorld);let target:T.Vector3;
   if(event.defense==='shield'){
    b.rig.shield.geometry.computeBoundingBox();target=b.rig.shield.geometry.boundingBox!.getCenter(new T.Vector3()).applyMatrix4(b.rig.shield.matrixWorld);const toward=ga.getWorldPosition(new T.Vector3()).sub(gb.getWorldPosition(new T.Vector3()));toward.y=0;target.addScaledVector(toward.normalize(),.03*scale);
