@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {BattleReplay,BattleFrame} from './battleReplay';
+import {BattleReplay,BattleFrame,bakeBattleMovement,COMBAT_PACE} from './battleReplay';
 import {fighterPose} from './battleMotion';
 import {buildFighter} from './fighterAppearance';
 import {buildDuelContacts,bladeShield,armorSpheres} from './duelContacts';
@@ -14,15 +14,20 @@ export function swordContact(a:BattleActor,b:BattleActor,scale=1){
  return distance<.06*scale?best:null;
 }
 /** Shared by WebGL rendering and headless geometry regression tests. */
-export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame,actors:BattleActor[],height:(x:number,z:number)=>number,scale=1,yaw=0){
+function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:BattleActor[],height:(x:number,z:number)=>number,scale=1,yaw=0,align=true){
  const groups=actors.map(a=>a.rig.mesh.parent as T.Group),ground=(i:number)=>{const a=actors[i],g=groups[i];g.position.y+=a.shape.groundLift(g.position,g.rotation.y,height);g.updateMatrixWorld(true);};
  actors.forEach(({rig},i)=>{const p=frame.positions[i],g=groups[i];g.position.set(p.x,0,p.z);g.rotation.y=p.yaw;rig.mesh.rotation.x=0;poseAuthoredKnight(rig,fighterPose(plan.actors[i],time,frame.actions[i],p.moving));g.updateMatrixWorld(true);ground(i);});
  const touches=new Map<number,T.Vector3>();
  const partners=new Map<number,number>();
  for(const e of plan.exchanges)if(e.defense==='parry'&&Math.abs(time-e.at)<.12&&frame.actions[e.attacker]?.exchange===e&&frame.actions[e.target]?.exchange===e){partners.set(e.attacker,e.target);partners.set(e.target,e.attacker);}
  const move=(i:number,delta:T.Vector3,obstacle:number)=>{groups[i].position.add(delta);groups[i].updateMatrixWorld(true);const other=partners.get(i);if(other!==undefined&&other!==obstacle){groups[other].position.add(delta);groups[other].updateMatrixWorld(true);}};
- for(const event of plan.exchanges){
-  const dt=time-event.at;if(dt<-.5||dt>.36||time>=plan.actors[event.attacker].deathAt||event.defense==='dodge')continue;
+ const clearWeapon=(i:number,j:number,away:T.Vector3,amount:number)=>{
+  const action=frame.actions[i];
+  if(action?.role==='attack'&&action.exchange.target!==j)move(j,away.clone().multiplyScalar(-amount),i);
+  else {move(i,away.clone().multiplyScalar(amount*.5),j);move(j,away.clone().multiplyScalar(-amount*.5),i);}
+ };
+ if(align)for(const event of plan.exchanges){
+  const dt=(time-event.at)*COMBAT_PACE;if(dt<-.5||dt>.36||time>=plan.actors[event.attacker].deathAt||event.defense==='dodge')continue;
   const a=actors[event.attacker],b=actors[event.target],ga=groups[event.attacker],gb=groups[event.target];
   if(frame.actions[event.attacker]?.role!=='attack'||frame.actions[event.attacker]?.exchange!==event)continue;
   const blade=v(.52).applyMatrix4(a.rig.sword.matrixWorld);let target:T.Vector3;
@@ -32,6 +37,9 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
    const start=v(.12).applyMatrix4(b.rig.sword.matrixWorld),end=v(.80).applyMatrix4(b.rig.sword.matrixWorld);
    const t=Math.abs(end.y-start.y)>.01?T.MathUtils.clamp((blade.y-start.y)/(end.y-start.y),0,1):.5;target=start.lerp(end,t);
   }else target=new T.Vector3(0,.23,0).applyMatrix4(b.rig.bones[0].matrixWorld);
+  const center=ga.getWorldPosition(new T.Vector3()),edge=blade.clone().sub(center),aim=target.clone().sub(center);
+  const turn=Math.atan2(Math.sin(Math.atan2(aim.x,aim.z)-Math.atan2(edge.x,edge.z)),Math.cos(Math.atan2(aim.x,aim.z)-Math.atan2(edge.x,edge.z)));
+  ga.rotation.y+=T.MathUtils.clamp(turn,-.75,.75);ga.updateMatrixWorld(true);blade.copy(v(.52).applyMatrix4(a.rig.sword.matrixWorld));
   const shift=target.sub(blade).divideScalar(scale).applyAxisAngle(new T.Vector3(0,1,0),-yaw),weight=T.MathUtils.smoothstep(dt,-.5,-.02)*(1-T.MathUtils.smoothstep(dt,.08,.36));
   shift.y=0;if(shift.length()>.75)shift.setLength(.75);ga.position.addScaledVector(shift,weight);ga.updateMatrixWorld(true);
  }
@@ -45,13 +53,13 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
   const away=groups[i].position.clone().sub(groups[j].position);away.y=0;away.normalize();
   for(let pass=0;pass<35;pass++){
    const hit=bladeShield(actors[i].rig,actors[j].rig,actors[j].shape,.012);if(!hit)break;
-   touches.set(i,hit);groups[i].position.addScaledVector(away,.012);groups[i].updateMatrixWorld(true);
+   touches.set(i,hit);clearWeapon(i,j,away,.012);
   }
  }
  // A parry is a shared blade contact. Split the approach between both feet so crowd
  // separation cannot leave the defender blocking empty air.
- for(let pass=0;pass<3;pass++)for(const e of plan.exchanges){
-  const dt=time-e.at;if(e.defense!=='parry'||dt<-.5||dt>.36)continue;
+ if(align)for(let pass=0;pass<3;pass++)for(const e of plan.exchanges){
+  const dt=(time-e.at)*COMBAT_PACE;if(e.defense!=='parry'||dt<-.5||dt>.36)continue;
   if(frame.actions[e.attacker]?.exchange!==e||frame.actions[e.target]?.exchange!==e)continue;
   const a=actors[e.attacker],b=actors[e.target],blade=v(.52).applyMatrix4(a.rig.sword.matrixWorld),lo=v(.12).applyMatrix4(b.rig.sword.matrixWorld),hi=v(.8).applyMatrix4(b.rig.sword.matrixWorld);
   const along=Math.abs(hi.y-lo.y)>.01?T.MathUtils.clamp((blade.y-lo.y)/(hi.y-lo.y),0,1):.5;
@@ -70,7 +78,7 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
   for(let pass=0;pass<40;pass++){
    const line=new T.Line3(v(.10).applyMatrix4(actors[i].rig.sword.matrixWorld),v(.85).applyMatrix4(actors[i].rig.sword.matrixWorld));
    const hit=armorSpheres(actors[j].rig).find(s=>line.closestPointToPoint(s.center,true,new T.Vector3()).distanceTo(s.center)<s.radius+.01*scale);
-   if(!hit)break;touches.set(i,line.closestPointToPoint(hit.center,true,new T.Vector3()));groups[i].position.addScaledVector(away,.012);groups[i].updateMatrixWorld(true);
+   if(!hit)break;touches.set(i,line.closestPointToPoint(hit.center,true,new T.Vector3()));clearWeapon(i,j,away,.012);
   }
  }
  // Solve the whole contact graph again after grounding and shared parries. A change to
@@ -81,7 +89,7 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
   if(distance<.8999){move(i,away.clone().multiplyScalar(.9-distance),j);changed=true;}
   for(let k=0;k<65;k++){
    const hit=bladeShield(actors[i].rig,actors[j].rig,actors[j].shape,.014);if(!hit)break;
-   changed=true;touches.set(i,hit);move(i,away.clone().multiplyScalar(.006),j);move(j,away.clone().multiplyScalar(-.006),i);
+   changed=true;touches.set(i,hit);clearWeapon(i,j,away,.012);
   }
  }if(!changed)break;}
  actors.forEach((_,i)=>ground(i));
@@ -89,4 +97,35 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
   const contact=swordContact(actors[e.attacker],actors[e.target],scale);if(contact)touches.set(e.attacker,contact);
  }
  return touches;
+}
+
+type Footstep={at:number;offset:T.Vector3;turn:number};
+function footOffset(path:Footstep[],time:number){
+ let index=0;while(index+1<path.length&&path[index+1].at<=time)index++;
+ const a=path[index],b=path[Math.min(index+1,path.length-1)];return a.offset.clone().lerp(b.offset,a===b?0:T.MathUtils.smoothstep(time,a.at,b.at));
+}
+function footTurn(path:Footstep[],time:number){let i=0;while(i+1<path.length&&path[i+1].at<=time)i++;const a=path[i],b=path[Math.min(i+1,path.length-1)];return a.turn+(b.turn-a.turn)*(a===b?0:T.MathUtils.smoothstep(time,a.at,b.at));}
+const contactPaths=new WeakMap<BattleActor[],{plan:BattleReplay;scale:number;yaw:number;paths:Footstep[][]}>();
+/** Solve contact stances once, then travel between them. Re-solving a near-horizontal
+ * parry every display frame used to move a fighter almost a metre in 1/60 second. */
+export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame,actors:BattleActor[],height:(x:number,z:number)=>number,scale=1,yaw=0){
+ let cached=contactPaths.get(actors);
+ if(!cached||cached.plan!==plan||cached.scale!==scale||cached.yaw!==yaw){
+  const movement=bakeBattleMovement(plan),paths:Footstep[][]=actors.map(()=>[{at:0,offset:new T.Vector3(),turn:0}]);
+  for(const at of [...new Set(plan.exchanges.map(e=>e.at))]){
+   const sample=movement.sample(at);
+   const positions=sample.positions.map((p,i)=>{const dead=at>=plan.actors[i].deathAt,offset=dead?footOffset(paths[i],at):new T.Vector3();return {...p,x:p.x+offset.x,z:p.z+offset.z,yaw:p.yaw+(dead?footTurn(paths[i],at):0)};});
+   solveBattlePose(plan,at,{...sample,positions},actors,height,scale,yaw);
+   for(let i=0;i<actors.length;i++){
+    const p=sample.positions[i],position=actors[i].rig.mesh.parent!.position;
+    paths[i].push({at,offset:new T.Vector3(position.x-p.x,0,position.z-p.z),turn:actors[i].rig.mesh.parent!.rotation.y-p.yaw});
+   }
+  }
+  cached={plan,scale,yaw,paths};contactPaths.set(actors,cached);
+ }
+ const positions=frame.positions.map((p,i)=>{
+  const offset=footOffset(cached!.paths[i],time);
+  return {...p,x:p.x+offset.x,z:p.z+offset.z,yaw:p.yaw+footTurn(cached!.paths[i],time)};
+ });
+ return solveBattlePose(plan,time,{...frame,positions},actors,height,scale,yaw,false);
 }

@@ -40,7 +40,9 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
   sparks.setDrawRange(0,sparkCount);vertices.needsUpdate=true;if(spark.current)spark.current.visible=sparkCount>0;
   const names=[0,1].map(side=>FIGHTER_NAMES[plan.actors.find(a=>a.side===side)?.kind??'knight']);
   const result=plan.outcome==='stalemate'?'교착 · 양측 이탈':plan.outcome==='attacker-win'?'공격측 승리':'방어측 승리';
-  const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${time>plan.finish?result:time<1.8?'접근 중':`${Math.max(1,stage.round)}라운드`} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
+  const active=frame.actions.find(a=>a?.role==='attack')?.exchange;
+  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.cut==='horizontal'?'횡베기':'사선베기'} · ${active.defense==='shield'?'방패 방어':active.defense==='parry'?'검 받아치기':active.defense==='dodge'?'회피':'피격'}`:'간격 조절';
+  const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${time>plan.finish?result:time<1.8?'접근 중':actionLabel} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
   if(label!==lastPhase.current){lastPhase.current=label;onPhase?.(label);}
  });
  return <group ref={root} position={position} scale={scale} rotation={[0,yaw,0]}>
