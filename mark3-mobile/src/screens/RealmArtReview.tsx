@@ -39,7 +39,10 @@ function ReviewScene({variant,angle,action,clock,onPhase,closeup,battle}:{varian
     return {ground,field,pieces};
   },[variant]);
   const movement=useMemo(()=>bakeBattleMovement(battle),[battle]);
-  useFrame(({camera,size})=>{const alive=movement.sample(clock.time).positions.filter((_,i)=>clock.time<battle.actors[i].deathAt+4),center=variant===6&&alive.length?alive.reduce((p,a)=>({x:p.x+a.x/alive.length,z:p.z+a.z/alive.length}),{x:0,z:0}):{x:0,z:0};const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===6?(closeup?4.8:Math.max(5.8,battle.actors.length*.83)):variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(center.x+Math.sin(angle)*distance,h+(variant===6?(closeup?2.4:5):variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,center.z+Math.cos(angle)*distance);camera.lookAt(center.x,h+(variant===6?.65:variant===3?.055:variant===4?(closeup?1.2:.85):.15),center.z+(variant===3?.07:0));});
+  const combatCenter=useMemo(()=>{const positions=movement.sample(1.8).positions;return positions.reduce((p,a)=>({x:p.x+a.x/positions.length,z:p.z+a.z/positions.length}),{x:0,z:0});},[movement]);
+  // A camera that follows the pair's moving midpoint makes a planted attacker
+  // appear to slide with the dodge. Keep the battlefield frame fixed for review.
+  useFrame(({camera,size})=>{const center=variant===6?combatCenter:{x:0,z:0};const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===6?(closeup?4.8:Math.max(5.8,battle.actors.length*.83)):variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(center.x+Math.sin(angle)*distance,h+(variant===6?(closeup?2.4:5):variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,center.z+Math.cos(angle)*distance);camera.lookAt(center.x,h+(variant===6?(closeup?1:.65):variant===3?.055:variant===4?(closeup?1.2:.85):.15),center.z+(variant===3?.07:0));});
   return <>
     <color attach="background" args={['#82958c']}/><fog attach="fog" args={['#82958c',variant===6?18:7,variant===6?40:18]}/>
     <RealmDaylight/>
@@ -55,7 +58,7 @@ function ReviewScene({variant,angle,action,clock,onPhase,closeup,battle}:{varian
 export default function RealmArtReview(){
   const [variant,setVariant]=useState(()=>typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('battle')==='1'?6:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('nature')==='1'?5:typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('unit')==='1'?4:0),[angle,setAngle]=useState(.35);
   const [example,setExample]=useState(0),battle=useMemo(()=>exampleBattle(example),[example]);
-  const reactionTimes:Record<string,number|undefined>={'패링 보기':battle.exchanges.find(e=>e.defense==='parry')?.at,'밀쳐내기 보기':battle.exchanges.find(e=>e.move==='shove')?.at,'회피 보기':battle.exchanges.find(e=>e.defense==='dodge')?.at,'강공격 방패 방어':battle.exchanges.find(e=>e.heavy&&e.defense==='shield')?.at,'강공격 패링':battle.exchanges.find(e=>e.heavy&&e.defense==='parry')?.at,'강공격 사망':battle.exchanges.find(e=>e.heavy&&e.fatal)?.at};
+  const reactionTimes:Record<string,number|undefined>={'패링 보기':battle.exchanges.find(e=>e.defense==='parry')?.at,'밀쳐내기 보기':battle.exchanges.find(e=>e.move==='shove')?.at,'회피 보기':battle.exchanges.find(e=>e.defense==='dodge')?.at,'강공격 회피':battle.exchanges.find(e=>e.heavy&&e.defense==='dodge')?.at,'강공격 방패 방어':battle.exchanges.find(e=>e.heavy&&e.defense==='shield')?.at,'강공격 패링':battle.exchanges.find(e=>e.heavy&&e.defense==='parry')?.at,'강공격 사망':battle.exchanges.find(e=>e.heavy&&e.fatal)?.at};
   const clock=useRef<DuelClock>({time:0,paused:false,speed:1,first:0}).current;
   const [closeup,setCloseup]=useState(false),[reviewCut,setReviewCut]=useState(0);
   const [phase,setPhase]=useState('방패를 세우고 상대를 살핍니다'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false);
@@ -64,7 +67,7 @@ export default function RealmArtReview(){
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 5 · 머리 위 강타 · 버티기 · 흘려내기':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 6 · 공격선 고정 · 회피 · 강공격 회수':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
     <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
@@ -87,11 +90,12 @@ export default function RealmArtReview(){
      ['첫 교전',()=>{clock.time=battle.exchanges[0]?.at??0;clock.paused=true;setPaused(true);}],
      ['다음 공방',()=>{clock.time=battle.exchanges.find(e=>e.at>clock.time+.03)?.at??battle.exchanges[0]?.at??0;clock.paused=true;setPaused(true);}],
      ['강공격 패링',()=>{clock.time=Math.max(0,(reactionTimes['강공격 패링']??0)-.85);clock.paused=false;setPaused(false);}],
+     ['강공격 회피',()=>{clock.time=Math.max(0,(reactionTimes['강공격 회피']??0)-1);clock.paused=false;setPaused(false);}],
      ['강공격 방패 방어',()=>{clock.time=Math.max(0,(reactionTimes['강공격 방패 방어']??0)-.85);clock.paused=false;setPaused(false);}],
      ['강공격 사망',()=>{clock.time=Math.max(0,(reactionTimes['강공격 사망']??0)-.85);clock.paused=false;setPaused(false);}],
      ['패링 보기',()=>{clock.time=(battle.exchanges.find(e=>e.defense==='parry')?.at??0)-.35;clock.paused=false;setPaused(false);}],
      ['밀쳐내기 보기',()=>{clock.time=(battle.exchanges.find(e=>e.move==='shove')?.at??0)-.4;clock.paused=false;setPaused(false);}],
-     ['회피 보기',()=>{clock.time=(battle.exchanges.find(e=>e.defense==='dodge')?.at??0)-.4;clock.paused=false;setPaused(false);}],
+     ['회피 보기',()=>{clock.time=Math.max(0,(battle.exchanges.find(e=>e.defense==='dodge')?.at??0)-1);clock.paused=false;setPaused(false);}],
      ['전투 결과',()=>{clock.time=battle.duration-.4;clock.paused=true;setPaused(true);}],
      [closeup?'전장 전체':'가까이 보기',()=>setCloseup(!closeup)],
      ['이전 단계',()=>{clock.time=Math.max(0,clock.time-.08);clock.paused=true;setPaused(true);}],

@@ -12,6 +12,8 @@ const parry=plan.exchanges.find(e=>e.heavy&&e.defense==='parry')!,fatal=plan.exc
 assert(parry&&fatal,'real battle includes a heavy parry and a heavy finisher');
 assert(attackLead(parry)>ATTACK_LEAD+.3,'heavy attack visibly telegraphs before a normal cut');
 const pose=(t:number)=>poseBattleActors(plan,t,movement.sample(t),actors,()=>0);
+pose(parry.at-.4);const loaded=actors[parry.attacker].rig,bone=(i:number)=>loaded.bones[i].getWorldPosition(new T.Vector3()),upper=bone(2).sub(bone(1)),lower=bone(3).sub(bone(2)),elbow=upper.angleTo(lower)*180/Math.PI;
+assert(elbow>70&&elbow<110,'heavy chamber folds the elbow instead of spreading a straight arm');assert(bone(3).y>bone(7).y+.05,'heavy grip loads above the helmet');
 let overhead=-Infinity,peakTip=-Infinity;
 for(let dt=-.8;dt<-.1;dt+=.05){pose(parry.at+dt);const rig=actors[parry.attacker].rig,tip=new T.Vector3(0,0,.85).applyMatrix4(rig.sword.matrixWorld);overhead=Math.max(overhead,tip.y-rig.bones[7].getWorldPosition(new T.Vector3()).y);peakTip=Math.max(peakTip,tip.y);}
 pose(parry.at);
@@ -36,5 +38,16 @@ pose(death+.0001);const boundaryJump=Math.max(...actors[fatal.target].rig.bones.
 assert(boundaryJump<.025,`heavy hit must flow into collapse: ${boundaryJump}`);
 pose(death+2.3);const landed=actors[fatal.target].rig.bones[8].getWorldPosition(new T.Vector3());
 pose(death+3);assert(actors[fatal.target].rig.bones[8].getWorldPosition(new T.Vector3()).distanceTo(landed)<1e-5,'fallen victim stays grounded during dissolution');
-console.log({heavyWindup:attackLead(parry),overhead,hipCompression,recoil,bladeRebound,deathBoundaryJump:boundaryJump,groundedAfterDeath:true});
+console.log({heavyWindup:attackLead(parry),elbow,overhead,hipCompression,recoil,bladeRebound,deathBoundaryJump:boundaryJump,groundedAfterDeath:true});
 actors.forEach(a=>a.rig.dispose());
+// The first mercenary/bandit exchange is a real heavy miss, not a parry preview.
+const missPlan=exampleBattle(1),miss=missPlan.exchanges.find(e=>e.heavy&&e.defense==='dodge')!,missMovement=bakeBattleMovement(missPlan);
+assert(miss,'battle includes an evaded heavy');
+const missActors=missPlan.actors.map(a=>{const rig=buildFighter(testKnightScene(),a.kind);new T.Group().add(rig.mesh);return {rig,shape:buildDuelContacts(rig)};});
+const missPose=(dt:number)=>poseBattleActors(missPlan,miss.at+dt,missMovement.sample(miss.at+dt),missActors,()=>0);
+missPose(-.35);const striker=missActors[miss.attacker].rig,planted=striker.mesh.parent!,foot=planted.position.clone(),facing=planted.rotation.y;
+missPose(0);const atImpact=new T.Vector3(0,0,.85).applyMatrix4(striker.sword.matrixWorld);
+missPose(.30);const through=new T.Vector3(0,0,.85).applyMatrix4(striker.sword.matrixWorld);
+assert(atImpact.y-through.y>.15,'evaded heavy continues downward instead of bouncing off empty air');
+assert(Math.hypot(planted.position.x-foot.x,planted.position.z-foot.z)<.015,'heavy miss does not chase the dodger');assert(Math.abs(planted.rotation.y-facing)<.01,'heavy miss holds the committed heading');
+console.log({missFollowThroughDrop:atImpact.y-through.y,heavyMissStaysPlanted:true});missActors.forEach(a=>a.rig.dispose());

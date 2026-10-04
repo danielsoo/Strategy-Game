@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {BattleReplay,BattleFrame,bakeBattleMovement,attackPhase} from './battleReplay';
+import {BattleReplay,BattleFrame,bakeBattleMovement,attackPhase,attackRecovery,DODGE_COMMIT_LEAD} from './battleReplay';
 import {fighterPose} from './battleMotion';
 import {buildFighter} from './fighterAppearance';
 import {buildDuelContacts,bladeShield,armorSpheres} from './duelContacts';
@@ -154,6 +154,13 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
     const p=sample.positions[i],position=actors[i].rig.mesh.parent!.position;
     paths[i].push({at,offset:new T.Vector3(position.x-p.x,0,position.z-p.z),turn:actors[i].rig.mesh.parent!.rotation.y-p.yaw});
    }
+  }
+  // Contact corrections are part of locomotion too: freezing navigation alone
+  // still made attackers skate after a dodging opponent through these offsets.
+  for(const e of plan.exchanges.filter(e=>e.defense==='dodge')){
+   const start=e.at-DODGE_COMMIT_LEAD,end=e.at+attackRecovery(e),path=paths[e.attacker];
+   const offset=footOffset(path,start),turn=footTurn(path,start);
+   paths[e.attacker]=[...path.filter(p=>p.at<start||p.at>end),{at:start,offset,turn},{at:end,offset:offset.clone(),turn}].sort((a,b)=>a.at-b.at);
   }
   cached={plan,scale,yaw,paths};contactPaths.set(actors,cached);
  }

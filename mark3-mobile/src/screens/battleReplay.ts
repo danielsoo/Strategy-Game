@@ -10,8 +10,9 @@ export const ATTACK_LEAD=.65/COMBAT_PACE,ATTACK_RECOVERY=.48/COMBAT_PACE;
 export const attackLead=(e:Exchange)=>e.heavy?.9:ATTACK_LEAD;
 export const HEAVY_RECOVERY=.64;
 export const attackRecovery=(e:Exchange)=>e.heavy?HEAVY_RECOVERY:ATTACK_RECOVERY;
+export const DODGE_COMMIT_LEAD=.45;
 /** Heavy windup holds the coil longer, then accelerates into the same contact pose. */
-export const attackPhase=(e:Exchange,time:number)=>{const dt=time-e.at;return e.heavy?(dt<-.18?-.243+(dt+.18)*(.407/.72):dt<0?dt*COMBAT_PACE:Math.max(0,dt-.10)*(.48/(HEAVY_RECOVERY-.10))):dt*COMBAT_PACE;};
+export const attackPhase=(e:Exchange,time:number)=>{const dt=time-e.at,bind=e.defense==='shield'||e.defense==='parry'?.10:0;return e.heavy?(dt<-.18?-.243+(dt+.18)*(.407/.72):dt<0?dt*COMBAT_PACE:Math.max(0,dt-bind)*(.48/(HEAVY_RECOVERY-bind))):dt*COMBAT_PACE;};
 export type ReplayStage={at:number;counts:[number,number];morale:[number,number];round:number};
 export type BattleReplay={actors:Combatant[];exchanges:Exchange[];stages:ReplayStage[];initial:[number,number];final:[number,number];outcome:DetailedCombatResult['outcome'];reason:DetailedCombatResult['reason'];finish:number;duration:number};
 const defense=(kind:FighterKind,n:number):Defense=>kind==='knight'?(n%5===3?'dodge':'shield'):kind==='bandit'?'dodge':n%3===2?'dodge':'parry';
@@ -80,6 +81,7 @@ const smooth=(v:number)=>{v=Math.max(0,Math.min(1,v));return v*v*(3-2*v);};
 /** Deterministic crowd navigation, sampled at 30 Hz and interpolated when rendered. */
 export function bakeBattleMovement(plan:BattleReplay){
  const fps=30,frames:BattleFrame[]=[],positions=plan.actors.map(a=>{const row=plan.actors.filter(b=>b.side===a.side).indexOf(a),n=plan.actors.filter(b=>b.side===a.side).length;return {x:a.side===0?-3.1:3.1,z:(row-(n-1)/2)*1.9,yaw:a.side===0?Math.PI/2:-Math.PI/2,moving:0};});
+ const commitments=new Map<Exchange,{attacker:Position;defender:Position;sideX:number;sideZ:number}>();
  for(let tick=0;tick<=Math.ceil(plan.duration*fps);tick++){
   const time=tick/fps,alive=plan.actors.filter(a=>time<a.deathAt),actions:BattleFrame['actions']=plan.actors.map(()=>null);
   for(const e of plan.exchanges){if(time<e.at-attackLead(e)||time>e.at+attackRecovery(e))continue;
@@ -93,6 +95,12 @@ export function bakeBattleMovement(plan:BattleReplay){
    targets.set(a.id,target);const group=assignments.get(target)??[];group.push(a.id);assignments.set(target,group);
   }
   const old=positions.map(p=>({...p}));
+  const planted=new Set<number>();
+  for(const e of plan.exchanges){
+   if(e.defense!=='dodge'||time<e.at-DODGE_COMMIT_LEAD||time>e.at+attackRecovery(e)||actions[e.attacker]?.exchange!==e)continue;
+   planted.add(e.attacker);
+   if(!commitments.has(e)){const a=old[e.attacker],d=old[e.target],dx=d.x-a.x,dz=d.z-a.z,n=Math.hypot(dx,dz)||1;commitments.set(e,{attacker:{...a},defender:{...d},sideX:-dz/n,sideZ:dx/n});}
+  }
   for(const a of alive){const p=positions[a.id],target=targets.get(a.id);p.moving*=.8;
    if(time>plan.finish){const retreat=plan.outcome==='stalemate'||(plan.outcome==='attacker-win'?a.side===1:a.side===0);if(retreat){p.x+=(a.side===0?-1:1)*1.35/fps;const wanted=a.side===0?-Math.PI/2:Math.PI/2;p.yaw+=Math.max(-.08,Math.min(.08,Math.atan2(Math.sin(wanted-p.yaw),Math.cos(wanted-p.yaw))));p.moving+=.2;}continue;}
    if(target===undefined)continue;
@@ -114,19 +122,21 @@ export function bakeBattleMovement(plan:BattleReplay){
     if(action.exchange.defense==='parry'){gx-=dz/n*.45*answer;gz+=dx/n*.45*answer;}else {gx-=dx/n*.30*answer;gz-=dz/n*.30*answer;}
    }
    if(action?.role==='defend'&&action.exchange.defense==='dodge'){
-    const w=smooth((time-(action.exchange.at-.45))/.4)*(1-smooth((time-action.exchange.at-.1)/.38));gx+=Math.cos(angle)*.85*w;gz-=Math.sin(angle)*.85*w;
+    const mark=commitments.get(action.exchange),w=smooth((time-(action.exchange.at-DODGE_COMMIT_LEAD))/.4)*(1-smooth((time-action.exchange.at-.1)/.38));
+    if(mark){gx=mark.defender.x+mark.sideX*.95*w;gz=mark.defender.z+mark.sideZ*.95*w;}
    }
+   const mark=action&&planted.has(a.id)?commitments.get(action.exchange):undefined;
+   if(mark){gx=mark.attacker.x;gz=mark.attacker.z;p.yaw=mark.attacker.yaw;}
    const dx=gx-p.x,dz=gz-p.z,d=Math.hypot(dx,dz),speed=a.kind==='knight'?1.45:1.85,step=Math.min(d,speed/fps);
    if(d>.035){p.x+=dx/d*step;p.z+=dz/d*step;if(step>.012)p.moving+=.2;}
    const wanted=Math.atan2(enemy.x-p.x,enemy.z-p.z),delta=Math.atan2(Math.sin(wanted-p.yaw),Math.cos(wanted-p.yaw));
-   const committed=action?.role==='attack'&&action.exchange.defense==='dodge'&&time>action.exchange.at-.16&&time<action.exchange.at+.20;
-   if(!committed)p.yaw+=Math.max(-.16,Math.min(.16,delta));
+   if(!mark)p.yaw+=Math.max(-.16,Math.min(.16,delta));
   }
   // Body clearance includes friendly troops and fallen bodies until dissolution.
   for(let pass=0;pass<3;pass++)for(let i=0;i<positions.length;i++)for(let j=i+1;j<positions.length;j++){
    const a=plan.actors[i],b=plan.actors[j];if(time>a.deathAt+4.8||time>b.deathAt+4.8)continue;
    const p=positions[i],q=positions[j],dx=p.x-q.x,dz=p.z-q.z,d=Math.hypot(dx,dz),min=.90;if(d>=min)continue;
-   const nx=d>1e-6?dx/d:1,nz=d>1e-6?dz/d:0,ma=time<a.deathAt,mb=time<b.deathAt,amount=(min-d)/(Number(ma)+Number(mb)||1);
+   const nx=d>1e-6?dx/d:1,nz=d>1e-6?dz/d:0,ma=time<a.deathAt&&!planted.has(i),mb=time<b.deathAt&&!planted.has(j),amount=(min-d)/(Number(ma)+Number(mb)||1);
    if(ma){p.x+=nx*amount;p.z+=nz*amount;}if(mb){q.x-=nx*amount;q.z-=nz*amount;}
   }
   frames.push({positions:positions.map(p=>({...p})),actions});

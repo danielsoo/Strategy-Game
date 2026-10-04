@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as T from 'three';
 import {exampleBattle} from '../src/screens/battleExamples';
-import {bakeBattleMovement} from '../src/screens/battleReplay';
+import {bakeBattleMovement,attackRecovery} from '../src/screens/battleReplay';
 import {testKnightScene} from './knight-test-model';
 import {buildFighter} from '../src/screens/fighterAppearance';
 import {buildDuelContacts,armorSpheres} from '../src/screens/duelContacts';
@@ -26,13 +26,17 @@ for(const e of events.filter(e=>e.move==='shove')){
  assert(gap<.04,'pushing hand reaches the guard');assert(retreat>.04,'defender steps back after a shove');
 }
 for(const e of events.filter(e=>e.defense==='dodge')){
+ poseBattleActors(plan,e.at-.35,movement.sample(e.at-.35),actors,()=>0);
+ const planted=actors[e.attacker].rig.mesh.parent!,stance=planted.position.clone(),heading=planted.rotation.y;let chase=0,tracking=0;
+ for(let dt=-.35;dt<attackRecovery(e)-.02;dt+=1/60){poseBattleActors(plan,e.at+dt,movement.sample(e.at+dt),actors,()=>0);chase=Math.max(chase,Math.hypot(planted.position.x-stance.x,planted.position.z-stance.z));tracking=Math.max(tracking,Math.abs(planted.rotation.y-heading));}
+ assert(chase<.015,`committed attacker follows the dodge: ${chase}m`);assert(tracking<.01,`committed swing turns after the target: ${tracking}rad`);
  const before=movement.sample(e.at-.4).positions,from=before[e.target],enemy=before[e.attacker],tangent=new T.Vector3(-(enemy.z-from.z),0,enemy.x-from.x).normalize();
  const after=movement.sample(e.at+.1).positions[e.target];
  const sidestep=Math.abs(new T.Vector3(after.x-from.x,0,after.z-from.z).dot(tangent));
  poseBattleActors(plan,e.at,movement.sample(e.at),actors,()=>0);
  const sword=actors[e.attacker].rig.sword,line=new T.Line3(new T.Vector3(0,0,.1).applyMatrix4(sword.matrixWorld),new T.Vector3(0,0,.85).applyMatrix4(sword.matrixWorld));
  const gap=Math.min(...armorSpheres(actors[e.target].rig).map(s=>line.closestPointToPoint(s.center,true,new T.Vector3()).distanceTo(s.center)-s.radius));
- console.log('Dodge',e.at,{sidestep,gap});
+ console.log('Dodge',e.at,{sidestep,gap,attackerTravel:chase,attackerTurn:tracking});
  assert(sidestep>.12,'evasion moves off the attack line');assert(gap>0,'evaded blade misses the torso');
 }
 actors.forEach(a=>a.rig.dispose());
