@@ -5,7 +5,7 @@ import {SHIELD_REST_NORMAL,shieldRotation,DUEL_DURATION} from './duelMotion';
 import {buildBattleWeapon,WeaponKind} from './battleWeapons';
 
 type Joint={p:T.Vector3;q:T.Quaternion};
-export type AuthoredPose=Joint[]&{weaponPose?:{wrist?:T.Vector3;direction?:T.Vector3;support?:number;weight?:number}};
+export type AuthoredPose=Joint[]&{weaponPose?:{wrist?:T.Vector3;direction?:T.Vector3;support?:number;weight?:number;clearBody?:boolean}};
 type Pose=AuthoredPose;
 const V=(p:number[])=>new T.Vector3().fromArray(p);
 const Q=(q:number[])=>new T.Quaternion().fromArray(q);
@@ -116,8 +116,28 @@ export function knightTransforms(p:Pose){
  // 쓰러진 자세에서는 발뿐 아니라 몸통·머리도 지면을 지지한다.
  if(p.weaponPose){
   const original=p.weaponPose.weight!==undefined?{bones:bones.map(b=>({position:b.position.clone(),quaternion:b.quaternion.clone()})),hands:hands.map(h=>({position:h.position.clone(),quaternion:h.quaternion.clone()}))}:null;
+  const chestInverse=p[2].q.clone().invert();
+  const bodyLocal=(point:T.Vector3)=>point.clone().sub(chest).applyQuaternion(chestInverse);
+  const clearance=(point:T.Vector3,r=.052)=>{
+   const v=bodyLocal(point);v.y-=.25;
+   return Math.sqrt((v.x/(.225+r))**2+(v.y/(.30+r))**2+(v.z/(.155+r))**2)-1;
+  };
+  const outsideBody=(point:T.Vector3)=>{
+   const v=bodyLocal(point),y=(v.y-.25)/.375,x=v.x/.31;
+   // Keep the complete gauntlet in front of the breastplate, not just its pivot.
+   if(x*x+y*y<1)v.z=Math.max(v.z,.25*Math.sqrt(1-x*x-y*y));
+   return v.applyQuaternion(p[2].q).add(chest);
+  };
   const aimArm=(right:boolean,target:T.Vector3,direction:T.Vector3)=>{
    const i=right?1:4,hand=hands[right?0:1],a=bones[i].position,b=bones[i+1].position.clone(),c=bones[i+2].position.clone(),l1=a.distanceTo(b),l2=b.distanceTo(c);
+   if(p.weaponPose!.clearBody){
+    const local=bodyLocal(target),across=.08-.27*smooth((.43-local.y)/.22);local.x=right?Math.min(local.x,across):Math.max(local.x,-across);
+    target=local.applyQuaternion(p[2].q).add(chest);
+    for(let n=0;n<6;n++){
+     target=outsideBody(target);
+     const delta=target.clone().sub(a);if(delta.length()>l1+l2-.015)target.copy(a).add(delta.setLength(l1+l2-.015));
+    }
+   }
    const axis=target.clone().sub(a),distance=T.MathUtils.clamp(axis.length(),Math.abs(l1-l2)+.002,l1+l2-.008);axis.normalize();
    const pole=new T.Vector3(right?-1:1,-.6,-.6);pole.addScaledVector(axis,-pole.dot(axis)).normalize();
    const along=(l1*l1+distance*distance-l2*l2)/(2*distance),radius=Math.sqrt(Math.max(0,l1*l1-along*along)),center=a.clone().addScaledVector(axis,along),wrist=a.clone().addScaledVector(axis,distance),elbow=new T.Vector3();
@@ -126,6 +146,20 @@ export function knightTransforms(p:Pose){
    const projected=direction.clone().addScaledVector(axis,-direction.dot(axis)),length=projected.length();
    if(length<1e-6||radius<1e-6)elbow.copy(center).addScaledVector(pole,radius);
    else {projected.divideScalar(length);const cosine=T.MathUtils.clamp(wrist.clone().sub(center).dot(direction)/(radius*length),-1,1),tangent=axis.clone().cross(projected),sine=Math.sqrt(1-cosine*cosine)*(tangent.dot(pole)<0?-1:1);elbow.copy(center).addScaledVector(projected,radius*cosine).addScaledVector(tangent,radius*sine);}
+   if(p.weaponPose!.clearBody){
+    const radial=elbow.clone().sub(center).normalize(),tangent=axis.clone().cross(radial),outward=new T.Vector3(right?-1:1,-.6,.15).applyQuaternion(p[2].q);
+    const cost=(angle:number)=>{
+     const e=center.clone().addScaledVector(radial,radius*Math.cos(angle)).addScaledVector(tangent,radius*Math.sin(angle));
+     let penalty=0;
+     for(let n=0;n<=6;n++)penalty+=Math.min(0,clearance(e.clone().lerp(wrist,n/6)))**2*300;
+     const forearm=wrist.clone().sub(e).normalize();
+     return {e,value:penalty+forearm.dot(direction)**2*.6+(1-e.clone().sub(center).normalize().dot(outward.clone().normalize()))*.08};
+    };
+    let best=cost(0),angle=0;
+    for(let n=1;n<32;n++){const t=n*Math.PI*2/32,candidate=cost(t);if(candidate.value<best.value){best=candidate;angle=t;}}
+    for(let step=Math.PI/32;step>.001;step*=.5)for(const sign of [-1,1]){const t=angle+sign*step,candidate=cost(t);if(candidate.value<best.value){best=candidate;angle=t;}}
+    elbow.copy(best.e);
+   }
    bones[i].quaternion.premultiply(align(b.clone().sub(a),elbow.clone().sub(a)));
    const lowerRotation=align(c.clone().sub(b),wrist.clone().sub(elbow));bones[i+1].quaternion.premultiply(lowerRotation);bones[i+1].position.copy(elbow);bones[i+2].position.copy(wrist);
    const y=wrist.clone().sub(elbow).normalize(),z=direction.clone().addScaledVector(y,-direction.dot(y)).normalize(),x=y.clone().cross(z).normalize();
@@ -135,9 +169,26 @@ export function knightTransforms(p:Pose){
   };
   if(p.weaponPose.wrist){const grip=aimArm(true,p.weaponPose.wrist,p.weaponPose.direction!);bones[16].position.copy(grip);bones[16].quaternion.copy(hands[0].quaternion);}
   if(p.weaponPose.support!==undefined){
+   let mainWrist=hands[0].position.clone();
+   for(let pass=0;pass<5;pass++){
    const direction=V([0,0,1]).applyQuaternion(bones[16].quaternion),target=bones[16].position.clone().addScaledVector(direction,p.weaponPose.support);
    let wrist=target.clone().sub(V([.025,.076,0]).applyQuaternion(hands[1].quaternion));
-   for(let n=0;n<10;n++){const grip=aimArm(false,wrist,direction);wrist.addScaledVector(target.clone().sub(grip),.5);}
+   let grip=new T.Vector3();
+   for(let n=0;n<10;n++){grip=aimArm(false,wrist,direction);wrist.addScaledVector(target.clone().sub(grip),.5);}
+   if(pass===4||grip.distanceTo(target)<.003)break;
+   // Move the shared handle when the support hand cannot reach it safely;
+   // never force that hand through the chest to satisfy a weapon-only target.
+   mainWrist.addScaledVector(grip.sub(target),.8);
+   const mainGrip=aimArm(true,mainWrist,p.weaponPose.direction!);bones[16].position.copy(mainGrip);bones[16].quaternion.copy(hands[0].quaternion);
+   }
+  }
+  if(p.weaponPose.clearBody&&p.weaponPose.support===undefined){
+   for(const right of [true,false]){
+    const hand=hands[right?0:1];
+     const grip=aimArm(right,hand.position.clone(),V([0,0,1]).applyQuaternion(hand.quaternion));
+     if(right){bones[16].position.copy(grip);bones[16].quaternion.copy(hand.quaternion);}
+     else {const q=hand.quaternion.clone().multiply(shieldSocket);set(13,grip.add(V(SHIELD_REST_NORMAL).multiplyScalar(-.09).applyQuaternion(q)),q);}
+   }
   }
   if(original){bones.forEach((b,i)=>{b.position.lerp(original.bones[i].position,1-p.weaponPose!.weight!);b.quaternion.slerp(original.bones[i].quaternion,1-p.weaponPose!.weight!);});hands.forEach((h,i)=>{h.position.lerp(original.hands[i].position,1-p.weaponPose!.weight!);h.quaternion.slerp(original.hands[i].quaternion,1-p.weaponPose!.weight!);});}
  }

@@ -42,7 +42,7 @@ function ReviewScene({variant,angle,action,clock,onPhase,closeup,battle}:{varian
   const combatCenter=useMemo(()=>{const positions=movement.sample(1.8).positions;return positions.reduce((p,a)=>({x:p.x+a.x/positions.length,z:p.z+a.z/positions.length}),{x:0,z:0});},[movement]);
   // A camera that follows the pair's moving midpoint makes a planted attacker
   // appear to slide with the dodge. Keep the battlefield frame fixed for review.
-  useFrame(({camera,size})=>{const center=variant===6?combatCenter:{x:0,z:0};const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===6?(closeup?4.8:Math.max(5.8,battle.actors.length*.83)):variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(center.x+Math.sin(angle)*distance,h+(variant===6?(closeup?2.4:5):variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,center.z+Math.cos(angle)*distance);camera.lookAt(center.x,h+(variant===6?(closeup?(battle.actors.some(a=>a.weapon==='halberd'||a.weapon==='spear')?1.3:1):.65):variant===3?.055:variant===4?(closeup?1.2:.85):.15),center.z+(variant===3?.07:0));});
+  useFrame(({camera,size})=>{const center=variant===6?combatCenter:{x:0,z:0};const h=scene.field.height(0,0),fit=Math.max(1,1.1/(size.width/size.height)),distance=(variant===6?(closeup?(battle.actors.length===2?4:4.8):Math.max(5.8,battle.actors.length*.83)):variant===3?1.05:variant===4?(closeup?2.7:4.6):variant===5?1.7:2.7)*fit;camera.position.set(center.x+Math.sin(angle)*distance,h+(variant===6?(closeup?2.4:5):variant===3?.44:variant===4?(closeup?1.7:2.0):variant===5?.5:1.85)*fit,center.z+Math.cos(angle)*distance);camera.lookAt(center.x,h+(variant===6?(closeup?(battle.actors.some(a=>a.weapon==='halberd'||a.weapon==='spear'||a.weapon==='axe')?1.3:1):.65):variant===3?.055:variant===4?(closeup?1.2:.85):.15),center.z+(variant===3?.07:0));});
   return <>
     <color attach="background" args={['#82958c']}/><fog attach="fog" args={['#82958c',variant===6?18:7,variant===6?40:18]}/>
     <RealmDaylight/>
@@ -67,7 +67,7 @@ export default function RealmArtReview(){
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 7 · 도끼 · 손도끼 · 창 · 할버드 · 사슬 철퇴':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 8 · 새 무기 파지 · 팔과 몸통 간격 수정':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
     <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],

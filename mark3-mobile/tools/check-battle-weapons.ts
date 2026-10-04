@@ -8,7 +8,6 @@ import {exampleBattle} from '../src/screens/battleExamples';
 import {bakeBattleMovement} from '../src/screens/battleReplay';
 import {WEAPONS,weaponPoint,parryPoint} from '../src/screens/battleWeapons';
 import {fighterPose} from '../src/screens/battleMotion';
-import {knightTransforms} from '../src/screens/authoredKnightMotion';
 
 for(const index of process.argv[2]?[Number(process.argv[2])]:[5,6,7,8,9,10]){
  const plan=exampleBattle(index),movement=bakeBattleMovement(plan),actors=plan.actors.map(a=>{const rig=buildFighter(testKnightScene(),a.kind,undefined,a.weapon);new T.Group().add(rig.mesh);return {rig,shape:buildDuelContacts(rig)};});
@@ -20,8 +19,8 @@ for(const index of process.argv[2]?[Number(process.argv[2])]:[5,6,7,8,9,10]){
    maxLift=Math.max(maxLift,p.position.y);
    assert.equal(a.rig.hasShield,plan.actors[i].kind==='knight'&&!WEAPONS[plan.actors[i].weapon!].twoHanded);
    if(t<plan.actors[i].deathAt&&WEAPONS[plan.actors[i].weapon!].twoHanded){
-    const pose=fighterPose(plan.actors[i],t,frame.actions[i],frame.positions[i].moving),f=knightTransforms(pose),support=pose.weaponPose?.support;
-    if(support!==undefined){const target=new T.Vector3(0,0,support).applyQuaternion(f.bones[16].quaternion).add(f.grip),hand=new T.Vector3(.025,.076,0).applyQuaternion(f.hands[1].quaternion).add(f.hands[1].position);maxSupport=Math.max(maxSupport,hand.distanceTo(target));}
+    const pose=fighterPose(plan.actors[i],t,frame.actions[i],frame.positions[i].moving),support=pose.weaponPose?.support;
+    if(support!==undefined){const target=new T.Vector3(0,0,support).applyMatrix4(a.rig.sword.matrixWorld),hand=new T.Vector3(.025,.076,0).applyQuaternion(a.rig.hands[1].quaternion).add(a.rig.hands[1].position).applyMatrix4(a.rig.mesh.matrixWorld);const gap=hand.distanceTo(target);if(gap>maxSupport&&gap>.05)console.log('grip gap',index,t,i,gap,frame.actions[i]?.role,frame.actions[i]?.exchange.defense);maxSupport=Math.max(maxSupport,gap);}
    }
   }
   if(offset===0&&event.defense==='parry')assert(swordContact(actors[event.attacker],actors[event.target]),'parry actually contacts the weapon '+index+' '+event.at+' '+event.attacker);
@@ -31,7 +30,7 @@ for(const index of process.argv[2]?[Number(process.argv[2])]:[5,6,7,8,9,10]){
  const t=e.at;poseBattleActors(plan,t,movement.sample(t),actors,()=>0);const expected=weaponPoint(actors[0].rig.sword,.52).applyMatrix4(actors[0].rig.sword.matrixWorld);
  poseBattleActors(plan,t+.25,movement.sample(t+.25),actors,()=>0);poseBattleActors(plan,t,movement.sample(t),actors,()=>0);assert(expected.distanceTo(weaponPoint(actors[0].rig.sword,.52).applyMatrix4(actors[0].rig.sword.matrixWorld))<1e-7,'scrubbing is deterministic');
  console.log({example:index,weapons:plan.actors.map(a=>a.weapon),maxSupport,maxLift,final:plan.final});
- assert(maxSupport<.065,'support hand stays on the haft');
+ assert(maxSupport<.02,'support hand stays on the haft after final contact correction');
  for(const actor of plan.actors.filter(a=>Number.isFinite(a.deathAt))){let last:T.Vector3|undefined;for(const dt of [2.3,3]){const t=actor.deathAt+dt;poseBattleActors(plan,t,movement.sample(t),actors,()=>0);const hip=actors[actor.id].rig.bones[8].getWorldPosition(new T.Vector3());if(last)assert(hip.distanceTo(last)<.001,'fallen weapon carrier stays settled');last=hip;}}
  actors.forEach(a=>a.rig.dispose());
 }

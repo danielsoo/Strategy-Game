@@ -33,10 +33,21 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
   if(e.defense!=='parry'||!WEAPONS[plan.actors[e.target].weapon??'sword'].twoHanded||frame.actions[e.target]?.exchange!==e)continue;
   const dt=attackPhase(e,time),weight=T.MathUtils.smoothstep(dt,-.5,-.06)*(1-T.MathUtils.smoothstep(dt,.08,.38));if(!weight)continue;
   const a=actors[e.attacker].rig,b=actors[e.target].rig,p=fighterPose(plan.actors[e.target],time,frame.actions[e.target],frame.positions[e.target].moving);
+  // Long forward hafts already span the incoming height. Re-targeting their
+  // hands breaks the reachable two-hand guard, especially in mixed battles.
+  if(plan.actors[e.target].weapon==='spear'||plan.actors[e.target].weapon==='halberd')continue;
   if(!p.weaponPose?.wrist)continue;
   for(let pass=0;pass<3;pass++){
    const incoming=weaponPoint(a.sword,.52).applyMatrix4(a.sword.matrixWorld),guard=parryPoint(b.sword,.52).applyMatrix4(b.sword.matrixWorld);
-   p.weaponPose.wrist.y+=T.MathUtils.clamp((incoming.y-guard.y)/scale,-.3,.3)*weight;
+   const correction=T.MathUtils.clamp((incoming.y-guard.y)/scale,-.3,.3)*weight;
+   const chest=new T.Vector3(0,.8,0).add(new T.Vector3(0,.08,0).applyQuaternion(p[0].q)).addScaledVector(p[0].p,.9);
+   const local=p.weaponPose.wrist.clone().sub(chest).applyQuaternion(p[2].q.clone().invert()),before=local.y;
+   local.y=T.MathUtils.clamp(local.y+correction,.36,.52);
+   p.weaponPose.wrist.copy(local.applyQuaternion(p[2].q).add(chest));
+   // Low incoming cuts are caught by angling the forward haft down. Dropping
+   // both fists into the abdomen to match contact height breaks the grip.
+   const direction=p.weaponPose.direction!,vertical=T.MathUtils.clamp(direction.y+(correction-(T.MathUtils.clamp(before+correction,.36,.52)-before))/.65,-.55,.55);
+   const horizontal=Math.hypot(direction.x,direction.z);direction.x*=Math.sqrt(1-vertical*vertical)/horizontal;direction.z*=Math.sqrt(1-vertical*vertical)/horizontal;direction.y=vertical;
    poseAuthoredKnight(b,p);groups[e.target].updateMatrixWorld(true);ground(e.target);
   }
  }
