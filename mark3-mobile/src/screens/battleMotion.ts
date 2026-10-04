@@ -2,6 +2,7 @@ import * as T from 'three';
 import {AuthoredPose,combatPose,sampleKnightClip,mixKnightPoses,sampleAuthoredDuel,DEATH_START} from './authoredKnightMotion';
 import type {BattleFrame,Combatant} from './battleReplay';
 import {attackPhase} from './battleReplay';
+import {heavyAttackPose,heavyDefensePose} from './heavyCombatMotion';
 const smooth=(n:number)=>{n=T.MathUtils.clamp(n,0,1);return n*n*(3-2*n);};
 function heavyImpactPose(guard:AuthoredPose,weight:number){const open=sampleKnightClip('Walk_Loop',.38);for(const j of [8,9,10])guard[j]=open[j];return mixKnightPoses(guard,sampleKnightClip('Hit_Chest',.24),weight*.85);}
 export function fighterPose(actor:Combatant,time:number,action:BattleFrame['actions'][number],moving:number|boolean):AuthoredPose{
@@ -35,17 +36,17 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
  if(action.role==='attack'){
   const horizontal=action.exchange.cut==='horizontal',pair=sampleAuthoredDuel((horizontal?3.82:1.62)+dt),pose=pair.poses[horizontal?1:0];if(actor.kind!=='knight')for(const j of [8,9,10])pose[j]=guard[j];
   const cut=mixKnightPoses(guard,pose,w);
-  if(action.exchange.heavy&&dt<0){const coil=new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),-.20*smooth((dt+.65)/.25)*(1-smooth((dt+.22)/.22)));for(const j of [2,3,4,5,6,7,8,9,10])cut[j].q.premultiply(coil);}
+  if(action.exchange.heavy)heavyAttackPose(cut,guard,dt,action.exchange.defense==='parry'||action.exchange.defense==='shield');
   if(action.exchange.defense==='parry'&&dt>0){
    const rebound=action.exchange.heavy?mixKnightPoses(sampleKnightClip('Sword_Block',.85),sampleKnightClip('Hit_Chest',.20),.22):sampleKnightClip('Sword_Block',.65);
    return mixKnightPoses(cut,rebound,smooth(dt/.16)*(1-smooth((dt-.18)/.30))*(action.exchange.heavy?.85:.55));
   }
   return cut;
  }
- if(action.exchange.defense==='shield')return mixKnightPoses(guard,sampleAuthoredDuel(1.62+dt).poses[1],w);
+ if(action.exchange.defense==='shield'){const block=mixKnightPoses(guard,sampleAuthoredDuel(1.62+dt).poses[1],w);return action.exchange.heavy?heavyDefensePose(block,guard,dt,true):block;}
  if(action.exchange.defense==='parry'){
   const block=sampleKnightClip('Sword_Block',Math.min(1.23,Math.max(0,.4+dt*(dt>0?1.8:.6))));
-  return mixKnightPoses(guard,block,w);
+  const brace=mixKnightPoses(guard,block,w);return action.exchange.heavy?heavyDefensePose(brace,guard,dt,false):brace;
  }
  if(action.exchange.defense==='hit'){
   // A recorded casualty is an opening in the guard, not a successful shield block.

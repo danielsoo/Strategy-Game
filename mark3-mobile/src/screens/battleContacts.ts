@@ -111,6 +111,22 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
   }
  }if(!changed)break;}
  actors.forEach((_,i)=>ground(i));
+ // A neighbouring weapon can displace a loaded strike during crowd clearance.
+ // Re-aim its foot stance toward the victim, without bending the arm or moving
+ // either body into the crowd. These turns are baked into the smooth stance path.
+ if(align)for(const e of plan.exchanges){
+  if(!e.fatal||Math.abs(time-e.at)>.001)continue;
+  const a=actors[e.attacker],b=actors[e.target],g=groups[e.attacker],spheres=armorSpheres(b.rig);
+  const gap=()=>{const blade=new T.Line3(v(.1).applyMatrix4(a.rig.sword.matrixWorld),v(.85).applyMatrix4(a.rig.sword.matrixWorld));return Math.min(...spheres.map(s=>blade.closestPointToPoint(s.center,true,new T.Vector3()).distanceTo(s.center)-s.radius));};
+  if(gap()<.06*scale)continue;
+  const base=g.rotation.y;let best=base,score=Infinity;
+  for(let step=-20;step<=20;step++){
+   g.rotation.y=base+step*.025;g.updateMatrixWorld(true);const d=gap();
+   if(d<.014*scale||actors.some((other,j)=>j!==e.attacker&&time<plan.actors[j].deathAt&&bladeShield(a.rig,other.rig,other.shape,.012)))continue;
+   const cost=Math.abs(d-.025*scale)+Math.abs(step)*.0001*scale;if(cost<score){score=cost;best=g.rotation.y;}
+  }
+  g.rotation.y=best;g.updateMatrixWorld(true);
+ }
  for(const e of plan.exchanges)if(Math.abs(time-e.at)<.1&&e.defense==='parry'){
   const contact=swordContact(actors[e.attacker],actors[e.target],scale);if(contact)touches.set(e.attacker,contact);
  }

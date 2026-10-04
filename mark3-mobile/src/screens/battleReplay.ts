@@ -8,8 +8,10 @@ export type Exchange={at:number;attacker:number;target:number;defense:Defense;fa
 export const COMBAT_PACE=1.35;
 export const ATTACK_LEAD=.65/COMBAT_PACE,ATTACK_RECOVERY=.48/COMBAT_PACE;
 export const attackLead=(e:Exchange)=>e.heavy?.9:ATTACK_LEAD;
+export const HEAVY_RECOVERY=.64;
+export const attackRecovery=(e:Exchange)=>e.heavy?HEAVY_RECOVERY:ATTACK_RECOVERY;
 /** Heavy windup holds the coil longer, then accelerates into the same contact pose. */
-export const attackPhase=(e:Exchange,time:number)=>{const dt=time-e.at;return e.heavy&&dt<-.18?-.243+(dt+.18)*(.407/.72):dt*COMBAT_PACE;};
+export const attackPhase=(e:Exchange,time:number)=>{const dt=time-e.at;return e.heavy?(dt<-.18?-.243+(dt+.18)*(.407/.72):dt<0?dt*COMBAT_PACE:Math.max(0,dt-.10)*(.48/(HEAVY_RECOVERY-.10))):dt*COMBAT_PACE;};
 export type ReplayStage={at:number;counts:[number,number];morale:[number,number];round:number};
 export type BattleReplay={actors:Combatant[];exchanges:Exchange[];stages:ReplayStage[];initial:[number,number];final:[number,number];outcome:DetailedCombatResult['outcome'];reason:DetailedCombatResult['reason'];finish:number;duration:number};
 const defense=(kind:FighterKind,n:number):Defense=>kind==='knight'?(n%5===3?'dodge':'shield'):kind==='bandit'?'dodge':n%3===2?'dodge':'parry';
@@ -59,7 +61,13 @@ export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKin
  const final:[number,number]=[result.attackerSurvivors,result.defenderSurvivors],last=stages[stages.length-1];
  // Rout losses happen after the final combat round and must also appear in the replay.
  if(last.counts.some((n,i)=>n!==final[i]))addStage(final,[result.attackerMorale,result.defenderMorale],last.round+1);
- const finish=start,deathEnd=Math.max(0,...actors.filter(a=>Number.isFinite(a.deathAt)).map(a=>a.deathAt+7.1));
+ // Reserve time for absorbing/redirecting a heavy. Simultaneous blows share the
+ // same pause, and all stage/casualty clocks follow the monotonic time mapping.
+ const holds:number[]=[];for(const e of [...exchanges].filter(e=>e.heavy).sort((a,b)=>a.at-b.at)){const at=e.at+ATTACK_RECOVERY;if(!holds.length||at-holds[holds.length-1]>.2)holds.push(at);}
+ const retime=(t:number)=>t+holds.filter(at=>at<t).length*(HEAVY_RECOVERY-ATTACK_RECOVERY);
+ for(const e of exchanges){const old=e.at;e.at=retime(old);if(e.counterOf!==undefined)e.counterOf=retime(e.counterOf);if(e.fatal)actors[e.target].deathAt=e.at+.10;}
+ stages.forEach(s=>s.at=retime(s.at));
+ const finish=retime(start),deathEnd=Math.max(0,...actors.filter(a=>Number.isFinite(a.deathAt)).map(a=>a.deathAt+7.1));
  return {actors,exchanges:exchanges.sort((a,b)=>a.at-b.at||a.attacker-b.attacker),stages,initial,final,outcome:result.outcome,reason:result.reason,finish,duration:Math.max(finish+2.8,deathEnd)};
 }
 export function replayStage(plan:BattleReplay,time:number){let stage=plan.stages[0];for(const s of plan.stages){if(s.at>time)break;stage=s;}return stage;}
@@ -74,7 +82,7 @@ export function bakeBattleMovement(plan:BattleReplay){
  const fps=30,frames:BattleFrame[]=[],positions=plan.actors.map(a=>{const row=plan.actors.filter(b=>b.side===a.side).indexOf(a),n=plan.actors.filter(b=>b.side===a.side).length;return {x:a.side===0?-3.1:3.1,z:(row-(n-1)/2)*1.9,yaw:a.side===0?Math.PI/2:-Math.PI/2,moving:0};});
  for(let tick=0;tick<=Math.ceil(plan.duration*fps);tick++){
   const time=tick/fps,alive=plan.actors.filter(a=>time<a.deathAt),actions:BattleFrame['actions']=plan.actors.map(()=>null);
-  for(const e of plan.exchanges){if(time<e.at-attackLead(e)||time>e.at+ATTACK_RECOVERY)continue;
+  for(const e of plan.exchanges){if(time<e.at-attackLead(e)||time>e.at+attackRecovery(e))continue;
    if(time<plan.actors[e.attacker].deathAt)actions[e.attacker]={exchange:e,role:'attack'};
    if(time<plan.actors[e.target].deathAt&&(!actions[e.target]||e.fatal))actions[e.target]={exchange:e,role:'defend'};
   }
@@ -98,7 +106,12 @@ export function bakeBattleMovement(plan:BattleReplay){
     else {const push=smooth(dt/.20)*(1-smooth((dt-.20)/.30));gx=p.x+awayX/n*.9*push;gz=p.z+awayZ/n*.9*push;}
    }
    if(action?.role==='attack'&&action.exchange.heavy&&action.exchange.defense==='parry'){
-    const dt=time-action.exchange.at,w=smooth(dt/.12)*(1-smooth((dt-.18)/.20)),dx=p.x-enemy.x,dz=p.z-enemy.z,n=Math.hypot(dx,dz)||1;gx+=dx/n*.65*w;gz+=dz/n*.65*w;
+    const dt=time-action.exchange.at-.10,w=smooth(dt/.18)*(1-smooth((dt-.25)/.29)),dx=p.x-enemy.x,dz=p.z-enemy.z,n=Math.hypot(dx,dz)||1;gx+=dx/n*.65*w;gz+=dz/n*.65*w;
+   }
+   if(action?.role==='defend'&&action.exchange.heavy&&(action.exchange.defense==='shield'||action.exchange.defense==='parry')){
+    const dt=time-action.exchange.at-.10,dx=p.x-enemy.x,dz=p.z-enemy.z,n=Math.hypot(dx,dz)||1,absorb=smooth(dt/.12)*(1-smooth((dt-.12)/.22)),answer=smooth((dt-.12)/.20)*(1-smooth((dt-.34)/.20));
+    gx+=dx/n*.42*absorb;gz+=dz/n*.42*absorb;
+    if(action.exchange.defense==='parry'){gx-=dz/n*.45*answer;gz+=dx/n*.45*answer;}else {gx-=dx/n*.30*answer;gz-=dz/n*.30*answer;}
    }
    if(action?.role==='defend'&&action.exchange.defense==='dodge'){
     const w=smooth((time-(action.exchange.at-.45))/.4)*(1-smooth((time-action.exchange.at-.1)/.38));gx+=Math.cos(angle)*.85*w;gz-=Math.sin(angle)*.85*w;

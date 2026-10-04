@@ -43,7 +43,8 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
   const active=frame.actions.find(a=>a?.role==='attack')?.exchange;
   const dying=plan.actors.find(a=>a.heavyDeath&&time>=a.deathAt&&time<a.deathAt+2.2);
   const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.move==='shove'?'밀쳐내기':`${active.counterOf!==undefined?'반격 · ':''}${active.heavy?'강공격 · ':''}${active.cut==='horizontal'?'횡베기':'사선베기'}`} · ${active.move==='shove'?'뒤로 물러나 균형 회복':active.defense==='shield'?'방패 방어':active.defense==='parry'?(active.heavy?'강공격 패링 · 공격자 경직':'패링 · 검 쳐내기'):active.defense==='dodge'?'옆걸음 회피':active.heavy&&active.fatal?'치명타 · 쓰러짐':'피격'}`:dying?'강공격 치명타 · 힘을 잃고 쓰러집니다':'간격 조절';
-  const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${dying?actionLabel:time>plan.finish?result:time<1.8&&!active?'접근 중':actionLabel} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
+  const heavyPhase=active?.heavy?time<active.at?'머리 위로 검을 들어 강타 준비':active.defense==='parry'||active.defense==='shield'?time<active.at+.22?'무릎을 굽혀 충격을 버팁니다':active.defense==='parry'?'검을 옆으로 흘려내며 반격 준비':'방패를 밀어 올려 간격 회복':actionLabel:actionLabel;
+  const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${dying?actionLabel:time>plan.finish?result:time<1.8&&!active?'접근 중':heavyPhase} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
   if(label!==lastPhase.current){lastPhase.current=label;onPhase?.(label);}
  });
  return <group ref={root} position={position} scale={scale} rotation={[0,yaw,0]}>

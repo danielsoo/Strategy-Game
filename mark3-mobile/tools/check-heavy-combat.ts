@@ -12,10 +12,20 @@ const parry=plan.exchanges.find(e=>e.heavy&&e.defense==='parry')!,fatal=plan.exc
 assert(parry&&fatal,'real battle includes a heavy parry and a heavy finisher');
 assert(attackLead(parry)>ATTACK_LEAD+.3,'heavy attack visibly telegraphs before a normal cut');
 const pose=(t:number)=>poseBattleActors(plan,t,movement.sample(t),actors,()=>0);
+let overhead=-Infinity,peakTip=-Infinity;
+for(let dt=-.8;dt<-.1;dt+=.05){pose(parry.at+dt);const rig=actors[parry.attacker].rig,tip=new T.Vector3(0,0,.85).applyMatrix4(rig.sword.matrixWorld);overhead=Math.max(overhead,tip.y-rig.bones[7].getWorldPosition(new T.Vector3()).y);peakTip=Math.max(peakTip,tip.y);}
 pose(parry.at);
 assert(swordContact(actors[parry.attacker],actors[parry.target]),'heavy parry meets blade to blade');
 const attacker=actors[parry.attacker].rig,origin=attacker.mesh.parent!.position.clone(),away=origin.clone().sub(actors[parry.target].rig.mesh.parent!.position).setY(0).normalize();
 const tip=new T.Vector3(0,0,.85).applyMatrix4(attacker.sword.matrixWorld);
+console.log('Heavy silhouette',{overhead,downstroke:peakTip-tip.y});
+assert(overhead>.35,'loaded sword clearly rises above the helmet');assert(peakTip-tip.y>.65,'heavy blade travels through a large downward arc');
+pose(parry.at+.05);assert(swordContact(actors[parry.attacker],actors[parry.target]),'heavy parry briefly binds before the weapons separate');
+pose(parry.at);
+const defender=actors[parry.target].rig,hipAtContact=defender.bones[8].getWorldPosition(new T.Vector3()).y;
+pose(parry.at+.18);const hipCompression=hipAtContact-defender.bones[8].getWorldPosition(new T.Vector3()).y;
+console.log('Heavy defense',{hipCompression});
+assert(hipCompression>.025,'defender yields through the knees under the heavy blow');
 pose(parry.at+.24);
 const recoil=attacker.mesh.parent!.position.clone().sub(origin).dot(away),bladeRebound=new T.Vector3(0,0,.85).applyMatrix4(attacker.sword.matrixWorld).distanceTo(tip);
 assert(recoil>.04,'parried heavy attacker loses forward momentum');assert(bladeRebound>.12,'parry visibly knocks the attacking blade away');
@@ -26,5 +36,5 @@ pose(death+.0001);const boundaryJump=Math.max(...actors[fatal.target].rig.bones.
 assert(boundaryJump<.025,`heavy hit must flow into collapse: ${boundaryJump}`);
 pose(death+2.3);const landed=actors[fatal.target].rig.bones[8].getWorldPosition(new T.Vector3());
 pose(death+3);assert(actors[fatal.target].rig.bones[8].getWorldPosition(new T.Vector3()).distanceTo(landed)<1e-5,'fallen victim stays grounded during dissolution');
-console.log({heavyWindup:attackLead(parry),recoil,bladeRebound,deathBoundaryJump:boundaryJump,groundedAfterDeath:true});
+console.log({heavyWindup:attackLead(parry),overhead,hipCompression,recoil,bladeRebound,deathBoundaryJump:boundaryJump,groundedAfterDeath:true});
 actors.forEach(a=>a.rig.dispose());
