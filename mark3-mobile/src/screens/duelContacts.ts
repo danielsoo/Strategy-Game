@@ -45,12 +45,6 @@ export function bladeShield(rig:AuthoredRig,shield:AuthoredRig,shape:DuelContact
  if(!shield.shield.visible||!shape.planes.length)return null;
  if(weaponKind(rig.sword)!=='sword'){
   const transform=new T.Matrix4().copy(shield.shield.matrixWorld).invert().multiply(rig.sword.matrixWorld);
-  if(weaponKind(rig.sword)==='axe'){
-   // A broad double head must not lose its clearance in one frame when its
-   // edge turns tangent to the shield. The rounded envelope stays continuous.
-   const center=new T.Vector3(0,0,.66).applyMatrix4(transform);
-   if(segmentShield(center,center,shape.planes,padding+.33)!==null)return center.applyMatrix4(shield.shield.matrixWorld);
-  }
   for(const line of weaponSegments(rig.sword)){line.start.applyMatrix4(transform);line.end.applyMatrix4(transform);const t=segmentShield(line.start,line.end,shape.planes,padding+.012);if(t!==null)return line.at(t,new T.Vector3()).applyMatrix4(shield.shield.matrixWorld);}
   return null;
  }

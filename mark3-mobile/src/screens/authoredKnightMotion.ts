@@ -5,7 +5,7 @@ import {SHIELD_REST_NORMAL,shieldRotation,DUEL_DURATION} from './duelMotion';
 import {buildBattleWeapon,WeaponKind} from './battleWeapons';
 
 type Joint={p:T.Vector3;q:T.Quaternion};
-export type AuthoredPose=Joint[]&{weaponPose?:{wrist?:T.Vector3;direction?:T.Vector3;support?:number;weight?:number;clearBody?:boolean}};
+export type AuthoredPose=Joint[]&{weaponPose?:{wrist?:T.Vector3;direction?:T.Vector3;edge?:T.Vector3;support?:number;weight?:number;clearBody?:boolean}};
 type Pose=AuthoredPose;
 const V=(p:number[])=>new T.Vector3().fromArray(p);
 const Q=(q:number[])=>new T.Quaternion().fromArray(q);
@@ -153,7 +153,11 @@ export function knightTransforms(p:Pose){
      let penalty=0;
      for(let n=0;n<=6;n++)penalty+=Math.min(0,clearance(e.clone().lerp(wrist,n/6)))**2*300;
      const forearm=wrist.clone().sub(e).normalize();
-     return {e,value:penalty+forearm.dot(direction)**2*.6+(1-e.clone().sub(center).normalize().dot(outward.clone().normalize()))*.08};
+     if(p.weaponPose!.edge&&p.weaponPose!.support===undefined)penalty+=Math.max(0,bodyLocal(e).y-Math.max(.45,bodyLocal(wrist).y-.06))**2*1000;
+     const bend=e.clone().sub(center).normalize().dot(outward.clone().normalize());
+     // The two analytic elbow branches can exchange scores mid-swing. Keep the
+     // elbow in the outward/downward hemisphere so the head cannot snap 60°.
+     return {e,value:penalty+forearm.dot(direction)**2*.6+(1-bend)*.08+(p.weaponPose!.edge?Math.max(0,-bend)*20:0)};
     };
     let best=cost(0),angle=0;
     for(let n=1;n<32;n++){const t=n*Math.PI*2/32,candidate=cost(t);if(candidate.value<best.value){best=candidate;angle=t;}}
@@ -184,11 +188,18 @@ export function knightTransforms(p:Pose){
   }
   if(p.weaponPose.clearBody&&p.weaponPose.support===undefined){
    for(const right of [true,false]){
+    if(right&&p.weaponPose.wrist)continue;
     const hand=hands[right?0:1];
      const grip=aimArm(right,hand.position.clone(),V([0,0,1]).applyQuaternion(hand.quaternion));
      if(right){bones[16].position.copy(grip);bones[16].quaternion.copy(hand.quaternion);}
      else {const q=hand.quaternion.clone().multiply(shieldSocket);set(13,grip.add(V(SHIELD_REST_NORMAL).multiplyScalar(-.09).applyQuaternion(q)),q);}
    }
+  }
+  if(p.weaponPose.edge){
+   // The round handle fixes the shaft, not the cutting-plane socket. Calibrate
+   // the head around that shaft to follow the cut, instead of inheriting fist roll.
+   const z=V([0,0,1]).applyQuaternion(bones[16].quaternion),x=p.weaponPose.edge.clone().addScaledVector(z,-p.weaponPose.edge.dot(z)).normalize(),y=z.clone().cross(x).normalize();
+   bones[16].quaternion.setFromRotationMatrix(new T.Matrix4().makeBasis(x,y,z));
   }
   if(original){bones.forEach((b,i)=>{b.position.lerp(original.bones[i].position,1-p.weaponPose!.weight!);b.quaternion.slerp(original.bones[i].quaternion,1-p.weaponPose!.weight!);});hands.forEach((h,i)=>{h.position.lerp(original.hands[i].position,1-p.weaponPose!.weight!);h.quaternion.slerp(original.hands[i].quaternion,1-p.weaponPose!.weight!);});}
  }

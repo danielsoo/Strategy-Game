@@ -184,12 +184,23 @@ export function poseBattleActors(plan:BattleReplay,time:number,frame:BattleFrame
   // stance corrections ahead of time so the feet travel into them gradually.
   if(plan.actors.length===2&&plan.actors.some(a=>a.weapon&&a.weapon!=='sword')){
    const extras:Footstep[][]=actors.map(()=>[]);
-   const times=[...new Set(plan.exchanges.flatMap(e=>[-.40,-.25,-.12,.10,.20,.30,.42].map(dt=>e.at+dt)))].sort((a,b)=>a-b);
+   const times=[...new Set(plan.exchanges.flatMap(e=>Array.from({length:25},(_,i)=>e.at-.48+i*.04).filter(at=>Math.abs(at-e.at)>.001)))].sort((a,b)=>a-b);
    for(const at of times){const sample=movement.sample(at),positions=sample.positions.map((p,i)=>{const o=footOffset(paths[i],at);return {...p,x:p.x+o.x,z:p.z+o.z,yaw:p.yaw+footTurn(paths[i],at)};});
     solveBattlePose(plan,at,{...sample,positions},actors,height,scale,yaw,false);
     actors.forEach((a,i)=>{if(at>=plan.actors[i].deathAt)return;const p=sample.positions[i],g=a.rig.mesh.parent!;extras[i].push({at,offset:new T.Vector3(g.position.x-p.x,0,g.position.z-p.z),turn:g.rotation.y-p.yaw});});
    }
    paths.forEach((p,i)=>{p.push(...extras[i]);p.sort((a,b)=>a.at-b.at);});
+  }
+  // Carry the last living contact stance into the fall. Otherwise removing a
+  // dead actor from collision resolution drops its final clearance offset in
+  // one frame and the body snaps sideways before the death clip even starts.
+  for(const victim of plan.actors.filter(a=>Number.isFinite(a.deathAt)).sort((a,b)=>a.deathAt-b.deathAt)){
+   const at=victim.deathAt-.00001,sample=movement.sample(at),positions=sample.positions.map((p,i)=>{const o=footOffset(paths[i],at);return {...p,x:p.x+o.x,z:p.z+o.z,yaw:p.yaw+footTurn(paths[i],at)};});
+   solveBattlePose(plan,at,{...sample,positions},actors,height,scale,yaw,false);
+   actors.forEach((a,j)=>{if(j===victim.id||at>=plan.actors[j].deathAt)return;const g=a.rig.mesh.parent!,p=sample.positions[j];paths[j].push({at,offset:new T.Vector3(g.position.x-p.x,0,g.position.z-p.z),turn:g.rotation.y-p.yaw});paths[j].sort((a,b)=>a.at-b.at);});
+   const i=victim.id,g=actors[i].rig.mesh.parent!,p=sample.positions[i],after=movement.sample(victim.deathAt).positions[i];
+   const offset=new T.Vector3(g.position.x-p.x,0,g.position.z-p.z),turn=g.rotation.y-p.yaw;
+   paths[i]=[...paths[i].filter(n=>n.at<at),{at,offset,turn},{at:victim.deathAt,offset:new T.Vector3(g.position.x-after.x,0,g.position.z-after.z),turn:g.rotation.y-after.yaw}];
   }
   // Contact corrections are part of locomotion too: freezing navigation alone
   // still made attackers skate after a dodging opponent through these offsets.

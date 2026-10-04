@@ -83,6 +83,7 @@ const smooth=(v:number)=>{v=Math.max(0,Math.min(1,v));return v*v*(3-2*v);};
 /** Deterministic crowd navigation, sampled at 30 Hz and interpolated when rendered. */
 export function bakeBattleMovement(plan:BattleReplay){
  const fps=30,frames:BattleFrame[]=[],positions=plan.actors.map(a=>{const row=plan.actors.filter(b=>b.side===a.side).indexOf(a),n=plan.actors.filter(b=>b.side===a.side).length;return {x:a.side===0?-3.1:3.1,z:(row-(n-1)/2)*1.9,yaw:a.side===0?Math.PI/2:-Math.PI/2,moving:0};});
+ const arenaRadius=Math.max(3.2,(Math.max(...[0,1].map(side=>plan.actors.filter(a=>a.side===side).length))-1)*.95+1.2);
  const commitments=new Map<Exchange,{attacker:Position;defender:Position;sideX:number;sideZ:number}>();
  for(let tick=0;tick<=Math.ceil(plan.duration*fps);tick++){
   const time=tick/fps,alive=plan.actors.filter(a=>time<a.deathAt),actions:BattleFrame['actions']=plan.actors.map(()=>null);
@@ -104,13 +105,17 @@ export function bakeBattleMovement(plan:BattleReplay){
    if(!commitments.has(e)){const a=old[e.attacker],d=old[e.target],dx=d.x-a.x,dz=d.z-a.z,n=Math.hypot(dx,dz)||1;commitments.set(e,{attacker:{...a},defender:{...d},sideX:-dz/n,sideZ:dx/n});}
   }
   for(const a of alive){const p=positions[a.id],target=targets.get(a.id);p.moving*=.8;
-   if(time>plan.finish){const retreat=plan.outcome==='stalemate'||(plan.outcome==='attacker-win'?a.side===1:a.side===0);if(retreat){p.x+=(a.side===0?-1:1)*1.35/fps;const wanted=a.side===0?-Math.PI/2:Math.PI/2;p.yaw+=Math.max(-.08,Math.min(.08,Math.atan2(Math.sin(wanted-p.yaw),Math.cos(wanted-p.yaw))));p.moving+=.2;}continue;}
+   if(time>plan.finish){const retreat=plan.outcome==='stalemate'||(plan.outcome==='attacker-win'?a.side===1:a.side===0);if(retreat){const step=Math.min(1.4,(time-plan.finish)*1.35)-Math.min(1.4,Math.max(0,time-plan.finish-1/fps)*1.35);p.x+=(a.side===0?-1:1)*step;const wanted=a.side===0?-Math.PI/2:Math.PI/2;p.yaw+=Math.max(-.08,Math.min(.08,Math.atan2(Math.sin(wanted-p.yaw),Math.cos(wanted-p.yaw))));if(step>.001)p.moving+=.2;}continue;}
    if(target===undefined)continue;
    const enemy=old[target],partners=assignments.get(target)!,slot=partners.indexOf(a.id),angle=(a.side===0?-Math.PI/2:Math.PI/2)+(slot===0?0:(slot%2?1:-1)*Math.ceil(slot/2)*1.10);
    const own=alive.filter(b=>b.side===a.side).length,other=alive.length-own;
    const mobile=own>=other||actions[a.id]?.role==='attack';
    const reach=WEAPONS[a.weapon??'sword'].reach;
    let gx=mobile?enemy.x+Math.sin(angle)*reach:p.x,gz=mobile?enemy.z+Math.cos(angle)*reach:p.z;
+   // A duel has a shared engagement centre. Chasing the opponent's last frame
+   // with unequal weapon ranges makes both fighters walk off in the same direction.
+   if(plan.actors.length===2){const separation=(reach+WEAPONS[plan.actors[target].weapon??'sword'].reach)/2;gx=(a.side===0?-1:1)*separation/2;gz=0;}
+   else {const radius=Math.hypot(gx,gz);if(radius>arenaRadius){gx*=arenaRadius/radius;gz*=arenaRadius/radius;}}
    const action=actions[a.id];if(action?.exchange.move==='shove'){
     const dt=time-action.exchange.at,awayX=p.x-enemy.x,awayZ=p.z-enemy.z,n=Math.hypot(awayX,awayZ)||1;
     if(action.role==='attack'){gx=enemy.x+awayX/n*1.02;gz=enemy.z+awayZ/n*1.02;}

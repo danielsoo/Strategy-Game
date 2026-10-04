@@ -67,7 +67,7 @@ export default function RealmArtReview(){
   const capture=typeof window!=='undefined'&&new URLSearchParams(window.location.search).get('capture')==='1';
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
-    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 8 · 새 무기 파지 · 팔과 몸통 간격 수정':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
+    {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 9 · 날 방향 · 타격 궤적 · 전투 중심 수정':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
     <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],

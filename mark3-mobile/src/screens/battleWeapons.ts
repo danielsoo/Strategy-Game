@@ -76,6 +76,10 @@ export function weaponSegments(root:T.Group):T.Line3[]{
  if(weaponKind(root)==='sword')return [new T.Line3(new T.Vector3(-.03,0,.085),new T.Vector3(0,0,.87)),new T.Line3(new T.Vector3(.03,0,.085),new T.Vector3(0,0,.87))];
  const lines=[new T.Line3(weaponPoint(root,.1),weaponPoint(root,.85))];
  if(weaponKind(root)==='axe')lines.push(new T.Line3(new T.Vector3(-.27,0,.47),new T.Vector3(-.27,0,.85)));
+ if(['axe','hatchet','halberd'].includes(weaponKind(root))){
+  const kind=weaponKind(root),head=kind==='axe'?.66:kind==='hatchet'?.43:1.02,width=kind==='axe'?.27:kind==='hatchet'?.19:.25,h=kind==='hatchet'?.13:.19;
+  for(const side of kind==='axe'?[-1,1]:[1])for(const end of [-1,1])lines.push(new T.Line3(new T.Vector3(0,0,head+end*h*.37),new T.Vector3(side*width,0,head+end*h)));
+ }
  if(weaponKind(root)==='halberd')lines.push(new T.Line3(new T.Vector3(0,0,.90),new T.Vector3(0,0,1.27)));
  lines.push(new T.Line3(new T.Vector3(0,0,-.09),new T.Vector3(0,0,weaponKind(root)==='hatchet'?.43:weaponKind(root)==='flail'?.43:weaponKind(root)==='axe'?.66:1.04)));
  return lines;
@@ -91,7 +95,10 @@ export function animateFlail(root:T.Group,phase:number|null,time:number,dead=fal
  const chain=root.userData.chain as T.Group;
  const gravity=new T.Vector3(0,-1,0).applyQuaternion(root.quaternion.clone().invert());
  const swing=phase===null?0:T.MathUtils.smoothstep(phase,-.5,-.05)*(1-T.MathUtils.smoothstep(phase,.08,.42));
- const direction=gravity.lerp(new T.Vector3(.03,0,1).normalize(),dead?0:swing).normalize();
+ // The head trails the accelerating handle, then catches up through impact.
+ // Keep the chain taut in the cutting plane instead of instantly making a rigid rod.
+ const lag=phase===null?0:.85*(1-T.MathUtils.smoothstep(phase,-.16,.02));
+ const direction=gravity.lerp(new T.Vector3(-Math.sin(lag),0,Math.cos(lag)),dead?0:swing).normalize();
  chain.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),direction);
  if(!dead&&phase===null)chain.rotateZ(Math.sin(time*2)*.06);
 }

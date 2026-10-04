@@ -5,12 +5,13 @@ import {attackPhase} from './battleReplay';
 import {heavyAttackPose,heavyDefensePose} from './heavyCombatMotion';
 import {WEAPONS} from './battleWeapons';
 const smooth=(n:number)=>{n=T.MathUtils.clamp(n,0,1);return n*n*(3-2*n);};
+const stroke=(dt:number,keys:[number,number][])=>{let i=0;while(i+1<keys.length&&dt>keys[i+1][0])i++;const a=keys[i],b=keys[Math.min(i+1,keys.length-1)];return a[1]+(b[1]-a[1])*smooth((dt-a[0])/(b[0]-a[0]||1));};
 function heavyImpactPose(guard:AuthoredPose,weight:number){const open=sampleKnightClip('Walk_Loop',.38);for(const j of [8,9,10])guard[j]=open[j];return mixKnightPoses(guard,sampleKnightClip('Hit_Chest',.24),weight*.85);}
 export function fighterPose(actor:Combatant,time:number,action:BattleFrame['actions'][number],moving:number|boolean):AuthoredPose{
  const pose=baseFighterPose(actor,time,action,moving),weapon=actor.weapon??'sword';
  const held=1-smooth((time-actor.deathAt)/.45);
  if(weapon==='sword'||!held)return pose;
- if(WEAPONS[weapon].twoHanded){pose[2].q.slerp(new T.Quaternion(),.65*held);pose[4].q.slerp(new T.Quaternion(),.45*held);}
+ pose[2].q.slerp(new T.Quaternion(),.65*held);pose[4].q.slerp(new T.Quaternion(),.45*held);
  const dt=action?attackPhase(action.exchange,time):-.65;
  const parryWeight=action?.role==='defend'&&action.exchange.defense==='parry'?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
  if(weapon==='spear'){
@@ -18,16 +19,25 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
   const extend=attack?smooth((dt+.25)/.25)*(1-smooth((dt-.06)/.35)):0;
   // The thrust is a compact forward drive and withdrawal, never a sword slash.
   const thrust=attack?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
-  pose.weaponPose={wrist:new T.Vector3(-.20,1.29-.025*parryWeight,.22+extend*.04),direction:new T.Vector3(.76,.26-.15*thrust+.15*parryWeight,.65).normalize(),support:.24};
+  pose.weaponPose={wrist:new T.Vector3(-.30,1.30-.025*parryWeight,.12+extend*.035),direction:new T.Vector3(.76,.24*(1-thrust)+.15*parryWeight,.65).normalize(),support:.24};
  }else if(WEAPONS[weapon].twoHanded){
-  const attacking=action?.role==='attack'&&action.exchange.move!=='shove',load=attacking?smooth((dt+.65)/.3)*(1-smooth((dt+.20)/.20)):0,follow=attacking?smooth(dt/.18)*(1-smooth((dt-.22)/.26)):0;
+  const attacking=action?.role==='attack'&&action.exchange.move!=='shove';
   const blocked=action?.exchange.defense==='shield'||action?.exchange.defense==='parry';
-  const wrist=new T.Vector3(-.10,1.25,.26).lerp(new T.Vector3(-.15,1.59,.24),load);wrist.y+=follow*(blocked?.08:-.10);
-  const swingDirection=new T.Vector3(-.45,.18,1).lerp(new T.Vector3(-.45,.86,-.26),load).lerp(blocked?new T.Vector3(-.45,.8,.35):new T.Vector3(-.45,-.62,.78),follow).normalize();
-  const engaged=attacking?smooth((dt+.65)/.18)*(1-smooth((dt-.20)/.28)):0;
-  const direction=new T.Vector3(-.55,.75,.65).normalize().lerp(swingDirection,engaged).normalize();
-  pose.weaponPose={wrist,direction,support:-.18};
+  const heavy=action?.exchange.heavy,theta=attacking?stroke(dt,[[-.65,.70],[-.26,heavy?-.46:-.20],[0,1.25],[.13,blocked?1.12:1.90],[.30,blocked?.92:1.65],[.48,.70]]):.70;
+  const lift=attacking?stroke(dt,[[-.65,0],[-.26,heavy?.32:.23],[0,0],[.13,blocked?.025:-.10],[.30,-.025],[.48,0]]):0;
+  const wrist=new T.Vector3(-.13,1.28+lift,.24),direction=new T.Vector3(-.45,Math.cos(theta),Math.sin(theta)).normalize();
+  pose.weaponPose={wrist,direction,edge:new T.Vector3(0,-Math.sin(theta),Math.cos(theta)),support:-.18};
+  if(attacking&&action.exchange.cut==='horizontal'&&!heavy){const axis=new T.Vector3(0,0,1),plane=.95*smooth((dt+.65)/.32)*(1-smooth((dt-.20)/.28));direction.applyAxisAngle(axis,plane);pose.weaponPose.edge!.applyAxisAngle(axis,plane);wrist.y-=lift*.35;}
   if(parryWeight){pose.weaponPose.wrist!.lerp(new T.Vector3(-.20,1.23,.24),parryWeight);pose.weaponPose.direction!.lerp(new T.Vector3(.8,.35,.45).normalize(),parryWeight).normalize();pose.weaponPose.support=-.18+.38*parryWeight;}
+ }else{
+  // Short chopping weapons load at the shoulder, strike, then recover above the hip.
+  // They no longer inherit the sword clip's wide wrist-led sweep.
+  const attack=action?.role==='attack'&&action.exchange.move!=='shove',blocked=action?.exchange.defense==='shield'||action?.exchange.defense==='parry';
+  const theta=attack?stroke(dt,[[-.65,.6],[-.23,-.55],[0,1.35],[.14,blocked?1.16:2.1],[.48,.6]]):.6;
+  const lift=attack?stroke(dt,[[-.65,0],[-.23,.23],[0,0],[.14,blocked?.03:-.02],[.48,0]]):0;
+  pose.weaponPose={wrist:new T.Vector3(-.27,1.37+lift,.20),direction:new T.Vector3(-.25,Math.cos(theta),Math.sin(theta)).normalize(),edge:new T.Vector3(0,-Math.sin(theta),Math.cos(theta))};
+  if(attack&&action.exchange.cut==='horizontal'&&!action.exchange.heavy){const axis=new T.Vector3(0,0,1),plane=1.05*smooth((dt+.65)/.32)*(1-smooth((dt-.20)/.28));pose.weaponPose.direction!.applyAxisAngle(axis,plane);pose.weaponPose.edge!.applyAxisAngle(axis,plane);pose.weaponPose.wrist!.y-=lift*.35;}
+  if(parryWeight){pose.weaponPose.wrist!.lerp(new T.Vector3(-.24,1.39,.21),parryWeight);pose.weaponPose.direction!.lerp(new T.Vector3(.2,.8,.45).normalize(),parryWeight).normalize();}
  }
  pose.weaponPose??={};pose.weaponPose.clearBody=true;
  if(pose.weaponPose.wrist){
@@ -35,6 +45,7 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
   // behind the moving breastplate. The final solver also checks parry offsets.
   pose.weaponPose.wrist.sub(new T.Vector3(0,.88,0)).applyQuaternion(pose[2].q).add(new T.Vector3(0,.8,0)).add(new T.Vector3(0,.08,0).applyQuaternion(pose[0].q)).add(pose[0].p.clone().multiplyScalar(.9));
   pose.weaponPose.direction!.applyQuaternion(pose[2].q);
+  pose.weaponPose.edge?.applyQuaternion(pose[2].q);
  }
  if(held<1)pose.weaponPose.weight=held;
  return pose;
