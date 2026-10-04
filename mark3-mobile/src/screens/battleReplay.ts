@@ -3,10 +3,13 @@ export type FighterKind='knight'|'mercenary'|'bandit';
 export const FIGHTER_NAMES:Record<FighterKind,string>={knight:'기사',mercenary:'용병',bandit:'도적'};
 export const fighterKind=(neutral?:string):FighterKind=>neutral==='bandit'?'bandit':neutral==='mercenary'?'mercenary':'knight';
 export type Defense='shield'|'parry'|'dodge'|'hit';
-export type Combatant={id:number;side:0|1;kind:FighterKind;low:number;high:number;deathAt:number};
-export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal';move?:'cut'|'shove';counterOf?:number};
+export type Combatant={id:number;side:0|1;kind:FighterKind;low:number;high:number;deathAt:number;heavyDeath?:boolean};
+export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal';move?:'cut'|'shove';counterOf?:number;heavy?:boolean};
 export const COMBAT_PACE=1.35;
 export const ATTACK_LEAD=.65/COMBAT_PACE,ATTACK_RECOVERY=.48/COMBAT_PACE;
+export const attackLead=(e:Exchange)=>e.heavy?.9:ATTACK_LEAD;
+/** Heavy windup holds the coil longer, then accelerates into the same contact pose. */
+export const attackPhase=(e:Exchange,time:number)=>{const dt=time-e.at;return e.heavy&&dt<-.18?-.243+(dt+.18)*(.407/.72):dt*COMBAT_PACE;};
 export type ReplayStage={at:number;counts:[number,number];morale:[number,number];round:number};
 export type BattleReplay={actors:Combatant[];exchanges:Exchange[];stages:ReplayStage[];initial:[number,number];final:[number,number];outcome:DetailedCombatResult['outcome'];reason:DetailedCombatResult['reason'];finish:number;duration:number};
 const defense=(kind:FighterKind,n:number):Defense=>kind==='knight'?(n%5===3?'dodge':'shield'):kind==='bandit'?'dodge':n%3===2?'dodge':'parry';
@@ -26,8 +29,8 @@ export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKin
    const enemies=alive.filter(a=>a.side!==victim.side);if(!enemies.length)continue;
    const killer=[...enemies].sort((a,b)=>(busy.get(a.id)??0)-(busy.get(b.id)??0)||Math.abs(formationLane(a)-formationLane(victim))-Math.abs(formationLane(b)-formationLane(victim))||a.id-b.id)[0];
    const wave=busy.get(killer.id)??0,at=start+2.18+wave*.92+(victim.id%3)*.045;
-   busy.set(killer.id,wave+1);victim.deathAt=at+.10;end=Math.max(end,at+.6);
-   exchanges.push({at,attacker:killer.id,target:victim.id,defense:'hit',fatal:true});
+   busy.set(killer.id,wave+1);victim.deathAt=at+.10;victim.heavyDeath=wave===0;end=Math.max(end,at+.6);
+   exchanges.push({at,attacker:killer.id,target:victim.id,defense:'hit',fatal:true,heavy:victim.heavyDeath,cut:'diagonal'});
   }
   // Initiative follows the previous encounter: a parry or sidestep opens a
   // counter, while a blocked cut can keep the attacker pressing. No two-hit turns.
@@ -42,12 +45,13 @@ export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKin
    const next=previous?(previous.defense==='parry'||previous.defense==='dodge'?previous.target:previous.move==='shove'?previous.attacker:roll%4===0?previous.target:previous.attacker):undefined;
    if(previous?attacker.id!==next:attacker.side!==lane%2)continue;
    // A single sword cannot attack and parry two different blows at once.
-   const clashes=(id:number)=>exchanges.some(e=>(e.attacker===id||e.target===id)&&Math.abs(e.at-at)<ATTACK_LEAD+ATTACK_RECOVERY);
+   const clashes=(id:number,lead=ATTACK_LEAD)=>exchanges.some(e=>(e.attacker===id||e.target===id)&&at-lead<e.at+ATTACK_RECOVERY&&at+ATTACK_RECOVERY>e.at-attackLead(e));
    if(clashes(attacker.id))continue;
    const occupied=clashes(target.id);
    const counter=previous&&(previous.defense==='parry'||previous.defense==='dodge')&&previous.target===attacker.id;
    const shove=!occupied&&previous!==undefined&&roll%4===1;
-   exchanges.push({at,attacker:attacker.id,target:target.id,defense:occupied||shove?'hit':defense(target.kind,serial++),fatal:false,move:shove?'shove':'cut',counterOf:counter?previous.at:undefined,cut:roll%2?'horizontal':'diagonal'});
+   const heavy=!shove&&!occupied&&(previous===undefined||roll%7===0)&&!clashes(attacker.id,.9)&&!clashes(target.id,.9);
+   exchanges.push({at,attacker:attacker.id,target:target.id,defense:occupied||shove?'hit':defense(target.kind,serial++),fatal:false,move:shove?'shove':'cut',counterOf:counter?previous.at:undefined,heavy,cut:heavy?'diagonal':roll%2?'horizontal':'diagonal'});
   }
   stages.push({at:end,counts,morale,round});start=end+.06;
  };
@@ -70,7 +74,7 @@ export function bakeBattleMovement(plan:BattleReplay){
  const fps=30,frames:BattleFrame[]=[],positions=plan.actors.map(a=>{const row=plan.actors.filter(b=>b.side===a.side).indexOf(a),n=plan.actors.filter(b=>b.side===a.side).length;return {x:a.side===0?-3.1:3.1,z:(row-(n-1)/2)*1.9,yaw:a.side===0?Math.PI/2:-Math.PI/2,moving:0};});
  for(let tick=0;tick<=Math.ceil(plan.duration*fps);tick++){
   const time=tick/fps,alive=plan.actors.filter(a=>time<a.deathAt),actions:BattleFrame['actions']=plan.actors.map(()=>null);
-  for(const e of plan.exchanges){if(time<e.at-ATTACK_LEAD||time>e.at+ATTACK_RECOVERY)continue;
+  for(const e of plan.exchanges){if(time<e.at-attackLead(e)||time>e.at+ATTACK_RECOVERY)continue;
    if(time<plan.actors[e.attacker].deathAt)actions[e.attacker]={exchange:e,role:'attack'};
    if(time<plan.actors[e.target].deathAt&&(!actions[e.target]||e.fatal))actions[e.target]={exchange:e,role:'defend'};
   }
@@ -92,6 +96,9 @@ export function bakeBattleMovement(plan:BattleReplay){
     const dt=time-action.exchange.at,awayX=p.x-enemy.x,awayZ=p.z-enemy.z,n=Math.hypot(awayX,awayZ)||1;
     if(action.role==='attack'){gx=enemy.x+awayX/n*1.02;gz=enemy.z+awayZ/n*1.02;}
     else {const push=smooth(dt/.20)*(1-smooth((dt-.20)/.30));gx=p.x+awayX/n*.9*push;gz=p.z+awayZ/n*.9*push;}
+   }
+   if(action?.role==='attack'&&action.exchange.heavy&&action.exchange.defense==='parry'){
+    const dt=time-action.exchange.at,w=smooth(dt/.12)*(1-smooth((dt-.18)/.20)),dx=p.x-enemy.x,dz=p.z-enemy.z,n=Math.hypot(dx,dz)||1;gx+=dx/n*.65*w;gz+=dz/n*.65*w;
    }
    if(action?.role==='defend'&&action.exchange.defense==='dodge'){
     const w=smooth((time-(action.exchange.at-.45))/.4)*(1-smooth((time-action.exchange.at-.1)/.38));gx+=Math.cos(angle)*.85*w;gz-=Math.sin(angle)*.85*w;

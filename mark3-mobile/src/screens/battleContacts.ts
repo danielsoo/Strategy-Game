@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {BattleReplay,BattleFrame,bakeBattleMovement,COMBAT_PACE} from './battleReplay';
+import {BattleReplay,BattleFrame,bakeBattleMovement,attackPhase} from './battleReplay';
 import {fighterPose} from './battleMotion';
 import {buildFighter} from './fighterAppearance';
 import {buildDuelContacts,bladeShield,armorSpheres} from './duelContacts';
@@ -36,7 +36,7 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
   else {move(i,away.clone().multiplyScalar(amount*.5),j);move(j,away.clone().multiplyScalar(-amount*.5),i);}
  };
  if(align)for(const event of plan.exchanges){
-  const dt=(time-event.at)*COMBAT_PACE;if(dt<-.5||dt>.36||time>=plan.actors[event.attacker].deathAt||event.defense==='dodge')continue;
+  const dt=attackPhase(event,time);if(dt<-.5||dt>.36||time>=plan.actors[event.attacker].deathAt||event.defense==='dodge')continue;
   const a=actors[event.attacker],b=actors[event.target],ga=groups[event.attacker],gb=groups[event.target];
   if(frame.actions[event.attacker]?.role!=='attack'||frame.actions[event.attacker]?.exchange!==event)continue;
   if(event.move==='shove'){
@@ -77,7 +77,7 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
  // A parry is a shared blade contact. Split the approach between both feet so crowd
  // separation cannot leave the defender blocking empty air.
  if(align)for(let pass=0;pass<3;pass++)for(const e of plan.exchanges){
-  const dt=(time-e.at)*COMBAT_PACE;if(e.defense!=='parry'||dt<-.5||dt>.36)continue;
+  const dt=attackPhase(e,time);if(e.defense!=='parry'||dt<-.5||dt>.36)continue;
   if(frame.actions[e.attacker]?.exchange!==e||frame.actions[e.target]?.exchange!==e)continue;
   const a=actors[e.attacker],b=actors[e.target],blade=v(.52).applyMatrix4(a.rig.sword.matrixWorld),lo=v(.12).applyMatrix4(b.rig.sword.matrixWorld),hi=v(.8).applyMatrix4(b.rig.sword.matrixWorld);
   const along=Math.abs(hi.y-lo.y)>.01?T.MathUtils.clamp((blade.y-lo.y)/(hi.y-lo.y),0,1):.5;
