@@ -50,7 +50,7 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
   if(label!==lastPhase.current){lastPhase.current=label;onPhase?.(label);}
  });
  return <group ref={root} position={position} scale={scale} rotation={[0,yaw,0]}>
-  {actors.map(({rig},i)=><group key={i} ref={g=>{groups.current[i]=g;}}><primitive object={rig.mesh} dispose={null}/><group ref={g=>{markers.current[i]=g;}}>
+  {actors.map(({rig},i)=><group key={i} name={`realm-battle-actor-${i}`} ref={g=>{groups.current[i]=g;}}><primitive object={rig.mesh} dispose={null}/><group ref={g=>{markers.current[i]=g;}}>
    <mesh position={[0,1.95,0]}><octahedronGeometry args={[.06,0]}/><meshBasicMaterial color={colors[plan.actors[i].side]}/></mesh>
    <mesh rotation={[-Math.PI/2,0,0]} position={[0,.032,0]}><ringGeometry args={[.36,.375,32]}/><meshBasicMaterial color={colors[plan.actors[i].side]} transparent opacity={.7} depthWrite={false}/></mesh>
   </group></group>)}

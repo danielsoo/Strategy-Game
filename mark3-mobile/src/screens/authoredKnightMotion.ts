@@ -160,13 +160,14 @@ export function knightTransforms(p:Pose){
    if(length<1e-6||radius<1e-6)elbow.copy(center).addScaledVector(pole,radius);
    else {projected.divideScalar(length);const cosine=T.MathUtils.clamp(wrist.clone().sub(center).dot(direction)/(radius*length),-1,1),tangent=axis.clone().cross(projected),sine=Math.sqrt(1-cosine*cosine)*(tangent.dot(pole)<0?-1:1);elbow.copy(center).addScaledVector(projected,radius*cosine).addScaledVector(tangent,radius*sine);}
    if(p.weaponPose!.clearBody){
-    const anatomical=p.weaponPose!.support===undefined;
-    const outward=new T.Vector3(right?-1:1,-.6,.15).applyQuaternion(p[2].q),radial=anatomical?outward.clone().addScaledVector(axis,-outward.dot(axis)).normalize():elbow.clone().sub(center).normalize(),tangent=axis.clone().cross(radial);
+    const spear=p.weaponPose!.shaftLocked,anatomical=p.weaponPose!.support===undefined||spear;
+    const outward=new T.Vector3((right?-1:1)*(spear?.25:1),spear?-1:-.6,.15).applyQuaternion(p[2].q),radial=anatomical?outward.clone().addScaledVector(axis,-outward.dot(axis)).normalize():elbow.clone().sub(center).normalize(),tangent=axis.clone().cross(radial);
     const cost=(angle:number)=>{
      const e=center.clone().addScaledVector(radial,radius*Math.cos(angle)).addScaledVector(tangent,radius*Math.sin(angle));
      let penalty=0;
      for(let n=0;n<=6;n++)penalty+=Math.min(0,clearance(e.clone().lerp(wrist,n/6)))**2*300;
      const forearm=wrist.clone().sub(e).normalize();
+     if(spear){const local=bodyLocal(e),shoulder=bodyLocal(a);penalty+=Math.max(0,local.y-shoulder.y+.09)**2*1500+Math.max(0,Math.abs(local.x)-.38)**2*1000;}
      if(p.weaponPose!.edge&&p.weaponPose!.support===undefined)penalty+=Math.max(0,bodyLocal(e).y-Math.max(.45,bodyLocal(wrist).y-.06))**2*1000;
      const bend=e.clone().sub(center).normalize().dot(outward.clone().normalize());
      // The two analytic elbow branches can exchange scores mid-swing. Keep the

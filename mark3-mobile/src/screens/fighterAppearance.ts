@@ -7,6 +7,10 @@ import {appendClothSleeves} from './soldierSleeves';
 /** Shared anatomical rig, separate equipment, silhouettes and material sets. */
 export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weapon:WeaponKind='sword'){
  const rig=buildAuthoredKnight(scene,weapon),extras:T.Mesh[]=[],materials:T.MeshStandardMaterial[]=[],ownedTextures:T.Texture[]=[];
+ // Compensate the new across-body grip angle so it retains the previous
+ // navigation heading and contact staging. Keep the stance through the fall.
+ if(weapon==='spear')rig.mesh.rotation.y=Math.atan2(.76,.65)-Math.atan2(.96,.28);
+ const clothArms=kind!=='knight'&&weapon!=='sword';
  const hasShield=kind==='knight'&&!WEAPONS[weapon].twoHanded;
  if(!hasShield){rig.shield.visible=false;rig.shield.removeFromParent();}
  const material=(hex:string,metalness=0,roughness=.92)=>{const m=new T.MeshStandardMaterial({color:hex,metalness,roughness});materials.push(m);return m;};
@@ -14,9 +18,11 @@ export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weap
  const add=(g:T.BufferGeometry,m:T.Material,bone:number,p:[number,number,number],scale:[number,number,number]=[1,1,1])=>{const mesh=new T.Mesh(g,m);mesh.position.fromArray(p);mesh.scale.fromArray(scale);mesh.castShadow=true;mesh.receiveShadow=true;rig.bones[bone].add(mesh);extras.push(mesh);return mesh;};
  const team=material(color,0,.85);
  // A shoulder tie gives allegiance without painting the entire body blue or red.
- add(new T.CylinderGeometry(.101,.10,.045,14,1,true),team,1,[0,-.07,0]).rotation.z=-.58;
+ if(clothArms){
+  const axis=rig.bones[2].position.clone().sub(rig.bones[1].position),band=add(new T.CylinderGeometry(.079,.078,.037,16,1,true),team,1,axis.clone().multiplyScalar(.28).toArray() as [number,number,number]);
+  band.quaternion.setFromUnitVectors(new T.Vector3(0,1,0),axis.normalize());
+ }else add(new T.CylinderGeometry(.101,.10,.045,14,1,true),team,1,[0,-.07,0]).rotation.z=-.58;
  if(kind!=='knight'){
-  const clothArms=weapon!=='sword';
   rig.shield.visible=false;rig.shield.removeFromParent();
   const g=rig.mesh.geometry,p=g.getAttribute('position'),skinIds=g.getAttribute('skinIndex'),weights=g.getAttribute('skinWeight'),index=g.getIndex()!;
   const buckets:number[][]=[[],[],[]];
@@ -24,6 +30,7 @@ export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weap
   for(let i=0;i<index.count;i+=3){const ids=[index.getX(i),index.getX(i+1),index.getX(i+2)];if(ids.some(j=>{const bone=dominant(j);return bone===7||clothArms&&bone>=1&&bone<=6;}))continue;
    const y=ids.reduce((n,j)=>n+p.getY(j),0)/3,x=ids.reduce((n,j)=>n+Math.abs(p.getX(j)),0)/3;
    if(clothArms&&x>.20&&y>1.18)continue; // Remove remaining plate-shoulder tips at the chest seam.
+   if(clothArms&&x>.14&&y>1.34)continue;
    const bin=y<.25||y>.80&&y<.91?1:kind==='mercenary'&&x>.39&&y>.91&&y<1.2?2:0;buckets[bin].push(...ids);
   }
   // Reduce the projecting plate shoulders, breastplate and greaves into fitted layers.
@@ -36,6 +43,11 @@ export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weap
   }
   g.clearGroups();let offset=0;for(let i=0;i<buckets.length;i++){g.addGroup(offset,buckets[i].length,i);offset+=buckets[i].length;}g.setIndex(buckets.flat());
   if(clothArms)appendClothSleeves(g,rig.bones);g.computeVertexNormals();
+  if(clothArms)for(const [side,arm] of [[-1,1],[1,4]]){
+   add(new T.SphereGeometry(.084,20,14),cloth,arm,[0,0,0]);
+   // The clavicle stays with the torso while the upper arm turns in its socket.
+   add(new T.SphereGeometry(1,20,14),cloth,0,[side*.18,.48,-.075],[.115,.083,.10]);
+  }
   // Woven cloth microtexture, generated deterministically; no metallic coat or heraldic breastplate.
   const pixels=new Uint8Array(128*128*4);for(let y=0;y<128;y++)for(let x=0;x<128;x++){const i=(y*128+x)*4,n=190+((x*17+y*31)%23)+(x%4===0||y%4===0?-28:0);pixels.set([n,n,n,255],i);}
   const weave=new T.DataTexture(pixels,128,128);weave.wrapS=weave.wrapT=T.RepeatWrapping;weave.repeat.set(22,22);weave.needsUpdate=true;ownedTextures.push(weave);cloth.map=weave;cloth.bumpMap=weave;cloth.bumpScale=.003;

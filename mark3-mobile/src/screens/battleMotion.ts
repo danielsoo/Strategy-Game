@@ -22,7 +22,7 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
   // The thrust is a compact forward drive and withdrawal, never a sword slash.
   const thrust=attack?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
   const draw=attack?stroke(dt,[[-.65,0],[-.27,-.04],[0,.10],[.08,.11],[.31,-.025],[.48,0]]):0;
-  pose.weaponPose={wrist:new T.Vector3(-.30+draw*.22,1.30-.025*parryWeight,.12+draw),direction:new T.Vector3(.76,.24*(1-thrust)+.15*parryWeight,.65).normalize(),support:.24,shaftLocked:true};
+  pose.weaponPose={wrist:new T.Vector3(-.29+draw*.12,1.18+.02*parryWeight,.19+draw),direction:new T.Vector3(.96,.12*(1-thrust)+.12*parryWeight,.28).normalize(),support:.38,shaftLocked:true};
  }else if(WEAPONS[weapon].twoHanded){
   const attacking=action?.role==='attack'&&action.exchange.move!=='shove';
   const blocked=action?.exchange.defense==='shield'||action?.exchange.defense==='parry';
