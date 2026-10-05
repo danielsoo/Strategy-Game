@@ -5,7 +5,7 @@ import {SHIELD_REST_NORMAL,shieldRotation,DUEL_DURATION} from './duelMotion';
 import {buildBattleWeapon,WeaponKind} from './battleWeapons';
 
 type Joint={p:T.Vector3;q:T.Quaternion};
-export type AuthoredPose=Joint[]&{stance?:{weight:number;feet:T.Vector3[]};weaponPose?:{wrist?:T.Vector3;direction?:T.Vector3;edge?:T.Vector3;support?:number;weight?:number;clearBody?:boolean;shaftLocked?:boolean}};
+export type AuthoredPose=Joint[]&{mocap?:boolean;stance?:{weight:number;feet:T.Vector3[]};weaponPose?:{wrist?:T.Vector3;direction?:T.Vector3;edge?:T.Vector3;support?:number;weight?:number;clearBody?:boolean;shaftLocked?:boolean}};
 type Pose=AuthoredPose;
 const V=(p:number[])=>new T.Vector3().fromArray(p);
 const Q=(q:number[])=>new T.Quaternion().fromArray(q);
@@ -97,7 +97,8 @@ export function knightTransforms(p:Pose){
   const actualHandQ=p[j+2].q.clone().multiply(rests[2][j+2].q);
   // 가벼운 소품용 원본의 과도한 손목 플릭을 중갑 장갑의 12도 범위로 제한한다.
   const handAxis=V([0,1,0]).applyQuaternion(actualHandQ),forearm=wrist.clone().sub(elbow).normalize(),bend=handAxis.angleTo(forearm);
-  if(bend>Math.PI/15)actualHandQ.premultiply(new T.Quaternion().slerp(align(handAxis,forearm),1-(Math.PI/15)/bend));
+  const wristLimit=p.mocap?.6:Math.PI/15;
+  if(bend>wristLimit)actualHandQ.premultiply(new T.Quaternion().slerp(align(handAxis,forearm),1-wristLimit/bend));
   bones[i+2].quaternion.copy(actualHandQ).multiply(rests[2][j+2].q.clone().invert()).multiply(corrections[c+1]);
   const hand=hands[right?0:1];hand.position.copy(wrist);hand.quaternion.copy(actualHandQ);
   if(right){

@@ -24,7 +24,7 @@ import {Instances,SHAPES} from './Board3D';
 import {SPEAR_TECHNIQUES,SPEAR_GUARDS} from './spearTechniques';
 
 function ControlRow({children}:{children:React.ReactNode}){return <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{flexGrow:0,flexShrink:0}}><View style={styles.tabs}>{children}</View></ScrollView>;}
-const names=['왕실 성채','수도원 도시','변경 성','군대 대열','병사 대련','숲과 지면','부대 전투'];
+const names=['왕실 성채','수도원 도시','변경 성','군대 대열','병사 대련','숲과 지면','부대 전투','무료 모캡'];
 function SceneReady({onReady}:{onReady:(ready:boolean)=>void}){useEffect(()=>onReady(true),[onReady]);return null;}
 /** 실제 게임과 같은 모델·재질·배치 코드. 저장이나 게임 서버 요청은 하지 않는다. */
 function ReviewScene({variant,angle,action,clock,onPhase,closeup,armDetail,detailActor,battle}:{variant:number;angle:number;action:ArmyAction;clock:DuelClock;closeup:boolean;armDetail:boolean;detailActor:number;onPhase:(phase:string)=>void;battle:BattleReplay}){
@@ -71,7 +71,7 @@ export default function RealmArtReview(){
   const {height}=useWindowDimensions();
   return <View style={[styles.page,{height,maxHeight:height}]}>
     {!capture&&<><View style={styles.header}><Text style={styles.title}>왕국의 풍경</Text><Text style={styles.note}>{variant===6?'부대 전투 14 · 창술 공방과 연결 기술':'대련 동작 8 · 착지 후 자세 고정'}</Text></View>
-    <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>setVariant(i)} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
+    <ControlRow>{names.map((name,i)=><TouchableOpacity key={name} accessibilityRole="button" accessibilityLabel={name} onPress={()=>{if(i===7&&typeof window!=='undefined')window.location.search='?art=1&mocap=1';else setVariant(i);}} style={[styles.button,variant===i&&styles.active]}><Text style={styles.label}>{name}</Text></TouchableOpacity>)}</ControlRow>{variant===3&&<ControlRow>{([['idle','대기'],['walk','걷기']] as [ArmyAction,string][]).map(([mode,label])=><TouchableOpacity key={mode} accessibilityRole="button" accessibilityLabel={label} onPress={()=>setAction(mode)} style={[styles.button,action===mode&&styles.active]}><Text style={styles.label}>{label}</Text></TouchableOpacity>)}</ControlRow>}{variant===4&&<><ControlRow>{([
       ['아군 선공',()=>{clock.first=0;clock.time=0;clock.paused=false;setPaused(false);}],
       ['사선베기',()=>{setReviewCut(0);clock.time=CONTACT_TIMES[0]-.7;clock.paused=false;setPaused(false);}],
       ['횡베기',()=>{setReviewCut(1);clock.time=CONTACT_TIMES[1]-.7;clock.paused=false;setPaused(false);}],
