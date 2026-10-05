@@ -1,6 +1,7 @@
 import * as T from 'three';
 import {clone} from 'three/examples/jsm/utils/SkeletonUtils';
 import {NativeClip} from './nativeCombatModels';
+import {createNativeQuiver} from './nativeQuiver';
 
 type Grip=(hand:T.Object3D,out:T.Vector3,scope:T.Object3D)=>T.Vector3;
 const RELEASE_TIME=5/30;
@@ -42,13 +43,20 @@ export function createNativeBow(root:T.Object3D,animations:T.AnimationClip[],gri
  mixer.stopAllAction();const deathClip=animations.find(c=>c.name==='bowDeath')!;mixer.clipAction(deathClip).play();const deathTime=deathClip.duration*.28;mixer.setTime(deathTime);sample.updateMatrixWorld(true);
  const deathLeft=grip(sample.getObjectByName('mixamorigLeftHand')!,new T.Vector3(),sample),deathRight=grip(sample.getObjectByName('mixamorigRightHand')!,new T.Vector3(),sample),deathRotation=frame(sample,deathLeft,deathRight,false);deathLeft.y-=sample.position.y;
  mixer.stopAllAction();mixer.uncacheRoot(sample);
+ const quiver=createNativeQuiver(root);prop.userData.quiver=quiver.mount;
  let released=false;
  function update(clip:NativeClip,time:number,duration:number){
   if(clip==='bowVolley'){
    const draw=animations.find(c=>c.name==='bowDraw')!.duration,shoot=shotClip.duration;
    if(time<draw)clip='bowDraw';else if(time<draw+.65){clip='bowAim';time-=draw;}else if(time<draw+.65+shoot){clip='bowShoot';time-=draw+.65;}else{clip='bowIdle';time-=draw+.65+shoot;}
   }
-  root.updateMatrixWorld(true);grip(left,leftGrip,root);grip(right,rightGrip,root);
+  root.updateMatrixWorld(true);
+  quiver.update();
+  if(clip==='bowDeath'){
+   const floor=new T.Box3().setFromObject(quiver.mount,true).min.y;
+   if(floor<.012){root.position.y+=.012-floor;root.updateMatrixWorld(true);quiver.update();}
+  }
+  grip(left,leftGrip,root);grip(right,rightGrip,root);
   const aiming=clip==='bowAim'||clip==='bowShoot'&&time<RELEASE_TIME||clip==='bowDraw'&&time>.55;
   prop.position.copy(leftGrip);prop.quaternion.copy(frame(root,leftGrip,rightGrip,aiming));prop.updateMatrixWorld(true);
   const nock=new T.Vector3(0,0,-.17),drawing=clip==='bowDraw'&&time>.58;
@@ -64,5 +72,5 @@ export function createNativeBow(root:T.Object3D,animations:T.AnimationClip[],gri
   if(released){const elapsed=time-deathTime;prop.position.copy(deathLeft);prop.position.y+=root.position.y-4.9*elapsed*elapsed;prop.quaternion.copy(deathRotation).slerp(new T.Quaternion().setFromEuler(new T.Euler(Math.PI/2,0,0)),T.MathUtils.smoothstep(elapsed,0,.5));prop.updateMatrixWorld(true);const box=new T.Box3();prop.traverseVisible(o=>{if(o instanceof T.Mesh)box.expandByObject(o,true);});if(box.min.y<.012)prop.position.y+=.012-box.min.y;}
   prop.userData.nock=nock;prop.userData.arrow=arrow;prop.userData.fired=fired;prop.userData.releaseTime=RELEASE_TIME;
  }
- return {prop,update,rightGrip,leftGrip,get released(){return released;},dispose(){const geometries=new Set<T.BufferGeometry>(),materials=new Set<T.Material>();prop.traverse(o=>{if(o instanceof T.Mesh){geometries.add(o.geometry);(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>materials.add(m));}});geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());}};
+ return {prop,update,rightGrip,leftGrip,get released(){return released;},dispose(){quiver.dispose();const geometries=new Set<T.BufferGeometry>(),materials=new Set<T.Material>();prop.traverse(o=>{if(o instanceof T.Mesh){geometries.add(o.geometry);(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>materials.add(m));}});geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());}};
 }

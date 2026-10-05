@@ -18,6 +18,8 @@ async function main(){for(const model of ['paladin','arissa','erika']){
    const t=clip.duration*frame/120;action.paused=false;action.enabled=true;mixer.setTime(t);ground.update(name==='bowDeath');root.updateMatrixWorld(true);
    const elbow=root.getObjectByName('mixamorigLeftForeArm')!,native=elbow.quaternion.clone();bow.update(name,t,clip.duration);bow.prop!.updateMatrixWorld(true);
    assert(native.equals(elbow.quaternion),'bow overwrote native elbow');
+   const quiver=bow.prop!.userData.quiver as T.Group;assert(quiver?.parent===root,'bow has no attached quiver');
+   if(name==='bowDeath')assert(new T.Box3().setFromObject(quiver,true).min.y>=.01,'quiver penetrates ground during death');
    assert(bow.released||bow.prop!.position.distanceTo(bow.leftGrip)<1e-6,'left palm lost bow');
    const nock=bow.prop!.localToWorld(bow.prop!.userData.nock.clone());
    if(name==='bowAim'||name==='bowDraw'&&t>.58||name==='bowShoot'&&t<5/30)assert(nock.distanceTo(bow.rightGrip)<1e-6,'string detached from drawing hand');
