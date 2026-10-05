@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import * as T from 'three';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 globalThis.ProgressEvent=class {};
-const approved=['idle','slash','cross','block','guard','release','impact','walk'];
+const approved=['idle','slash','cross','block','guard','release','impact','walk','heavy','axeIdle','axeChop','axeSweep','axeBlock','axeWalk','twoIdle','twoChop','twoSweep','twoBlock','twoWalk','spearThrust','spearGuard'];
 for(const id of ['paladin','arissa','erika']){
  const dir=`public/realm/${id}`,json=JSON.parse(fs.readFileSync(`${dir}/model.gltf`));
  for(const image of json.images)assert(fs.statSync(`${dir}/${image.uri}`).size>1000,'missing texture');
@@ -29,4 +29,3 @@ for(const id of ['paladin','arissa','erika']){
  }
  console.log(`${id}: ${meshes.length} native skinned meshes, ${approved.length} bound clips, textures and reverse scrubbing verified`);
 }
-
