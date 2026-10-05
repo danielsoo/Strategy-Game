@@ -10,6 +10,7 @@ import {COMBAT_MODELS,CombatModel,NATIVE_CLIPS,NativeClip} from './nativeCombatM
 import {nativeDeathGround} from './nativeDeathGround';
 
 import RealmDaylight from './RealmDaylight';
+import RealmMocapDuel from './RealmMocapDuel';
 import {useRealmMaterial} from './realmAssets';
 
 
@@ -42,6 +43,10 @@ function Motion({model,weapon,clip,clock,angle,close,onTime,onEnd}:{model:Combat
  return <><color attach="background" args={['#82958c']}/><fog attach="fog" args={['#82958c',10,30]}/><RealmDaylight/><ambientLight intensity={.65}/><mesh rotation-x={-Math.PI/2} receiveShadow><planeGeometry args={[60,60]}/><meshStandardMaterial {...grass} roughness={1}/></mesh><primitive object={rig.root} dispose={null}/>{equipment.prop&&<primitive object={equipment.prop} dispose={null}/>}</>;
 }
 export default function RealmMocapReview(){
+ const [duel,setDuel]=useState(true);
+ return duel?<RealmMocapDuel onSingle={()=>setDuel(false)}/>:<SingleReview onDuel={()=>setDuel(true)}/>;
+}
+function SingleReview({onDuel}:{onDuel:()=>void}){
  const [model,setModel]=useState<CombatModel>('paladin'),[weapon,setWeapon]=useState<WeaponKind>('sword');
  const [clip,setClip]=useState<NativeClip>('idle'),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false),[angle,setAngle]=useState(-.65),[time,setTime]=useState(''),[close,setClose]=useState(false);
  const clock=useRef<Clock>({time:0,paused:false,speed:1,duration:1}).current,{height}=useWindowDimensions();
@@ -53,7 +58,7 @@ export default function RealmMocapReview(){
   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.row}><View style={s.controls}>{clipsForWeapon(weapon,model==='paladin').map(key=>button(weaponClipLabel(weapon,key,NATIVE_CLIPS[key]),()=>{setClip(key);clock.time=0;clock.paused=false;setPaused(false);},clip===key))}</View></ScrollView>
   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.row}><View style={s.controls}>{button(paused?'재생':'일시정지',()=>{if(clock.paused&&clock.time>=clock.duration)clock.time=0;clock.paused=!clock.paused;setPaused(clock.paused);})}{button(slow?'정상 속도':'느리게 보기',()=>{clock.speed=slow?1:.25;setSlow(!slow);})}{button('처음부터',()=>{clock.time=0;})}{button('이전 프레임',()=>{clock.time=Math.max(0,clock.time-1/30);clock.paused=true;setPaused(true);})}{button('다음 프레임',()=>{clock.time=Math.min(clock.duration,clock.time+1/30);clock.paused=true;setPaused(true);})}{button('동작 중간',()=>{clock.time=clock.duration*.5;clock.paused=true;setPaused(true);})}{button(close?'전체 보기':'손·무기 확대',()=>setClose(v=>!v))}{button('왼쪽에서 보기',()=>setAngle(a=>a-.5))}{button('오른쪽에서 보기',()=>setAngle(a=>a+.5))}</View></ScrollView>
   <View style={{flex:1,minHeight:0}}><Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.01,far:60}} gl={{antialias:true,toneMapping:T.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><Motion key={model} model={model} weapon={weapon} clip={clip} clock={clock} angle={angle} close={close} onTime={setTime} onEnd={()=>setPaused(true)}/></Suspense></Canvas></View>
-  <View style={s.footer}><Text style={s.note}>{weaponClipLabel(weapon,clip,NATIVE_CLIPS[clip])} · {time}</Text>{button('전투 화면',()=>{if(typeof window!=='undefined')window.location.search='?art=1&battle=1';})}</View>
+  <View style={s.footer}><Text style={s.note}>{weaponClipLabel(weapon,clip,NATIVE_CLIPS[clip])} · {time}</Text>{button('상대와 공방 보기',onDuel)}</View>
  </View>;
 }
 const s=StyleSheet.create({page:{flex:1,width:'100%',backgroundColor:'#172521'},header:{padding:16,paddingBottom:10},title:{fontFamily:'serif',fontSize:23,color:'#e2d5b7'},note:{fontSize:12,color:'#acb7ac'},row:{flexGrow:0,flexShrink:0},controls:{flexDirection:'row',gap:6,paddingHorizontal:16,paddingBottom:10},button:{paddingHorizontal:13,paddingVertical:10,borderWidth:1,borderColor:'#596451'},active:{backgroundColor:'#5a664e'},label:{color:'#e5dbc4',fontSize:13},footer:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',padding:12}});
