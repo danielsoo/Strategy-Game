@@ -180,6 +180,16 @@ export function knightTransforms(p:Pose){
    }
    bones[i].quaternion.premultiply(align(b.clone().sub(a),elbow.clone().sub(a)));
    const lowerRotation=align(c.clone().sub(b),wrist.clone().sub(elbow));bones[i+1].quaternion.premultiply(lowerRotation);bones[i+1].position.copy(elbow);bones[i+2].position.copy(wrist);
+   if(p.weaponPose!.clearBody){
+    // Rebuild the arm's bend plane from the actual joint positions. Keeping the
+    // sword clip's axial twist after IK corkscrews the sleeve around a straight bone.
+    const side=right?-1:1,upperRest=E(side).sub(S(side)),lowerRest=W(side).sub(E(side));
+    const upper=elbow.clone().sub(a),lower=wrist.clone().sub(elbow);
+    const restNormal=upperRest.clone().cross(lowerRest).normalize(),normal=upper.clone().cross(lower).normalize();
+    const frame=(axis:T.Vector3,n:T.Vector3)=>{axis=axis.clone().normalize();return new T.Matrix4().makeBasis(axis,n.clone().cross(axis).normalize(),n);};
+    bones[i].quaternion.setFromRotationMatrix(frame(upper,normal).multiply(frame(upperRest,restNormal).transpose()));
+    bones[i+1].quaternion.setFromRotationMatrix(frame(lower,normal).multiply(frame(lowerRest,restNormal).transpose()));
+   }
    const y=wrist.clone().sub(elbow).normalize(),z=direction.clone();
    if(p.weaponPose!.shaftLocked){
     // Preserve the thrust axis when reachable; let the whole haft yield a few

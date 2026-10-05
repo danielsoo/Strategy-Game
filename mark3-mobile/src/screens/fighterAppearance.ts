@@ -2,6 +2,7 @@ import * as T from 'three';
 import {buildAuthoredKnight} from './authoredKnightMotion';
 import type {FighterKind} from './battleReplay';
 import {WeaponKind,WEAPONS} from './battleWeapons';
+import {appendClothSleeves} from './soldierSleeves';
 
 /** Shared anatomical rig, separate equipment, silhouettes and material sets. */
 export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weapon:WeaponKind='sword'){
@@ -15,23 +16,26 @@ export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weap
  // A shoulder tie gives allegiance without painting the entire body blue or red.
  add(new T.CylinderGeometry(.101,.10,.045,14,1,true),team,1,[0,-.07,0]).rotation.z=-.58;
  if(kind!=='knight'){
+  const clothArms=weapon!=='sword';
   rig.shield.visible=false;rig.shield.removeFromParent();
   const g=rig.mesh.geometry,p=g.getAttribute('position'),skinIds=g.getAttribute('skinIndex'),weights=g.getAttribute('skinWeight'),index=g.getIndex()!;
   const buckets:number[][]=[[],[],[]];
   const dominant=(i:number)=>{let k=0;for(let j=1;j<4;j++)if(weights.getComponent(i,j)>weights.getComponent(i,k))k=j;return skinIds.getComponent(i,k);};
-  for(let i=0;i<index.count;i+=3){const ids=[index.getX(i),index.getX(i+1),index.getX(i+2)];if(ids.some(j=>dominant(j)===7))continue;
+  for(let i=0;i<index.count;i+=3){const ids=[index.getX(i),index.getX(i+1),index.getX(i+2)];if(ids.some(j=>{const bone=dominant(j);return bone===7||clothArms&&bone>=1&&bone<=6;}))continue;
    const y=ids.reduce((n,j)=>n+p.getY(j),0)/3,x=ids.reduce((n,j)=>n+Math.abs(p.getX(j)),0)/3;
+   if(clothArms&&x>.20&&y>1.18)continue; // Remove remaining plate-shoulder tips at the chest seam.
    const bin=y<.25||y>.80&&y<.91?1:kind==='mercenary'&&x>.39&&y>.91&&y<1.2?2:0;buckets[bin].push(...ids);
   }
   // Reduce the projecting plate shoulders, breastplate and greaves into fitted layers.
   for(let i=0;i<p.count;i++){
    let x=p.getX(i),y=p.getY(i),z=p.getZ(i),ax=Math.abs(x);
-   if(ax>.22&&y>1.16){x=Math.sign(x)*(.22+(ax-.22)*.70);z*=.72;}
+   if(!clothArms&&ax>.22&&y>1.16){x=Math.sign(x)*(.22+(ax-.22)*.70);z*=.72;}
    if(ax<.25&&y>.91&&y<1.4)z*=kind==='bandit'?.70:.83;
    if(y<.72&&y>.25){const center=Math.sign(x)*.14;x=center+(x-center)*.86;z*=.83;}
    p.setXYZ(i,x,y,z);
   }
-  g.clearGroups();let offset=0;for(let i=0;i<buckets.length;i++){g.addGroup(offset,buckets[i].length,i);offset+=buckets[i].length;}g.setIndex(buckets.flat());g.computeVertexNormals();
+  g.clearGroups();let offset=0;for(let i=0;i<buckets.length;i++){g.addGroup(offset,buckets[i].length,i);offset+=buckets[i].length;}g.setIndex(buckets.flat());
+  if(clothArms)appendClothSleeves(g,rig.bones);g.computeVertexNormals();
   // Woven cloth microtexture, generated deterministically; no metallic coat or heraldic breastplate.
   const pixels=new Uint8Array(128*128*4);for(let y=0;y<128;y++)for(let x=0;x<128;x++){const i=(y*128+x)*4,n=190+((x*17+y*31)%23)+(x%4===0||y%4===0?-28:0);pixels.set([n,n,n,255],i);}
   const weave=new T.DataTexture(pixels,128,128);weave.wrapS=weave.wrapT=T.RepeatWrapping;weave.repeat.set(22,22);weave.needsUpdate=true;ownedTextures.push(weave);cloth.map=weave;cloth.bumpMap=weave;cloth.bumpScale=.003;
