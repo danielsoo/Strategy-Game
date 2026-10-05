@@ -57,6 +57,9 @@ export function createDuelActor(asset:GLTF,fighter:DuelFighter){
   else if(equipment.prop&&fighter.weapon!=='bow')guard.set(0,0,twoHand(fighter.weapon)?.4:.34).applyMatrix4(equipment.prop.matrixWorld);
   else guard.copy(root.getObjectByName('mixamorigSpine2')!.getWorldPosition(new T.Vector3())).add(new T.Vector3(0,.12,.2));
   visual.add(root);if(equipment.prop)visual.add(equipment.prop);visual.updateMatrixWorld(true);
+  // Contact sampling updates the bone palette in actor space. Refresh it after
+  // placement as well, before either the shadow or colour pass consumes it.
+  root.traverse(o=>{if(o instanceof T.SkinnedMesh)o.skeleton.update();});
  }
  evaluate({clip:idle(fighter),time:0});
  return {visual,root,equipment,fighter,animations,strike,guard,duration,evaluate,idle:idle(fighter),defense:defense(fighter),impact:impact(fighter),death:death(fighter),dispose(){ground.dispose();equipment.dispose();mixer.stopAllAction();mixer.uncacheRoot(root);}};
