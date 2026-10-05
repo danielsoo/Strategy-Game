@@ -11,6 +11,7 @@ import {buildKnightAsh} from './knightAsh';
 import type {DuelClock} from './RealmDuel';
 import type {Point} from './duelMotion';
 import {WEAPONS} from './battleWeapons';
+import {SPEAR_TECHNIQUES,SPEAR_GUARDS} from './spearTechniques';
 
 /** Bounded representative formations; equipment and casualties follow the resolved combat log. */
 export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale=1,yaw=0,surfaceHeight,colors=['#3e89db','#bf473c'],onPhase}:{plan:BattleReplay;clock?:DuelClock;startAt?:number;position?:Point;scale?:number;yaw?:number;surfaceHeight?:(x:number,z:number)=>number;colors?:[string,string];onPhase?:(s:string)=>void}){
@@ -44,8 +45,8 @@ export default function RealmBattle({plan,clock,startAt=0,position=[0,0,0],scale
   const active=frame.actions.find(a=>a?.role==='attack')?.exchange;
   const weapon=WEAPONS[active?plan.actors[active.attacker].weapon??'sword':'sword'];
   const dying=plan.actors.find(a=>a.heavyDeath&&time>=a.deathAt&&time<a.deathAt+2.2);
-  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.move==='shove'?'밀쳐내기':`${active.counterOf!==undefined?'반격 · ':''}${active.heavy?'강공격 · ':''}${weapon.name==='검'?(active.cut==='horizontal'?'횡베기':'사선베기'):weapon.action}`} · ${active.move==='shove'?'뒤로 물러나 균형 회복':active.defense==='shield'?'방패 방어':active.defense==='parry'?(active.heavy?'강공격 패링 · 공격자 경직':'패링 · 무기 쳐내기'):active.defense==='dodge'?'옆걸음 회피':active.heavy&&active.fatal?'치명타 · 쓰러짐':'피격'}`:dying?'강공격 치명타 · 힘을 잃고 쓰러집니다':'간격 조절';
-  const heavyPhase=active?.heavy?time<active.at?(weapon.name==='창'?'창을 거두어 찌르기 준비':weapon.name+' 강타 준비'):active.defense==='parry'||active.defense==='shield'?time<active.at+.22?'무릎을 굽혀 충격을 버팁니다':active.defense==='parry'?'공격을 옆으로 흘려내며 반격 준비':'방패를 밀어 올려 간격 회복':actionLabel:actionLabel;
+  const actionLabel=active?`${FIGHTER_NAMES[plan.actors[active.attacker].kind]} ${active.move==='shove'?'밀쳐내기':`${active.counterOf!==undefined?'반격 · ':''}${active.heavy?'강공격 · ':''}${active.spearTechnique?SPEAR_TECHNIQUES[active.spearTechnique]:weapon.name==='검'?(active.cut==='horizontal'?'횡베기':'사선베기'):weapon.action}`} · ${active.move==='shove'?'뒤로 물러나 균형 회복':active.defense==='shield'?'방패 방어':active.defense==='parry'?(active.spearGuard?SPEAR_GUARDS[active.spearGuard]:active.heavy?'강공격 패링 · 공격자 경직':'패링 · 무기 쳐내기'):active.defense==='dodge'?'옆걸음 회피':active.heavy&&active.fatal?'치명타 · 쓰러짐':'피격'}`:dying?'강공격 치명타 · 힘을 잃고 쓰러집니다':'간격 조절';
+  const heavyPhase=active?.heavy?time<active.at?(active.spearTechnique?SPEAR_TECHNIQUES[active.spearTechnique]+' 준비':weapon.name+' 강타 준비'):active.defense==='parry'||active.defense==='shield'?time<active.at+.22?'무릎을 굽혀 충격을 버팁니다':active.defense==='parry'?'공격을 옆으로 흘려내며 반격 준비':'방패를 밀어 올려 간격 회복':actionLabel:actionLabel;
   const label=`${names[0]} ${stage.counts[0]} / ${names[1]} ${stage.counts[1]} · ${dying?actionLabel:time>plan.finish?result:time<1.8&&!active?'접근 중':heavyPhase} · 최종 생존 ${plan.final[0]} : ${plan.final[1]}`;
   if(label!==lastPhase.current){lastPhase.current=label;onPhase?.(label);}
  });

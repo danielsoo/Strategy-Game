@@ -1,11 +1,13 @@
 import type {DetailedCombatResult} from '../services/combatSystem';
 import {WeaponKind,WEAPONS} from './battleWeapons';
+import {assignSpearTechniques} from './spearTechniques';
+import type {SpearTechnique,SpearGuard} from './spearTechniques';
 export type FighterKind='knight'|'mercenary'|'bandit';
 export const FIGHTER_NAMES:Record<FighterKind,string>={knight:'기사',mercenary:'용병',bandit:'도적'};
 export const fighterKind=(neutral?:string):FighterKind=>neutral==='bandit'?'bandit':neutral==='mercenary'?'mercenary':'knight';
 export type Defense='shield'|'parry'|'dodge'|'hit';
 export type Combatant={id:number;side:0|1;kind:FighterKind;weapon?:WeaponKind;low:number;high:number;deathAt:number;heavyDeath?:boolean};
-export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal';move?:'cut'|'shove';counterOf?:number;heavy?:boolean};
+export type Exchange={at:number;attacker:number;target:number;defense:Defense;fatal:boolean;cut?:'diagonal'|'horizontal';move?:'cut'|'shove';counterOf?:number;heavy?:boolean;spearTechnique?:SpearTechnique;spearGuard?:SpearGuard};
 export const COMBAT_PACE=1.35;
 export const ATTACK_LEAD=.65/COMBAT_PACE,ATTACK_RECOVERY=.48/COMBAT_PACE;
 export const attackLead=(e:Exchange)=>e.heavy?.9:ATTACK_LEAD;
@@ -70,6 +72,7 @@ export function createBattleReplay(result:DetailedCombatResult,kinds:[FighterKin
  for(const e of exchanges){const old=e.at;e.at=retime(old);if(e.counterOf!==undefined)e.counterOf=retime(e.counterOf);if(e.fatal)actors[e.target].deathAt=e.at+.10;}
  stages.forEach(s=>s.at=retime(s.at));
  for(const e of exchanges){const target=actors[e.target];if(e.defense==='shield'&&WEAPONS[target.weapon??'sword'].twoHanded)e.defense='parry';if(e.defense==='parry'&&target.weapon==='flail')e.defense='dodge';}
+ assignSpearTechniques(actors,exchanges);
  const finish=retime(start),deathEnd=Math.max(0,...actors.filter(a=>Number.isFinite(a.deathAt)).map(a=>a.deathAt+7.1));
  return {actors,exchanges:exchanges.sort((a,b)=>a.at-b.at||a.attacker-b.attacker),stages,initial,final,outcome:result.outcome,reason:result.reason,finish,duration:Math.max(finish+2.8,deathEnd)};
 }

@@ -19,7 +19,11 @@ for(const index of process.argv[2]?[+process.argv[2]]:[5,6,7,8,9,10]){
   for(const a of actors)renderMax=Math.max(renderMax,Math.hypot(a.rig.mesh.parent!.position.x,a.rig.mesh.parent!.position.z));
   const a=plan.actors[e.attacker];if(a.weapon==='sword'||e.move==='shove')continue;
   const f=knightTransforms(fighterPose(a,e.at,frame.actions[a.id],false));
-  if(a.weapon==='spear')shaftY=Math.max(shaftY,Math.abs(new T.Vector3(0,0,1).applyQuaternion(f.bones[16].quaternion).y));
+  if(a.weapon==='spear'){
+   const y=new T.Vector3(0,0,1).applyQuaternion(f.bones[16].quaternion).y;
+   if(e.spearTechnique==='high-low')assert(y>-.35&&y<.10,'low-line thrust misses the lower torso');
+   else shaftY=Math.max(shaftY,Math.abs(y));
+  }
   if(['axe','hatchet','halberd'].includes(a.weapon!)&&e.cut!=='horizontal'){
    const edge=new T.Vector3(1,0,0).applyQuaternion(f.bones[16].quaternion),axis=new T.Vector3(0,0,1).applyQuaternion(f.bones[16].quaternion);
    const tangent=new T.Vector3(0,-1,0).addScaledVector(axis,axis.y).normalize();minEdge=Math.min(minEdge,edge.dot(tangent));

@@ -19,7 +19,7 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
  if(attacking&&weapon!=='spear')weaponBodyMotion(pose,weapon,dt,!!action?.exchange.heavy,action?.exchange.defense==='shield'||action?.exchange.defense==='parry');
  const parryWeight=action?.role==='defend'&&action.exchange.defense==='parry'?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
  if(weapon==='spear'){
-  spearMotion(pose,dt,attacking,parryWeight,held*(1-Number(moving)*.65));
+  spearMotion(pose,dt,attacking,parryWeight,held*(1-Number(moving)*.65),action?.exchange.spearTechnique,action?.exchange.spearGuard);
  }else if(WEAPONS[weapon].twoHanded){
   const attacking=action?.role==='attack'&&action.exchange.move!=='shove';
   const blocked=action?.exchange.defense==='shield'||action?.exchange.defense==='parry';
@@ -50,11 +50,6 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
   // behind the moving breastplate. The final solver also checks parry offsets.
   pose.weaponPose.wrist.sub(new T.Vector3(0,.88,0)).applyQuaternion(pose[2].q).add(new T.Vector3(0,.8,0)).add(new T.Vector3(0,.08,0).applyQuaternion(pose[0].q)).add(pose[0].p.clone().multiplyScalar(.9));
   pose.weaponPose.direction!.applyQuaternion(pose[2].q);
-  if(weapon==='spear'){
-   const level=smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33));
-   pose.weaponPose.direction!.y=.06*(1-level)+.15*parryWeight;
-   pose.weaponPose.direction!.normalize();
-  }
   pose.weaponPose.edge?.applyQuaternion(pose[2].q);
  }
  if(held<1)pose.weaponPose.weight=held;
