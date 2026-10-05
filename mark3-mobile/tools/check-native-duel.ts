@@ -19,11 +19,16 @@ async function main(){
    const preHealth=[...duel.update(e.contact-.001).health];
    duel.update(e.contact);const attackPoint=A.visual.localToWorld(A.strike.clone()),defensePoint=D.visual.localToWorld((e.outcome==='block'?D.guard:D.bodyTarget).clone());
    if(e.outcome==='block'){assert.deepEqual(duel.state.health,preHealth,'a successful block caused damage');assert.equal(duel.state.winner,null,'a successful block killed the defender');}
-   else{if(D.fighter.weapon!=='bow')assert.notEqual(e.defenderClip,D.defense,'hit reused the successful block pose');if(D.fighter.model==='paladin'&&D.fighter.weapon==='sword')assert(D.guard.distanceTo(D.bodyTarget)>.25,'shield still covers the hit point');}
+   else{assert(['block','twoBlock','axeBlock','bowIdle'].includes(e.defenderClip),'failure is an attack pose instead of a guard attempt');assert(e.defenseTime<=.111,'failed guard was fully raised');if(D.fighter.model==='paladin'&&D.fighter.weapon==='sword')assert(D.guard.distanceTo(D.bodyTarget)>.25,'shield still covers the hit point');}
    if(A.fighter.weapon!=='bow')assert(attackPoint.distanceTo(defensePoint)<.48,`${a.model}/${a.weapon} vs ${b.model}: contact missed (${attackPoint.distanceTo(defensePoint)})`);
    else{const arrow=A.equipment.prop!.userData.arrow as T.Group;arrow.updateWorldMatrix(true,false);const tip=arrow.localToWorld(new T.Vector3(0,0,.935));assert(tip.distanceTo(e.point)<.015,'arrow did not reach resolved contact');duel.update(e.contact+.2);assert(!arrow.visible,'arrow continued through opponent');}
    // Sampling both sides of every contact catches position discontinuities.
    duel.update(e.contact-1/60);const before=duel.actors.map(x=>x.visual.position.clone());duel.update(e.contact+1/60);duel.actors.forEach((x,i)=>assert(x.visual.position.distanceTo(before[i])<.12,'contact teleported a fighter'));
+   if(e.outcome!=='block'){
+    const joints=['mixamorigRightHand','mixamorigLeftHand','mixamorigNeck'];
+    duel.update(e.contact-.01);const pre=joints.map(n=>D.root.getObjectByName(n)!.getWorldPosition(new T.Vector3()));
+    duel.update(e.contact+.01);joints.forEach((n,i)=>assert(D.root.getObjectByName(n)!.getWorldPosition(new T.Vector3()).distanceTo(pre[i])<.08,'guard-to-impact transition snapped a joint'));
+   }
   }
   let previous:T.Vector3[]|undefined;
   for(let t=0;t<duel.duration;t+=1/24){duel.update(t);const positions=duel.actors.map(A=>A.visual.position.clone());assert(positions[0].distanceTo(positions[1])>1.1,'fighters overlap');if(previous)positions.forEach((p,i)=>assert(p.distanceTo(previous![i])<.25,'fighter root teleported'));previous=positions;}

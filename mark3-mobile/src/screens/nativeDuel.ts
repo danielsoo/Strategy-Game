@@ -74,14 +74,19 @@ export function createDuelActor(asset:GLTF,fighter:DuelFighter){
   if(hasShield(fighter)&&shield)guard.copy(meshCenter(shield)).add(new T.Vector3(0,0,.035));
   else if(equipment.prop&&fighter.weapon!=='bow')guard.set(0,0,twoHand(fighter.weapon)?.4:.34).applyMatrix4(equipment.prop.matrixWorld);
   else guard.copy(root.getObjectByName('mixamorigSpine2')!.getWorldPosition(new T.Vector3())).add(new T.Vector3(0,.12,.2));
-  bodyTarget.copy(root.getObjectByName('mixamorigSpine2')!.getWorldPosition(new T.Vector3())).add(new T.Vector3(.12,.06,.17));
+  const chest=root.getObjectByName('mixamorigSpine2')!.getWorldPosition(new T.Vector3());
+  bodyTarget.copy(root.getObjectByName('mixamorigRightArm')!.getWorldPosition(new T.Vector3()));
+  const outside=bodyTarget.clone().sub(chest).setY(0).normalize();
+  // The sword-side shoulder is outside a late, still-low shield. Aim at that
+  // exposed armour surface rather than pretending a guarded chest was hit.
+  bodyTarget.addScaledVector(outside,.075).add(new T.Vector3(0,.035,.09));
   visual.add(root);if(equipment.prop)visual.add(equipment.prop);visual.updateMatrixWorld(true);
   // Contact sampling updates the bone palette in actor space. Refresh it after
   // placement as well, before either the shadow or colour pass consumes it.
   root.traverse(o=>{if(o instanceof T.SkinnedMesh)o.skeleton.update();});
  }
  evaluate({clip:idle(fighter),time:0});
- return {visual,root,equipment,fighter,animations,strike,guard,bodyTarget,trail,duration,evaluate,idle:idle(fighter),defense:defense(fighter),exposed:(hasShield(fighter)?'cross':fighter.weapon==='bow'?'bowIdle':twoHand(fighter.weapon)?'twoSweep':'axeSweep') as NativeClip,impact:impact(fighter),death:death(fighter),dispose(){trail.geometry.dispose();trail.material.dispose();ground.dispose();equipment.dispose();mixer.stopAllAction();mixer.uncacheRoot(root);}};
+ return {visual,root,equipment,fighter,animations,strike,guard,bodyTarget,trail,duration,evaluate,idle:idle(fighter),defense:defense(fighter),failedGuard:(hasShield(fighter)?'block':defense(fighter)) as NativeClip,impact:impact(fighter),death:death(fighter),dispose(){trail.geometry.dispose();trail.material.dispose();ground.dispose();equipment.dispose();mixer.stopAllAction();mixer.uncacheRoot(root);}};
 }
 export type DuelActor=ReturnType<typeof createDuelActor>;
 type PreparedEvent=DuelEvent&{start:number;contact:number;end:number;clip:NativeClip;marker:number;defenseTime:number;defenderClip:NativeClip;attackPosition:T.Vector3;defendPosition:T.Vector3;point:T.Vector3;flight:number;projectileOrigin:T.Vector3;approach:number;ballistic:ReturnType<typeof arrowFlight>|null;aimDirection:T.Vector3|null};
@@ -95,8 +100,8 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
   const a=event.attacker,d=(1-a) as DuelSide,A=actors[a],D=actors[d],clip=attack(A.fighter,event),duration=A.duration(clip);
   // A successful block targets equipment. Hits must visibly reach an opening,
   // never reuse the same raised shield pose and then kill its defender.
-  const defenderClip=event.outcome==='block'?D.defense:D.exposed;
-  const defenseTime=D.duration(defenderClip)*(event.outcome==='block'?.65:.5);D.evaluate({clip:defenderClip,time:defenseTime});const guard=(event.outcome==='block'?D.guard:D.bodyTarget).clone();
+  const defenderClip=event.outcome==='block'?D.defense:D.failedGuard;
+  const defenseTime=event.outcome==='block'?D.duration(defenderClip)*.65:Math.min(.11,D.duration(defenderClip)*.2);D.evaluate({clip:defenderClip,time:defenseTime});const guard=(event.outcome==='block'?D.guard:D.bodyTarget).clone();
   let marker=duration*.45,point=new T.Vector3(),projectileOrigin=new T.Vector3(),best=-Infinity;
   const shot=A.fighter.weapon==='bow';
   if(shot){marker=A.duration('bowDraw')+.65+5/30;A.evaluate({clip,time:marker});point.copy(A.strike);projectileOrigin.copy(A.equipment.rightGrip);}
@@ -120,7 +125,7 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
   }
   const flight=ballistic?.duration??0,approach=ranged&&!shot?Math.max(2.8,(range-1.5)/1.6):0;
   const windup=(shot?marker:event.jump?1.25:event.heavy?1.05:.76)+approach;
-  const contact=start+windup+flight,end=contact+(event.outcome==='death'?D.duration(D.death)+.65:.9);
+  const contact=start+windup+flight,end=contact+(event.outcome==='death'?D.duration(D.death)+.65:event.outcome==='hit'?D.duration(D.impact)+.25:.9);
   prepared.push({...event,start,contact,end,clip,marker,defenseTime,defenderClip,attackPosition,defendPosition:defensePosition,point:contactPoint,flight,projectileOrigin,approach,ballistic,aimDirection});start=end+.18;
  }
  const duration=prepared.at(-1)!.end+.6;
@@ -145,15 +150,17 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
     if(e.aimDirection){const release=e.contact-e.flight,drawStart=A.duration('bowDraw')*.55,blend=ease((before-drawStart)/.3)*(1-ease((t-release-.05)/.32));if(blend>0){A.evaluate(poses[a],others[a],weights[a]);const native=A.equipment.leftGrip.clone().sub(A.equipment.rightGrip).normalize();aims[a]=native.lerp(e.aimDirection,blend).normalize();}}
     if(before<e.approach){const walk:NativeClip=twoHand(A.fighter.weapon)?'twoWalk':hasShield(A.fighter)?'walk':'axeWalk';poses[a]={clip:walk,time:Math.max(0,before)%A.duration(walk)};}
     const travel=ease(before/Math.max(.15,windup*.8))*(1-ease((after-.15)/.65));positions[a].lerp(e.attackPosition,travel);
-    // Defender raises the appropriate guard before the committed strike.
+    // Success raises the guard in time. Failure plays only the first part of
+    // the actual guard capture, starting late; never freeze an attack pose.
     if(after<0||e.outcome==='block'){
      poses[d]={clip:e.defenderClip,time:e.defenseTime};weights[d]=ease((t-e.start+.2)/.36)*(1-ease((after-.2)/.48));
+     if(e.outcome!=='block'){const attempt=T.MathUtils.clamp((after+.24)/.24,0,1);poses[d].time=e.defenseTime*attempt;weights[d]=ease(attempt/.6);}
      if(after>=0)positions[d].x+=(d===0?-1:1)*Math.sin(Math.min(1,after/.65)*Math.PI)*(e.heavy?.14:.07);
      if(after>=0){const react:NativeClip=hasShield(D.fighter)?'impact':D.impact;poses[d]={clip:react,time:after};others[d]={clip:after<.3?D.defense:D.idle,time:after<.3?e.defenseTime:0};weights[d]=ease(after/.06)*(1-ease((after-.45)/.4));}
-    }else{poses[d]={clip:dead?D.death:D.impact,time:Math.max(0,after)};others[d]={clip:after<.3?e.defenderClip:D.idle,time:after<.3?e.defenseTime:0};weights[d]=ease(after/.09)*(dead?1:1-ease((after-.5)/.4));if(!dead)positions[d].x+=(d===0?-1:1)*.17*Math.sin(Math.min(1,after/.9)*Math.PI);}
+    }else{poses[d]={clip:dead?D.death:D.impact,time:Math.max(0,after)};others[d]={clip:after<.3?e.defenderClip:D.idle,time:after<.3?e.defenseTime:0};weights[d]=ease(after/.12)*(dead?1:1-ease((after-D.duration(D.impact)+.14)/.22));}
     const actorLabel=a===0?'아군':'적군';state.phase=after<0?`${actorLabel} ${A.fighter.weapon==='bow'?'조준 · 발사':e.heavy?'강공격 준비':'공격'}`:e.outcome==='block'?`${hasShield(D.fighter)?'방패 방어':'무기 받아내기'} → 반격 준비`:e.outcome==='death'?`${d===0?'아군':'적군'} 쓰러짐`:'피격 · 자세 회복';
    }
-   if(dead){poses[d]={clip:D.death,time:Math.min(D.duration(D.death),after)};others[d]={clip:e.defenderClip,time:e.defenseTime};weights[d]=ease(after/.09);positions[d].copy(e.defendPosition);positions[a].copy(e.attackPosition);if(!ongoing)state.phase=`${a===0?'아군':'적군'} 승리 · 공방 종료`;}
+   if(dead){poses[d]={clip:D.death,time:Math.min(D.duration(D.death),after)};others[d]={clip:e.defenderClip,time:e.defenseTime};weights[d]=ease(after/.14);positions[d].copy(e.defendPosition);positions[a].copy(e.attackPosition);if(!ongoing)state.phase=`${a===0?'아군':'적군'} 승리 · 공방 종료`;}
    if(after>=0&&after<.22)state.contact={point:e.point.clone(),age:after,blocked:e.outcome==='block'};
   }
   actors.forEach((A,i)=>{A.trail.visible=false;A.visual.position.copy(positions[i]);A.visual.rotation.y=i===0?Math.PI/2:-Math.PI/2;A.evaluate(poses[i],others[i],weights[i],aims[i]);});
