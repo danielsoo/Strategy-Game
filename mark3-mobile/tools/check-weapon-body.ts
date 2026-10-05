@@ -23,8 +23,18 @@ for(const index of [5,6,7,8,9]){
   }
  }
  console.log({weapon:actor.weapon,pelvis,chest,upperArm,shoulder,elbow,grip,wristBend,worstWrist});
- assert(pelvis>.25,'attack has no meaningful pelvis rotation');
- assert(chest>.35,'attack has no meaningful chest rotation');
+ if(actor.weapon==='spear'){
+  // A thrust is powered by translation along the shaft, not an axe-like sweep.
+  const axis=new T.Vector3(0,0,1).applyQuaternion(hit.bones[16].quaternion);
+  const travel=hit.grip.clone().sub(load.grip),hipTravel=hit.bones[8].position.clone().sub(load.bones[8].position);
+  console.log({axis:axis.toArray(),travel:travel.toArray(),along:travel.dot(axis),alignment:travel.clone().normalize().dot(axis),hip:hipTravel.dot(axis)});
+  assert(travel.dot(axis)>.25&&travel.clone().normalize().dot(axis)>.85,'spear moves sideways instead of along its shaft');
+  assert(hipTravel.dot(axis)>.12,'spear thrust has no body weight transfer');
+  assert(chest<.35&&pelvis<.25,'spear thrust inherits a broad chopping torso rotation');
+ }else{
+  assert(pelvis>.25,'attack has no meaningful pelvis rotation');
+  assert(chest>.35,'attack has no meaningful chest rotation');
+ }
  assert(shoulder>.08&&elbow>.12&&grip>.18,'weapon is flicked from a stationary arm');
  assert(wristBend<Math.PI/9,'gripping hand bends away from the forearm');
 }

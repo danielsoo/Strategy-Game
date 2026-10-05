@@ -3,13 +3,13 @@ import {buildAuthoredKnight} from './authoredKnightMotion';
 import type {FighterKind} from './battleReplay';
 import {WeaponKind,WEAPONS} from './battleWeapons';
 import {appendClothSleeves} from './soldierSleeves';
+import {SPEAR_STANCE_YAW} from './spearMotion';
 
 /** Shared anatomical rig, separate equipment, silhouettes and material sets. */
 export function buildFighter(scene:T.Group,kind:FighterKind,color='#456eaa',weapon:WeaponKind='sword'){
  const rig=buildAuthoredKnight(scene,weapon),extras:T.Mesh[]=[],materials:T.MeshStandardMaterial[]=[],ownedTextures:T.Texture[]=[];
- // Compensate the new across-body grip angle so it retains the previous
- // navigation heading and contact staging. Keep the stance through the fall.
- if(weapon==='spear')rig.mesh.rotation.y=Math.atan2(.76,.65)-Math.atan2(.96,.28);
+ // Present the lead shoulder and spear point to the opponent; retain through death.
+ if(weapon==='spear')rig.mesh.rotation.y=SPEAR_STANCE_YAW;
  const clothArms=kind!=='knight'&&weapon!=='sword';
  const hasShield=kind==='knight'&&!WEAPONS[weapon].twoHanded;
  if(!hasShield){rig.shield.visible=false;rig.shield.removeFromParent();}

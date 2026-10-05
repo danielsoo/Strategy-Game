@@ -35,8 +35,20 @@ function solveBattlePose(plan:BattleReplay,time:number,frame:BattleFrame,actors:
   const a=actors[e.attacker].rig,b=actors[e.target].rig,p=fighterPose(plan.actors[e.target],time,frame.actions[e.target],frame.positions[e.target].moving);
   // Long forward hafts already span the incoming height. Re-targeting their
   // hands breaks the reachable two-hand guard, especially in mixed battles.
-  if(plan.actors[e.target].weapon==='spear'||plan.actors[e.target].weapon==='halberd')continue;
+  if(plan.actors[e.target].weapon==='halberd')continue;
   if(!p.weaponPose?.wrist)continue;
+  if(plan.actors[e.target].weapon==='spear'){
+   // Meet a low/high cut with the forward haft. The rear grip remains at the
+   // hip, rather than forcing both wrists down into the body to catch a blade.
+   for(let pass=0;pass<4;pass++){
+    const incoming=weaponPoint(a.sword,.52).applyMatrix4(a.sword.matrixWorld),guard=parryPoint(b.sword,.52).applyMatrix4(b.sword.matrixWorld);
+    const direction=p.weaponPose.direction!,vertical=T.MathUtils.clamp(direction.y+(incoming.y-guard.y)/scale/.8*weight,-.4,.4);
+    const horizontal=Math.hypot(direction.x,direction.z);
+    direction.x*=Math.sqrt(1-vertical*vertical)/horizontal;direction.z*=Math.sqrt(1-vertical*vertical)/horizontal;direction.y=vertical;
+    poseAuthoredKnight(b,p);groups[e.target].updateMatrixWorld(true);ground(e.target);
+   }
+   continue;
+  }
   for(let pass=0;pass<3;pass++){
    const incoming=weaponPoint(a.sword,.52).applyMatrix4(a.sword.matrixWorld),guard=parryPoint(b.sword,.52).applyMatrix4(b.sword.matrixWorld);
    const correction=T.MathUtils.clamp((incoming.y-guard.y)/scale,-.3,.3)*weight;

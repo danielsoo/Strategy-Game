@@ -5,6 +5,7 @@ import {attackPhase} from './battleReplay';
 import {heavyAttackPose,heavyDefensePose} from './heavyCombatMotion';
 import {WEAPONS} from './battleWeapons';
 import {weaponBodyMotion} from './weaponBodyMotion';
+import {spearMotion} from './spearMotion';
 const smooth=(n:number)=>{n=T.MathUtils.clamp(n,0,1);return n*n*(3-2*n);};
 const stroke=(dt:number,keys:[number,number][])=>{let i=0;while(i+1<keys.length&&dt>keys[i+1][0])i++;const a=keys[i],b=keys[Math.min(i+1,keys.length-1)];return a[1]+(b[1]-a[1])*smooth((dt-a[0])/(b[0]-a[0]||1));};
 function heavyImpactPose(guard:AuthoredPose,weight:number){const open=sampleKnightClip('Walk_Loop',.38);for(const j of [8,9,10])guard[j]=open[j];return mixKnightPoses(guard,sampleKnightClip('Hit_Chest',.24),weight*.85);}
@@ -15,14 +16,10 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
  if(weapon==='sword'||!held)return pose;
  pose[2].q.slerp(new T.Quaternion(),.65*held);pose[4].q.slerp(new T.Quaternion(),.45*held);
  const dt=action?attackPhase(action.exchange,time):-.65;
- if(attacking)weaponBodyMotion(pose,weapon,dt,!!action?.exchange.heavy,action?.exchange.defense==='shield'||action?.exchange.defense==='parry');
+ if(attacking&&weapon!=='spear')weaponBodyMotion(pose,weapon,dt,!!action?.exchange.heavy,action?.exchange.defense==='shield'||action?.exchange.defense==='parry');
  const parryWeight=action?.role==='defend'&&action.exchange.defense==='parry'?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
  if(weapon==='spear'){
-  const attack=action?.role==='attack'&&action.exchange.move!=='shove';
-  // The thrust is a compact forward drive and withdrawal, never a sword slash.
-  const thrust=attack?smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33)):0;
-  const draw=attack?stroke(dt,[[-.65,0],[-.27,-.04],[0,.10],[.08,.11],[.31,-.025],[.48,0]]):0;
-  pose.weaponPose={wrist:new T.Vector3(-.29+draw*.12,1.18+.02*parryWeight,.19+draw),direction:new T.Vector3(.96,.12*(1-thrust)+.12*parryWeight,.28).normalize(),support:.38,shaftLocked:true};
+  spearMotion(pose,dt,attacking,parryWeight,held*(1-Number(moving)*.65));
  }else if(WEAPONS[weapon].twoHanded){
   const attacking=action?.role==='attack'&&action.exchange.move!=='shove';
   const blocked=action?.exchange.defense==='shield'||action?.exchange.defense==='parry';
@@ -55,7 +52,7 @@ export function fighterPose(actor:Combatant,time:number,action:BattleFrame['acti
   pose.weaponPose.direction!.applyQuaternion(pose[2].q);
   if(weapon==='spear'){
    const level=smooth((dt+.65)/.25)*(1-smooth((dt-.15)/.33));
-   pose.weaponPose.direction!.y=.18*(1-level)+.15*parryWeight;
+   pose.weaponPose.direction!.y=.06*(1-level)+.15*parryWeight;
    pose.weaponPose.direction!.normalize();
   }
   pose.weaponPose.edge?.applyQuaternion(pose[2].q);
