@@ -37,3 +37,7 @@ Poly Haven의 CC0 1.0 자산을 게임에 포함했습니다. PC는 2K, 작은 �
 - 환경광: [Kloofendal 48d Partly Cloudy Pure Sky](https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky), Greg Zaal / Jarod Guest, CC0.
 
 재생성: `python -X utf8 tools/fetch-realm-floor.py`, `python -X utf8 tools/fetch-realm-undergrowth.py`, `python tools/prepare-realm-knight.py`.
+
+## Mixamo 원본 캐릭터 검토
+
+2026-10-05: 중갑 기사, 경장 용병·도적 후보의 원본 스킨과 애니메이션을 추가했습니다. 출처와 적용 범위는 [Mixamo 기록](MIXAMO.md)을 참고하세요. 현재 외형·동작 검토 화면에 적용되어 있습니다.
