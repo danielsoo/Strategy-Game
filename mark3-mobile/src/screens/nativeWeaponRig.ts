@@ -2,8 +2,12 @@ import * as T from 'three';
 import {buildBattleWeapon,WeaponKind,WEAPONS} from './battleWeapons';
 import {NativeClip} from './nativeCombatModels';
 import {clone} from 'three/examples/jsm/utils/SkeletonUtils';
+import {createNativeBow} from './nativeBow';
+export type NativeWeaponKind=WeaponKind|'bow';
+export const REVIEW_WEAPONS={...WEAPONS,bow:{name:'장궁',twoHanded:true}};
 
-export const WEAPON_CLIPS:Record<WeaponKind,NativeClip[]>={
+export const WEAPON_CLIPS:Record<NativeWeaponKind,NativeClip[]>={
+ bow:['bowVolley','bowIdle','bowDraw','bowAim','bowShoot','bowWalk','bowImpact','bowDeath'],
  sword:['idle','slash','cross','heavy','jumpHeavy','block','guard','release','impact','impactHeavy','death','walk'],
  hatchet:['axeIdle','axeChop','axeSweep','axeJump','axeBlock','axeImpact','axeImpactHeavy','death','axeWalk'],
  axe:['twoIdle','twoChop','twoSweep','twoJump','twoBlock','twoImpact','twoDeath','twoWalk'],
@@ -11,10 +15,10 @@ export const WEAPON_CLIPS:Record<WeaponKind,NativeClip[]>={
  spear:['spearGuard','spearThrust','twoImpact','twoDeath'],
  flail:['axeIdle','axeChop','axeSweep','axeJump','axeImpact','axeImpactHeavy','death','axeWalk'],
 };
-export const clipsForWeapon=(kind:WeaponKind,shield:boolean):NativeClip[]=>shield&&(kind==='hatchet'||kind==='flail')
+export const clipsForWeapon=(kind:NativeWeaponKind,shield:boolean):NativeClip[]=>shield&&(kind==='hatchet'||kind==='flail')
  ?['idle','axeChop','axeSweep','axeJump','block','guard','release','impact','impactHeavy','death','walk']:WEAPON_CLIPS[kind];
 
-export function nativeWeaponClip(animations:T.AnimationClip[],name:NativeClip,shield:boolean,kind:WeaponKind){
+export function nativeWeaponClip(animations:T.AnimationClip[],name:NativeClip,shield:boolean,kind:NativeWeaponKind){
  const source=animations.find(c=>c.name===name)!;
  if(!shield||!['hatchet','flail'].includes(kind)||!name.startsWith('axe'))return source;
  const guard=animations.find(c=>c.name==='guard')!;
@@ -39,13 +43,13 @@ function shaftFrame(root:T.Object3D,two:boolean,spear:boolean){
  return {r,l,axis,edge};
 }
 
-// Fit one constant grip roll to the fastest part of each captured cut. This is
-// not a per-frame auto-aim: the weapon never spins independently during a cut.
+// Ordinary cuts use a constant grip roll; twoJump has its own continuous
+// cutting-plane correction because its native wrists roll during recovery.
 export function calibrateCutRolls(root:T.Object3D,animations:T.AnimationClip[],kind:WeaponKind){
  const result:Partial<Record<NativeClip,number>>={};
  if(!['axe','hatchet','halberd'].includes(kind))return result;
  const sampleRoot=clone(root),mixer=new T.AnimationMixer(sampleRoot),two=WEAPONS[kind].twoHanded;
- for(const name of two?['twoChop','twoSweep','twoJump']:['axeChop','axeSweep','axeJump','jumpHeavy']){
+ for(const name of two?['twoChop','twoSweep']:['axeChop','axeSweep','axeJump','jumpHeavy']){
   const clip=animations.find(c=>c.name===name);if(!clip)continue;
   mixer.stopAllAction();const action=mixer.clipAction(clip).reset().setLoop(T.LoopOnce,1);action.clampWhenFinished=true;action.play();
   const samples=[];
@@ -56,13 +60,28 @@ export function calibrateCutRolls(root:T.Object3D,animations:T.AnimationClip[],k
  }
  mixer.stopAllAction();mixer.uncacheRoot(sampleRoot);return result;
 }
-export const weaponClipLabel=(weapon:WeaponKind,clip:NativeClip,label:string)=>weapon==='flail'?({axeChop:'강공격 · 철구 내려치기',axeSweep:'철구 가로 휘두르기'} as Partial<Record<NativeClip,string>>)[clip]??label:label;
+/** The jump capture rolls its wrists during recovery. Fit the blade's cutting
+ * plane to the downward stroke, not the faster sideways recovery afterwards. */
+export function jumpCutPlane(root:T.Object3D,animations:T.AnimationClip[],kind:WeaponKind){
+ if(kind!=='axe'&&kind!=='halberd')return null;
+ const clip=animations.find(c=>c.name==='twoJump');if(!clip)return null;
+ const sample=clone(root),mixer=new T.AnimationMixer(sample),action=mixer.clipAction(clip);
+ action.setLoop(T.LoopOnce,1);action.clampWhenFinished=true;action.play();
+ const frames=[];
+ for(let i=0;i<=120;i++){action.paused=false;action.enabled=true;mixer.setTime(clip.duration*i/120);sample.updateMatrixWorld(true);const f=shaftFrame(sample,true,false);frames.push({...f,head:f.r.clone().addScaledVector(f.axis,kind==='axe'?.66:1.02)});}
+ const inverse=sample.getWorldQuaternion(new T.Quaternion()).invert();
+ const normals=frames.map((_,index)=>{const i=T.MathUtils.clamp(index,52,73),f=frames[i],velocity=frames[i+1].head.clone().sub(frames[i-1].head);return f.axis.clone().cross(velocity).normalize().applyQuaternion(inverse);});
+ mixer.stopAllAction();mixer.uncacheRoot(sample);return normals;
+}
+export const weaponClipLabel=(weapon:NativeWeaponKind,clip:NativeClip,label:string)=>weapon==='flail'?({axeChop:'강공격 · 철구 내려치기',axeSweep:'철구 가로 휘두르기'} as Partial<Record<NativeClip,string>>)[clip]??label:label;
 
 /** Follow native captured hands. Never replace the captured shoulder/elbow rotations with IK. */
-export function createNativeWeapon(root:T.Object3D,kind:WeaponKind,animations:T.AnimationClip[]=[]){
+export function createNativeWeapon(root:T.Object3D,kind:NativeWeaponKind,animations:T.AnimationClip[]=[]){
+ if(kind==='bow')return createNativeBow(root,animations,capturedGrip);
  const right=root.getObjectByName('mixamorigRightHand')!,left=root.getObjectByName('mixamorigLeftHand')!;
  root.updateMatrixWorld(true);
  const rolls=calibrateCutRolls(root,animations,kind);
+ const jumpPlane=jumpCutPlane(root,animations,kind);
  const prop=kind==='sword'?null:buildBattleWeapon(kind);
  // Original FBX object labels do not describe their geometry: these are the
  // verified 684-vertex sword and 306-vertex shield, not the body or helmet.
@@ -98,8 +117,16 @@ export function createNativeWeapon(root:T.Object3D,kind:WeaponKind,animations:T.
    axis.normalize();
   }else axis.set(1,0,0).applyQuaternion(q).normalize();
   edge.set(0,1,0).applyQuaternion(q);edge.addScaledVector(axis,-edge.dot(axis)).normalize();
-  const roll=rolls[clip]??rolls[two?'twoChop':'axeChop']??0;
+  const roll=(clip==='twoJump'?rolls.twoChop:rolls[clip])??rolls[two?'twoChop':'axeChop']??0;
   edge.applyAxisAngle(axis,roll);
+  if(clip==='twoJump'&&jumpPlane){
+   const phase=time/Math.max(duration,.01),weight=T.MathUtils.smoothstep(phase,.20,.43)*(1-T.MathUtils.smoothstep(phase,.61,.84));
+   const frame=T.MathUtils.clamp(phase,0,1)*120,index=Math.min(119,Math.floor(frame));
+   const cutEdge=jumpPlane[index].clone().lerp(jumpPlane[index+1],frame-index).normalize().applyQuaternion(root.getWorldQuaternion(new T.Quaternion())).cross(axis).normalize();
+   // Interpolate around the haft, retaining both captured palm positions.
+   const angle=Math.atan2(axis.dot(edge.clone().cross(cutEdge)),edge.dot(cutEdge));
+   edge.applyAxisAngle(axis,angle*weight);
+  }
   normal.crossVectors(axis,edge).normalize();edge.crossVectors(normal,axis).normalize();
   prop.quaternion.setFromRotationMatrix(matrix.makeBasis(edge,normal,axis));
   prop.position.copy(rightGrip);prop.updateMatrixWorld(true);

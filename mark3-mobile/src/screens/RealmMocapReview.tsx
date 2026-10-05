@@ -4,7 +4,7 @@ import {Canvas,useFrame,useLoader} from '@react-three/fiber';
 import * as T from 'three';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader';
 import {clone} from 'three/examples/jsm/utils/SkeletonUtils';
-import {WeaponKind,WEAPONS} from './battleWeapons';
+import {NativeWeaponKind as WeaponKind,REVIEW_WEAPONS as WEAPONS} from './nativeWeaponRig';
 import {createNativeWeapon,clipsForWeapon,weaponClipLabel,nativeWeaponClip} from './nativeWeaponRig';
 import {COMBAT_MODELS,CombatModel,NATIVE_CLIPS,NativeClip} from './nativeCombatModels';
 import {nativeDeathGround} from './nativeDeathGround';
@@ -33,7 +33,10 @@ function Motion({model,weapon,clip,clock,angle,close,onTime,onEnd}:{model:Combat
   const time=Math.min(clock.time,duration);action.paused=false;action.enabled=true;rig.mixer.setTime(time);
   const h=0;ground.update(/death/i.test(clip));equipment.update(clip,time,duration);
   const jumping=/jump/i.test(clip),dying=/death/i.test(clip),hips=rig.root.getObjectByName('mixamorigHips')!.getWorldPosition(new T.Vector3());
-  const long=weapon==='spear'||weapon==='halberd',distance=close?1.75:Math.max(jumping?5:long?4.2:weapon==='axe'?3.8:3.4,(long?3.8:3)/(size.width/size.height));camera.position.set(hips.x+Math.sin(angle)*distance,h+1.55,hips.z+Math.cos(angle)*distance);camera.lookAt(hips.x,h+(close?1.2:dying?.5:jumping?1.1:.85),hips.z);
+  const long=weapon==='spear'||weapon==='halberd'||weapon==='bow',aspect=size.width/size.height;
+  const distance=close?1.75:weapon==='bow'&&dying?Math.max(5.2,4.4/aspect):Math.max(jumping?5:weapon==='bow'?4.5:long?4.2:weapon==='axe'?3.8:3.4,(long?3.8:3)/aspect);
+  const focus=hips.clone();if(weapon==='bow'&&dying&&equipment.prop)focus.lerp(equipment.prop.position,.5);
+  camera.position.set(focus.x+Math.sin(angle)*distance,h+1.55,focus.z+Math.cos(angle)*distance);camera.lookAt(focus.x,h+(close?1.2:dying?.5:jumping||weapon==='bow'?1.1:.85),focus.z);
   const text=`${time.toFixed(2)} / ${duration.toFixed(2)}초`;if(text!==previous.current){previous.current=text;onTime(text);}
  });
  return <><color attach="background" args={['#82958c']}/><fog attach="fog" args={['#82958c',10,30]}/><RealmDaylight/><ambientLight intensity={.65}/><mesh rotation-x={-Math.PI/2} receiveShadow><planeGeometry args={[60,60]}/><meshStandardMaterial {...grass} roughness={1}/></mesh><primitive object={rig.root} dispose={null}/>{equipment.prop&&<primitive object={equipment.prop} dispose={null}/>}</>;
@@ -46,7 +49,7 @@ export default function RealmMocapReview(){
  return <View style={[s.page,{height}]}><View style={s.header}><Text style={s.title}>왕국의 병사 · 외형과 동작</Text><Text style={s.note}>Mixamo 원본 모델·뼈대 · 전투 연결 전 검토</Text></View>
   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.row}><View style={s.controls}>{(Object.entries(COMBAT_MODELS) as [CombatModel,typeof COMBAT_MODELS[CombatModel]][]).map(([key,value])=>button(value.label,()=>{setModel(key);const next=key==='paladin'?weapon:weapon==='sword'?'hatchet':weapon;setWeapon(next);setClip(clipsForWeapon(next,key==='paladin')[0]);clock.time=0;clock.paused=false;setPaused(false);},model===key))}</View></ScrollView>
   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.row}><View style={s.controls}>{(Object.entries(WEAPONS) as [WeaponKind,typeof WEAPONS[WeaponKind]][]).filter(([key])=>key!=='sword'||model==='paladin').map(([key,value])=>button(value.name,()=>{setWeapon(key);setClip(clipsForWeapon(key,model==='paladin')[0]);clock.time=0;clock.paused=false;setPaused(false);},weapon===key))}</View></ScrollView>
-  <Text style={[s.note,{paddingHorizontal:16,paddingBottom:8}]}>{WEAPONS[weapon].name} · 원본 전신 동작 · {WEAPONS[weapon].twoHanded?'양손 자루 고정':'한손 무기'}</Text>
+  <Text style={[s.note,{paddingHorizontal:16,paddingBottom:8}]}>{WEAPONS[weapon].name} · 원본 전신 동작 · {weapon==='bow'?'장전 · 조준 · 발사':WEAPONS[weapon].twoHanded?'양손 자루 고정':'한손 무기'}</Text>
   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.row}><View style={s.controls}>{clipsForWeapon(weapon,model==='paladin').map(key=>button(weaponClipLabel(weapon,key,NATIVE_CLIPS[key]),()=>{setClip(key);clock.time=0;clock.paused=false;setPaused(false);},clip===key))}</View></ScrollView>
   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.row}><View style={s.controls}>{button(paused?'재생':'일시정지',()=>{if(clock.paused&&clock.time>=clock.duration)clock.time=0;clock.paused=!clock.paused;setPaused(clock.paused);})}{button(slow?'정상 속도':'느리게 보기',()=>{clock.speed=slow?1:.25;setSlow(!slow);})}{button('처음부터',()=>{clock.time=0;})}{button('이전 프레임',()=>{clock.time=Math.max(0,clock.time-1/30);clock.paused=true;setPaused(true);})}{button('다음 프레임',()=>{clock.time=Math.min(clock.duration,clock.time+1/30);clock.paused=true;setPaused(true);})}{button('동작 중간',()=>{clock.time=clock.duration*.5;clock.paused=true;setPaused(true);})}{button(close?'전체 보기':'손·무기 확대',()=>setClose(v=>!v))}{button('왼쪽에서 보기',()=>setAngle(a=>a-.5))}{button('오른쪽에서 보기',()=>setAngle(a=>a+.5))}</View></ScrollView>
   <View style={{flex:1,minHeight:0}}><Canvas shadows dpr={[1,1.5]} camera={{fov:38,near:.01,far:60}} gl={{antialias:true,toneMapping:T.ACESFilmicToneMapping,toneMappingExposure:1.18}}><Suspense fallback={null}><Motion key={model} model={model} weapon={weapon} clip={clip} clock={clock} angle={angle} close={close} onTime={setTime} onEnd={()=>setPaused(true)}/></Suspense></Canvas></View>

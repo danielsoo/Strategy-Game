@@ -33,6 +33,16 @@ for(const [name,[dir,file]] of Object.entries(extra)){
 }
 const spearGuard=animations.find(c=>c.name==='spearThrust').clone();spearGuard.name='spearGuard';spearGuard.duration=2;
 for(const track of spearGuard.tracks){const n=track.getValueSize(),value=track.values.slice(0,n);track.times=new Float32Array([0,2]);track.values=new Float32Array([...value,...value]);}animations.push(spearGuard);
+const bowFiles={bowIdle:'standing idle 01',bowDraw:'standing draw arrow',bowAim:'standing aim overdraw',bowShoot:'standing aim recoil',bowWalk:'standing walk forward',bowImpact:'standing react small from front',bowDeath:'standing death backward 01'};
+for(const [name,file] of Object.entries(bowFiles)){const clip=load(file,`.realm-source/${profile}-bow`).animations[0].clone();clip.name=name;animations.push(clip);}
+// A complete shot is still original capture data, joined at matching poses.
+const bowSegments=['bowDraw','bowAim','bowShoot','bowIdle'].map(name=>{const clip=animations.find(c=>c.name===name);return {clip,duration:name==='bowAim'?.65:name==='bowIdle'?.7:clip.duration};});
+const volleyDuration=bowSegments.reduce((n,s)=>n+s.duration,0),volleyTracks=bowSegments[0].clip.tracks.map(template=>{
+ const times=[],values=[];let offset=0;
+ for(const segment of bowSegments){const track=segment.clip.tracks.find(t=>t.name===template.name),interpolant=track.createInterpolant();for(let t=0;t<segment.duration-1e-5;t+=1/30){times.push(offset+t);values.push(...interpolant.evaluate(t));}offset+=segment.duration;}
+ const last=bowSegments.at(-1),track=last.clip.tracks.find(t=>t.name===template.name);times.push(volleyDuration);values.push(...track.createInterpolant().evaluate(last.duration));
+ const result=template.clone();result.times=new Float32Array(times);result.values=new Float32Array(values);return result;
+});animations.push(new T.AnimationClip('bowVolley',volleyDuration,volleyTracks));
 const gltf=await new GLTFExporter().parseAsync(scene,{binary:false,animations,onlyVisible:true});
 gltf.images=[];gltf.textures=[];gltf.samplers=[{magFilter:9729,minFilter:9987,wrapS:10497,wrapT:10497}];
 const saved=new Map();

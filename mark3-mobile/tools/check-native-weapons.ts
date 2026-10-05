@@ -42,6 +42,13 @@ async function main(){
      let speed=-1,alignment=0;for(let i=23;i<58;i++){const f=cuttingSamples[i],v=cuttingSamples[i+1].head.clone().sub(cuttingSamples[i-1].head);v.addScaledVector(f.axis,-v.dot(f.axis));if(v.lengthSq()>speed){speed=v.lengthSq();alignment=f.edge.dot(v.normalize());}}
      assert(alignment>.9,`${id}/${kind}/${name}: blade face leads instead of cutting edge (${alignment})`);
     }
+    if(name==='twoJump'&&(kind==='axe'||kind==='halberd')){
+     const stroke=[];for(let i=40;i<52;i++){const f=cuttingSamples[i],v=cuttingSamples[i+1].head.clone().sub(cuttingSamples[i-1].head);const down=-v.y;v.addScaledVector(f.axis,-v.dot(f.axis));stroke.push({down,alignment:f.edge.dot(v.normalize())});}
+     const peak=Math.max(...stroke.map(s=>s.down)),active=stroke.filter(s=>s.down>peak*.5);
+     assert(active.length>=3,'jump stroke sampling missed active descent');
+     for(const s of active)assert(s.alignment>.9,`${id}/${kind}: jump edge misaligned during descent (${s.alignment})`);
+     console.log(`${id}/${kind}: ${active.length} jump descent frames, minimum edge alignment ${Math.min(...active.map(s=>s.alignment)).toFixed(3)}`);
+    }
    }
    console.log(`${id}/${kind}: grip, native elbow and rewind verified; min weapon height ${min.toFixed(3)}m`);
    assert(min>-.025,`${id}/${kind} penetrates flat ground`);
