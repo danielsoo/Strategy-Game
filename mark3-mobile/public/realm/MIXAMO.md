@@ -8,7 +8,7 @@ Source: [Adobe Mixamo](https://www.mixamo.com/), downloaded through the user's s
 | Cloaked bandit candidate | Arissa | arissa |
 | Light mercenary candidate | Erika Archer | erika |
 
-These are game-integrated assets for the `?art=1&mocap=1` review route, not a standalone asset library. Source ZIP/FBX files remain outside version control in `.realm-source/`. They have not replaced the campaign units or battle result presentation yet. National knight variants and dedicated equipment/reactions for the light characters remain to be made.
+These are game-integrated assets for the `?art=1&mocap=1` review route and the player's resolved-battle presentation, not a standalone asset library. Source ZIP/FBX files remain outside version control in `.realm-source/`. The campaign's distant standing units and AI map skirmish renderer are separate. National knight variants remain to be made.
 
 Preserved: native skeletons, skin weights, embedded diffuse and normal textures, 30 fps animations. Converted FBX centimetres to metres and texture V coordinates to glTF conventions. Materials use approximate PBR factors; the source does not supply full metallic/roughness maps.
 
@@ -54,6 +54,18 @@ The review now defaults to three representatives per side. Presets include 1v1, 
 
 `nativeSquad.ts` schedules existing native paired engagements. Disjoint pairs run concurrently with staggered starts. Shared defenders resolve one engagement at a time, turning towards separate approach lanes; the same actor cannot play two conflicting reactions simultaneously. Continuous root paths and blended native walking connect engagements. Lane assignment preserves nearest formation order to avoid crossing another pair. Every actor retains its own animation mixer and equipment. Ranged squads preserve quivers, ballistic shots and their contact timing; a victorious melee unit approaches the archers before its final strike. The camera fits all representatives on desktop and narrow screens.
 
-This remains a deterministic review example with selectable victory. The campaign resolver and campaign renderer are unchanged; real battle casualties and rank progression must be connected separately. The spacing checks are root-level clearance checks, not general mesh collision guarantees.
+The initial representative-squad review used selectable victory; the resolved-record revision below replaces that demo scheduler. The spacing checks are root-level clearance checks, not general mesh collision guarantees. Rank progression remains separate.
 
 Validation: `node node_modules/tsx/dist/cli.mjs tools/check-native-squad.ts` covers 16 formations/equipment configurations, both winners, simultaneous scheduling, root spacing and continuity, transformed weapon/arrow contact, final casualties and repeatable scrubbing. TypeScript and Expo web export also pass. Browser checks use desktop and 390×844 layouts.
+
+## Individual choreography from resolved results — 2026-10-05
+
+`nativeBattlePlan.ts` reads the original `DetailedCombatResult` without modifying it or consuming combat RNG. Initial strength, every round's losses, post-rout losses, final survivors and outcome come from that record. Each of up to three representatives owns an explicit troop-count interval: it dies only when that interval has no recorded survivors. A defeat with survivors ends in withdrawal, not invented annihilation; a stalemate preserves both sides. Round summaries retain exact numerical counts, including partial losses within a representative's group.
+
+Each soldier has its own initiative, native attack variant and optional continuation. Mixed equipment is the default: knights use sword/spear/halberd, light troops use their primary weapon/hatchet/axe. Separate pairs can act concurrently, while shared actors cannot occupy conflicting engagements. Fighters acquire another living opponent after casualties. Clear engagement placement and obstacle-aware entry paths avoid walking through stationary comrades or fallen bodies. Unchanged rounds are compressed into record updates rather than repeating the same fight six times. These are authored individual exchanges derived from aggregate combat rounds; the engine does not provide literal per-swing combat events.
+
+In the 3D game, a player-initiated attack with quick combat disabled opens this player using the **already resolved** `performAttack` result and the pre-battle unit kinds. Finishing/skipping opens the existing result table with that same result object. Replaying does not call `performAttack` or `resolveCombat` again. Turn input and competing encounter dialogs remain blocked during presentation. Quick combat, 2D results, and AI map skirmishes retain their existing paths.
+
+The standalone review uses the same game resolver with explicit sample forces/seed; it is labeled as an engine example, not a historical campaign fight. It no longer offers victory-selection buttons. Equipment changes and playback controls do not change its resolved outcome. Real campaign playback hides force, equipment and sample-record controls.
+
+Validation includes 330 seeded resolved battles (all three outcomes, zero-size sides, small and 60+ armies), immutable inputs, exact round/final counts, no resurrection and deterministic variation. `check-native-squad.ts --mixed` covers mixed equipment and grouped representatives. Browser validation also exercised a real local campaign attack: the native player and result table both reported defender victory and 2:2 survivors.

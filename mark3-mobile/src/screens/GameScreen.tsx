@@ -15,7 +15,8 @@ import Board3D from './Board3D';
 import RealmMenu from './RealmMenu';
 import RealmHUD from './RealmHUD';
 import type {BattleCue} from './armyTimeline';
-import {battleReplayDuration} from './battleReplay';
+import {fighterKind,FighterKind} from './battleReplay';
+import RealmMocapDuel from './RealmMocapDuel';
 import type {AttackOutcome} from '../engine';
 import { realm } from './realmTheme';
 import { encodeSave, decodeSave, describeSave } from '../engine/save';
@@ -509,9 +510,8 @@ export default function GameScreen() {
   const [selected, setSelected] = useState<string | null>(null);
   const [combat, setCombat] = useState<DetailedCombatResult | null>(null);
   const [motionEpoch,setMotionEpoch]=useState(0);
-  const [pendingCombat,setPendingCombat]=useState<DetailedCombatResult|null>(null);
+  const [nativeCombat,setNativeCombat]=useState<{result:DetailedCombatResult;kinds:[FighterKind,FighterKind]}|null>(null);
   const [battleCues,setBattleCues]=useState<BattleCue[]>([]),battleSequence=useRef(0);
-  useEffect(()=>{if(!pendingCombat)return;const timer=setTimeout(()=>{setCombat(pendingCombat);setPendingCombat(null);},(battleReplayDuration(pendingCombat)+.6)*1000);return()=>clearTimeout(timer);},[pendingCombat]);
   const queueBattle=(outcome:AttackOutcome,s:GameState)=>{
     const from=s.cells.find(c=>c.id===outcome.fromId),to=s.cells.find(c=>c.id===outcome.toId);
     if(!from||!to||!outcome.result.rounds.length||!isVisible(s,PLAYER,from)||!isVisible(s,PLAYER,to))return;
@@ -732,7 +732,7 @@ export default function GameScreen() {
   // 성 하나당 한 턴에 한 번. 성이 많으면 그만큼 더 뽑는다.
   const readyCastles = recruitableCastles(state, PLAYER).length;
   const ledger = useMemo(() => computeLedger(state, PLAYER), [state]);
-  const myTurn = !watching && !pendingCombat && state.current === PLAYER && state.winner === null;
+  const myTurn = !watching && !nativeCombat && state.current === PLAYER && state.winner === null;
 
   // ── 관전 모드: 한 나라씩 자동으로 둔다 ────────────────────
   useEffect(() => {
@@ -805,7 +805,7 @@ export default function GameScreen() {
     if (Platform.OS !== 'web') return;
     const onKey = (e: KeyboardEvent) => {
       // 무언가 물어보는 중이면 키는 끈다. 모르고 누른 Enter 가 턴을 넘기면 안 된다.
-      const asking = showHelp || !!combat || !!pendingCombat || !!defenseAsk || !!conquest || !!merchantPick || showVassals;
+      const asking = showHelp || !!combat || !!nativeCombat || !!defenseAsk || !!conquest || !!merchantPick || showVassals;
 
       if (e.key === 'Escape') {
         if (placing) {
@@ -838,7 +838,7 @@ export default function GameScreen() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [
-    showHelp, combat, pendingCombat, defenseAsk, conquest, merchantPick, showVassals,
+    showHelp, combat, nativeCombat, defenseAsk, conquest, merchantPick, showVassals,
     placing, pathTo, myTurn, state, readyCastles,
   ]);
 
@@ -892,7 +892,7 @@ export default function GameScreen() {
     setSelected(null);
     setPathTo(null);
     setCombat(null);
-    setPendingCombat(null);setBattleCues([]);setMotionEpoch(v=>v+1);
+    setNativeCombat(null);setBattleCues([]);setMotionEpoch(v=>v+1);
     setState(file.state);
     setShowHelp(false);
     /*
@@ -1034,10 +1034,12 @@ export default function GameScreen() {
         const wasCastle = to.castle;
         const victim = to.owner;
         const wasNeutral = to.neutral;
+        const combatKinds:[FighterKind,FighterKind]=[fighterKind(from.neutral),fighterKind(to.neutral)];
         const outcome = performAttack(prev, from, to, rng);
         // 빠른 전투면 결과 창 없이 기록 한 줄로만 (설정)
-        queueBattle(outcome,prev);
-        if (!getSettings().quickCombat) {if(use3D&&can3D&&outcome.result.rounds.length)setPendingCombat(outcome.result);else setCombat(outcome.result);}
+        const nativeReplay=!getSettings().quickCombat&&use3D&&can3D;
+        if(!nativeReplay)queueBattle(outcome,prev);
+        if (!getSettings().quickCombat) {if(nativeReplay)setNativeCombat({result:outcome.result,kinds:combatKinds});else setCombat(outcome.result);}
         else
           pushLog(
             prev,
@@ -1444,7 +1446,7 @@ export default function GameScreen() {
   };
 
   const endTurn = () => {
-    if(pendingCombat)return;
+    if(nativeCombat)return;
     setSelected(null);
     setState((prev) => {
       // 움직인 부대는 쉬지 못한다. 빈 집합을 넘기면 플레이어만 피로가 안 쌓여
@@ -1515,7 +1517,7 @@ export default function GameScreen() {
     });
     setSelected(null);
     setCombat(null);
-    setPendingCombat(null);setBattleCues([]);setMotionEpoch(v=>v+1);
+    setNativeCombat(null);setBattleCues([]);setMotionEpoch(v=>v+1);
     actedRef.current = new Set();
   };
 
@@ -1939,7 +1941,7 @@ export default function GameScreen() {
       </View>
 
 
-      {realmHUD&&<RealmHUD busy={!!pendingCombat} state={state} player={PLAYER} selected={selectedCell} myTurn={myTurn} income={ledger.net} readyCastles={readyCastles} recruitCost={DEFAULT_ECONOMY.recruitCost} fortCost={DEFAULT_ECONOMY.fortCost} canFort={!!fortCheck?.ok} vassals={myVassals.length}
+      {realmHUD&&<RealmHUD busy={!!nativeCombat} state={state} player={PLAYER} selected={selectedCell} myTurn={myTurn} income={ledger.net} readyCastles={readyCastles} recruitCost={DEFAULT_ECONOMY.recruitCost} fortCost={DEFAULT_ECONOMY.fortCost} canFort={!!fortCheck?.ok} vassals={myVassals.length}
         note={preview?`${preview.steps.length}칸 · ${preview.turns===0?'이번 턴 도착':`${preview.turns}턴 후 도착`} · 목적지를 다시 누르면 행군`:selectedCell?.order?'명령받은 목적지로 행군 중':''}
         onRecruit={()=>setState(prev=>{const got=recruit(prev,PLAYER);if(got>0)sfx('recruit');humanRef.current.recruited+=got;tutRef.current.recruits+=got;return bump(prev);})}
         onEnd={endTurn} onFort={buildFortHandler()} onMenu={()=>setShowHelp(true)} onSettings={()=>setShowSettings(true)} onDiplo={()=>{setDiploNote(null);setShowDiplo(true);}} onVassals={()=>{setOrderNote(null);setShowVassals(true);}} onDetails={()=>setRealmDetails(v=>!v)} onMap={()=>setUse3D(false)}/>}
@@ -2450,6 +2452,9 @@ export default function GameScreen() {
       )}
 
       <CombatModal result={combat} onClose={() => setCombat(null)} />
+      {nativeCombat&&<Modal visible animationType="fade" onRequestClose={()=>{setCombat(nativeCombat.result);setNativeCombat(null);}}>
+        <RealmMocapDuel result={nativeCombat.result} kinds={nativeCombat.kinds} onClose={()=>{setCombat(nativeCombat.result);setNativeCombat(null);}}/>
+      </Modal>}
 
       {/*
         조우 — 무리와 맞닿았다. 계약하거나, 물러나라 하거나, 치거나, 그냥 둔다.
@@ -2557,7 +2562,7 @@ export default function GameScreen() {
       </Modal>
 
       <EncounterCard
-        encounter={!combat && !pendingCombat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
+        encounter={!combat && !nativeCombat && !defenseAsk ? encQueueRef.current[0] ?? null : null}
         onPick={(choice) => {
           const e = encQueueRef.current.shift();
           if (!e) return;
@@ -2573,7 +2578,7 @@ export default function GameScreen() {
         proposal={
           myTurn &&
           !showHelp &&
-          !combat && !pendingCombat &&
+          !combat && !nativeCombat &&
           !defenseAsk &&
           !conquest &&
           !showVassals &&
@@ -2876,7 +2881,7 @@ export default function GameScreen() {
         </View>
       </Modal>
 
-      <Modal visible={!!conquest&&!pendingCombat} transparent animationType="fade">
+      <Modal visible={!!conquest&&!nativeCombat} transparent animationType="fade">
         <View style={styles.overlay}>
           <ScrollView style={styles.modal} contentContainerStyle={{paddingBottom:4}} nestedScrollEnabled>
             {conquest && (

@@ -10,7 +10,7 @@ import {arrowFlight,arrowPose} from './duelBallistics';
 export type DuelSide=0|1;
 export type DuelFighter={model:CombatModel;weapon:NativeWeaponKind};
 export type DuelOutcome='block'|'hit'|'death';
-export type DuelEvent={attacker:DuelSide;outcome:DuelOutcome;heavy?:boolean;jump?:boolean};
+export type DuelEvent={attacker:DuelSide;outcome:DuelOutcome;heavy?:boolean;jump?:boolean;variation?:number};
 type Pose={clip:NativeClip;time:number};
 export const hasShield=(f:DuelFighter)=>f.model==='paladin'&&['sword','hatchet','flail'].includes(f.weapon);
 const twoHand=(w:NativeWeaponKind)=>['axe','halberd','spear'].includes(w);
@@ -18,7 +18,7 @@ function idle(f:DuelFighter):NativeClip{return f.weapon==='bow'?'bowIdle':f.weap
 function defense(f:DuelFighter):NativeClip{return hasShield(f)?'guard':f.weapon==='spear'||twoHand(f.weapon)?'twoBlock':f.weapon==='bow'?'bowIdle':'axeBlock';}
 function impact(f:DuelFighter):NativeClip{return f.weapon==='bow'?'bowImpact':twoHand(f.weapon)?'twoImpact':hasShield(f)?'impactHeavy':'axeImpactHeavy';}
 function death(f:DuelFighter):NativeClip{return f.weapon==='bow'?'bowDeath':twoHand(f.weapon)?'twoDeath':'death';}
-function attack(f:DuelFighter,e:DuelEvent):NativeClip{return f.weapon==='bow'?'bowVolley':f.weapon==='spear'?'spearThrust':twoHand(f.weapon)?e.jump?'twoJump':e.heavy?'twoChop':'twoSweep':f.weapon==='sword'?e.jump?'jumpHeavy':e.heavy?'heavy':'slash':e.heavy?'axeChop':'axeSweep';}
+function attack(f:DuelFighter,e:DuelEvent):NativeClip{return f.weapon==='bow'?'bowVolley':f.weapon==='spear'?'spearThrust':twoHand(f.weapon)?e.jump?'twoJump':e.heavy?'twoChop':'twoSweep':f.weapon==='sword'?e.jump?'jumpHeavy':e.heavy?'heavy':e.variation===1?'cross':'slash':e.heavy?'axeChop':'axeSweep';}
 
 /** Demo events are explicit, not random animation outcomes. The same player
  * accepts an event list derived from a resolved battle without rerolling it. */
@@ -80,6 +80,9 @@ export function createDuelActor(asset:GLTF,fighter:DuelFighter){
   // The sword-side shoulder is outside a late, still-low shield. Aim at that
   // exposed armour surface rather than pretending a guarded chest was hit.
   bodyTarget.addScaledVector(outside,.075).add(new T.Vector3(0,.035,.09));
+  // A two-handed fighter has no shield covering the torso. A waist-height
+  // sweep should hit that exposed torso, not pretend to reach the shoulder.
+  if(!hasShield(fighter))bodyTarget.copy(chest).add(new T.Vector3(0,-.10,.16));
   visual.add(root);if(equipment.prop)visual.add(equipment.prop);visual.updateMatrixWorld(true);
   // Contact sampling updates the bone palette in actor space. Refresh it after
   // placement as well, before either the shadow or colour pass consumes it.
