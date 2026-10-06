@@ -99,7 +99,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
  const state={phase:'대형 유지 · 상대 탐색',health:[100,100],contacts:[] as {point:T.Vector3;age:number;blocked:boolean}[],alive:[n[0],n[1]],counts:plan.initial,round:0};
  function update(time:number){
   const t=T.MathUtils.clamp(time,0,duration),placements=homes.map(copy);state.contacts=[];state.health=[0,0];state.alive=[0,0];state.phase=t>=finish?resultLabel:'대형 유지 · 상대 탐색';
-  const stage=stages.filter(s=>s.at<=t).at(-1)!;state.counts=[...stage.counts];state.round=stage.round;
+  const stage=stages.filter(s=>s.at<=t).at(-1)!;state.counts=[...stage.counts];state.round=stages.find(s=>s.at>t)?.round??stage.round;
   const engaged=new Set<number>();
   actors.forEach((a,id)=>{a.trail.visible=false;a.evaluate({clip:a.idle,time:(t+id*.39)%a.duration(a.idle)});});
   for(const e of engagements){
