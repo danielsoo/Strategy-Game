@@ -34,7 +34,7 @@ function Scene({fighters,plan,mixed,range,clock,angle,onState,onReady}:{fighters
  useFrame(({camera,size},delta)=>{
   if(!clock.paused)clock.time=Math.min(duel.duration,clock.time+Math.min(delta,.05)*clock.speed);
   const state=duel.update(clock.time),finished=clock.time>=duel.duration;if(finished)clock.paused=true;
-  const text=`${state.round}R · ${state.phase} · ${clock.time.toFixed(1)} / ${duel.duration.toFixed(1)}초`,key=text+(finished?'done':'');if(last.current!==key){last.current=key;onState(text,state.counts);}
+  const text=`${state.phase} · ${clock.time.toFixed(1)} / ${duel.duration.toFixed(1)}초`,key=text+(finished?'done':'');if(last.current!==key){last.current=key;onState(text,state.counts);}
   // Hold the shot through the exchange. Following changing body bounds on
   // every frame makes each lunge/death zoom and slide the entire battlefield.
   const bounds=framing,focus=bounds.getCenter(new T.Vector3()),span=bounds.getSize(new T.Vector3()).length();

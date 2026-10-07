@@ -58,7 +58,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
  const actors=teams.flat(),sides:DuelSide[]=actors.map((_,i)=>i<teams[0].length?0:1),n=teams.map(t=>t.length),ranged=teams[0][0]?.fighter.weapon==='bow';
  if(actors.length!==plan.actors.length)throw new Error('Recorded battle and representative models disagree');
  const homes:Placement[]=actors.map((a,id)=>{const side=sides[id],slot=side===0?id:id-n[0],lane=slot-(n[side]-1)/2;return {position:new T.Vector3((side===0?-1:1)*(ranged?range/2:1.6),0,lane*2.8),yaw:side===0?Math.PI/2:-Math.PI/2};});
- const last=homes.map(copy),available=actors.map(()=>0),deathAt=actors.map(()=>Infinity),deathPose=actors.map(()=>null as null|Placement),engagements:Engagement[]=[];
+ const last=homes.map(copy),available=actors.map((_,id)=>n[0]===n[1]?plan.actors[id].slot*.09:0),deathAt=actors.map(()=>Infinity),deathPose=actors.map(()=>null as null|Placement),engagements:Engagement[]=[];
  const onTrack=(e:Engagement,k:number,t:number):Placement=>{
   if(t>=e.release[k])return copy(e.finish[k]);
   if(t<e.actionStart[k])return approachPlacement(e,k,t);
@@ -82,7 +82,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   // recorded contact, preserving that hit/casualty while beating recovery.
   // A fighter already attacking this ally is not an off-target opportunity.
   const exposed=!ranged&&allowPressure?engagements.slice().reverse().find(e=>e.ids.includes(exposedId)&&e.owns[e.ids.indexOf(exposedId)]):undefined;
-  if(exposed&&exposed.ids[exposed.duel.events[0].attacker]===exposedId&&exposed.ids[1-exposed.duel.events[0].attacker]!==flankerId&&exposed.contact+.10>=phase&&exposed.release[exposed.duel.events[0].attacker]>exposed.contact+.10&&available[flankerId]+.94<=exposed.contact+.10){
+  if(exposed&&exposed.ids[exposed.duel.events[0].attacker]===exposedId&&exposed.ids[1-exposed.duel.events[0].attacker]!==flankerId&&exposed.contact+.10>=earliest&&exposed.release[exposed.duel.events[0].attacker]>exposed.contact+.10&&available[flankerId]+.94<=exposed.contact+.10){
    const attackSide=exposed.duel.events[0].attacker,at=exposed.contact+.10,target=onTrack(exposed,attackSide,at);
    const towardsAlly=last[flankerId].position.clone().sub(target.position).normalize(),facing=new T.Vector3(0,0,1).applyAxisAngle(up,target.yaw);
    if(facing.dot(towardsAlly)<-.2){
@@ -129,7 +129,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
     if(previous&&previous.release[previous.ids.indexOf(lone)]>previous.contact+pin){
      opening=previous.contact+pin;vulnerability='guard';const target=onTrack(previous,previous.ids.indexOf(lone),opening);
      anchorTarget.copy(target.position);
-     // A zero-loss record permits a committed miss, never an invented hit.
+     // A second cut can miss while the target is occupied with the front.
      if(event.outcome==='block')event={...event,outcome:'miss'};
      // Carry the captured block recoil at this precise follow-up time into
      // the hit/death blend, without resetting the defender to idle.
@@ -183,35 +183,65 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   if(event.outcome==='death'){const victim=ids[d];deathAt[victim]=e.contact;deathPose[victim]=copy(last[victim]);}
   return e.contact;
  }
- let phase=0;
- const stages=[{at:0,counts:plan.initial,round:0}];
- for(const round of plan.rounds){
-  let end=phase;
-  for(const exchange of round.exchanges){
-   const a=exchange.attacker,d=exchange.target;if(Number.isFinite(deathAt[a])||Number.isFinite(deathAt[d]))continue;
-   const i=sides[a]===0?a:d,j=(sides[a]===1?a:d)-n[0];
-   // Archers keep firing while infantry closes only for its decisive attack.
-   // This avoids repeated sprint-out/sprint-back choreography at bow range.
-   const event=ranged?{...exchange.event,attacker:0 as DuelSide,outcome:round.counts[1]<stages.at(-1)!.counts[1]?'hit' as const:'block' as const}:exchange.event;
-   end=Math.max(end,add(i,j,event,phase+exchange.delay));
-  }
-  for(const victim of round.fallen){
-   const enemies=plan.actors.filter(a=>a.side!==sides[victim]&&!Number.isFinite(deathAt[a.id]));
-   // Prefer a surviving opponent; a casualty cannot be resurrected to finish
-   // another soldier. Simultaneous last casualties can collapse from wounds.
-   const surrounded=!ranged&&enemies.length>1&&plan.actors.filter(a=>a.side===sides[victim]&&!Number.isFinite(deathAt[a.id])).length===1;
-   const committed=engagements.slice().reverse().find(e=>e.ids.includes(victim)&&e.owns[e.ids.indexOf(victim)]);
-   const exposed=surrounded&&committed&&committed.ids[committed.duel.events[0].attacker]===victim&&committed.contact+.1>=phase?onTrack(committed,committed.duel.events[0].attacker,committed.contact+.1):undefined;
-   const angleToOpening=(id:number)=>exposed?new T.Vector3(0,0,1).applyAxisAngle(up,exposed.yaw).dot(last[id].position.clone().sub(exposed.position).normalize()):0;
-   enemies.sort((a,b)=>Number(round.fallen.includes(a.id))-Number(round.fallen.includes(b.id))||(exposed?angleToOpening(a.id)-angleToOpening(b.id):0)||(surrounded?Number(a.slot===0)-Number(b.slot===0):0)||Math.abs(a.slot-plan.actors[victim].slot)-Math.abs(b.slot-plan.actors[victim].slot));
-   const killer=enemies[0];
-   if(killer){const i=sides[victim]===0?victim:killer.id,j=(sides[victim]===1?victim:killer.id)-n[0];
-    end=Math.max(end,add(i,j,{attacker:killer.side,outcome:'death',heavy:(round.round+victim)%2===0,jump:!ranged&&(round.round+victim)%4===0,variation:victim%3},phase+.4));
-   }else{deathAt[victim]=Math.max(end,available[victim]);deathPose[victim]=copy(last[victim]);end=deathAt[victim]+actors[victim].duration(actors[victim].death);}
-  }
-  stages.push({at:end,counts:round.counts,round:round.round});phase=end+((round.exchanges.length||round.fallen.length)? .05:0);
+ // A presentation-only director. No resolver rounds, loss ticks, damage rolls
+ // or weapon stats are consulted. Each body has its own animation clock.
+ const doomed=new Set(plan.fallen),attacks=actors.map(()=>0);
+ const livingIds=()=>actors.map((_,id)=>id).filter(id=>!Number.isFinite(deathAt[id]));
+ const filmSeed=plan.initial[0]*13+plan.initial[1]*7+plan.final[0]*5+plan.final[1]*3;
+ const perform=(a:number,d:number,event:Omit<DuelEvent,'attacker'>)=>{
+  const i=sides[a]===0?a:d,j=(sides[a]===1?a:d)-n[0];
+  const contact=add(i,j,{...event,attacker:sides[a]},0);
+  attacks[a]++;return contact;
+ };
+ // Start all outnumbering fighters immediately, keeping the existing guarded
+ // flank routes and supporting strike. They need not be hit to become active.
+ if(n[0]&&n[1]&&n[0]!==n[1]){
+  const majority=n[0]>n[1]?0:1;
+  const front=plan.actors.filter(a=>a.side===majority).sort((a,b)=>Math.abs(a.slot-(n[majority]-1)/2)-Math.abs(b.slot-(n[majority]-1)/2)||a.id-b.id);
+  for(const a of front){const d=plan.actors.filter(d=>d.side!==a.side).sort((b,c)=>Math.abs(b.slot-a.slot)-Math.abs(c.slot-a.slot)||b.id-c.id)[0];perform(a.id,d.id,{outcome:'block',variation:a.slot%3});}
  }
- const finish=Math.max(0,...engagements.map(e=>e.end),phase),duration=finish+2.4;
+ let lastDeath=0;
+ for(let step=0;step<120;step++){
+  const live=livingIds(),pending=live.filter(id=>doomed.has(id));
+  const casualties=[0,1].map(side=>pending.filter(id=>sides[id]===side).length);
+  const choices=live.flatMap(a=>live.filter(d=>sides[d]!==sides[a]).map(d=>{
+   const travel=Math.max(0,last[a].position.distanceTo(last[d].position)-(ranged?range:2.5))/APPROACH_SPEED;
+   const ready=Math.max(available[a]+travel,available[d]-.7);
+   // Settle casualties on both sides before eliminating the last opponent.
+   // If both duelists must fall, settle the side with more final survivors
+   // first, leaving nearby opponents to deliver the remaining finishing blows.
+   const mutual=live.every(id=>doomed.has(id));
+   const keepOpponent=!mutual&&live.filter(id=>sides[id]===sides[d]).length===1&&casualties[sides[a]]>0;
+   const otherFirst=doomed.has(a)&&(plan.final[sides[a]]>plan.final[sides[d]]||plan.final[0]===plan.final[1]&&sides[a]===0);
+   const fatal=ready>=5.8&&doomed.has(d)&&!keepOpponent&&!otherFirst;
+   return {a,d,ready,fatal,score:ready+attacks[a]*.18+Math.abs(plan.actors[a].slot-plan.actors[d].slot)*.05-(fatal?.35:0)};
+  })).filter(c=>!ranged||sides[c.a]===0||c.fatal).sort((a,b)=>a.score-b.score||a.a-b.a||a.d-b.d);
+  if(!choices.length)break;
+  // Surviving pairs keep sparring while the other pairs finish. A new hit on
+  // an unrelated lane cannot stop their local clocks.
+  if(!pending.length&&Math.min(...choices.map(c=>c.ready))>=Math.max(8,lastDeath))break;
+  const {a,d,fatal}=choices[0];
+  const roll=filmSeed+step*7+a*11+d*3;
+  const contact=perform(a,d,{outcome:fatal?'death':roll%5===0?'hit':'block',heavy:roll%4===0,jump:fatal&&!ranged&&roll%4===0,variation:roll%3});
+  if(fatal)lastDeath=Math.max(lastDeath,contact);
+  if(step===119)throw new Error('Battle film did not settle its resolved outcome');
+ }
+ // In mutual destruction the last wounded fighter has nobody left to deliver
+ // another blow. Its collapse still belongs to the precomputed casualty list.
+ for(const id of livingIds().filter(id=>doomed.has(id))){
+  deathAt[id]=Math.max(lastDeath,available[id]);deathPose[id]=copy(last[id]);
+  lastDeath=Math.max(lastDeath,deathAt[id]+actors[id].duration(actors[id].death));
+ }
+ const finish=Math.max(0,...engagements.map(e=>e.end),lastDeath),duration=finish+2.4;
+ // These are visual counts, not calculation rounds. Partially surviving
+ // representative slices settle to the exact game total at the end.
+ const stages=[{at:0,counts:[...plan.initial] as [number,number]}];
+ const counts:[number,number]=[...plan.initial];
+ for(const id of plan.fallen.slice().sort((a,b)=>deathAt[a]-deathAt[b])){
+  const actor=plan.actors[id];counts[actor.side]-=actor.high-actor.low;
+  stages.push({at:deathAt[id],counts:[...counts]});
+ }
+ stages.push({at:finish,counts:[...plan.final]});
  // Resolve attention from CURRENT bodies, independently of destination slots.
  // Fixed-step yaw samples make bounded turning identical during play/rewind.
  // Only the committed strike/block is locked to its calibrated capture frame.
@@ -252,10 +282,10 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
  const failures=engagements.filter(e=>['hit','death'].includes(e.duel.events[0].outcome)).map(e=>e.contact).sort((a,b)=>a-b);
  const shots=engagements.flatMap(e=>e.duel.events.filter(v=>v.flight>0).map(v=>e.start+e.enter+v.contact-v.flight-.001)).sort((a,b)=>a-b);
  const flights=engagements.flatMap(e=>e.duel.events.filter(v=>v.flight>0).map(v=>e.start+e.enter+v.contact-v.flight/2)).sort((a,b)=>a-b);
- const state={phase:'대형 유지 · 상대 탐색',health:[100,100],contacts:[] as {point:T.Vector3;age:number;blocked:boolean}[],alive:[n[0],n[1]],counts:plan.initial,round:0};
+ const state={phase:'대형 유지 · 상대 탐색',health:[100,100],contacts:[] as {point:T.Vector3;age:number;blocked:boolean}[],alive:[n[0],n[1]],counts:plan.initial};
  function update(time:number){
   const t=T.MathUtils.clamp(time,0,duration),placements=homes.map(copy);state.contacts=[];state.health=[0,0];state.alive=[0,0];state.phase=t>=finish?resultLabel:'대형 유지 · 상대 탐색';
-  const stage=stages.filter(s=>s.at<=t).at(-1)!;state.counts=[...stage.counts];state.round=stages.find(s=>s.at>t)?.round??stage.round;
+  const stage=stages.filter(s=>s.at<=t).at(-1)!;state.counts=[...stage.counts];
   const engaged=new Set<number>(),idleTimes=actors.map((a,id)=>(t+id*.39)%a.duration(a.idle)),facings=facingsAt(t);
   actors.forEach((a,id)=>{a.trail.visible=false;a.evaluate({clip:a.idle,time:idleTimes[id]});});
   for(const e of engagements){

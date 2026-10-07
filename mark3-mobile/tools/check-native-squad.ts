@@ -5,7 +5,7 @@ import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {createDuelActor,DuelActor,DuelFighter} from '../src/screens/nativeDuel';
 import {createNativeSquad,representativeCount,proficiencyLabel,strikeLaneClear,threatRadius} from '../src/screens/nativeSquad';
 import {nativeBattlePlan,representedCount} from '../src/screens/nativeBattlePlan';
-import {resolveCombat,makeRng} from '../src/services/combatSystem';
+import {resolveCombat,makeRng,DEFAULT_COMBAT_CONFIG} from '../src/services/combatSystem';
 (globalThis as any).ProgressEvent=class{};
 async function load(id:string){
  const dir='public/realm/'+id,j=JSON.parse(fs.readFileSync(dir+'/model.gltf','utf8'));
@@ -31,12 +31,26 @@ async function main(){
  for(const weapon of ['axe','hatchet','spear','halberd','flail','bow'] as const)configs.push([3,3,0,{model:'paladin',weapon},knight,6]);
  configs.push([3,3,1,{model:'erika',weapon:'bow'},knight,18],[3,1,0,{model:'arissa',weapon:'hatchet'},knight,6],[1,3,1,knight,{model:'erika',weapon:'axe'},6]);
  configs.push([12,12,0,knight,knight,6,true],[5,3,0,knight,{model:'erika',weapon:'axe'},6,true],[3,1,0,knight,knight,6,true],[1,3,0,knight,knight,6,true]);
+ configs.push([3,3,0,knight,knight,6,true],[3,3,1,knight,knight,6,true],[3,3,-1,knight,knight,6,true]);
  if(process.argv.includes('--tactics')){configs.length=0;for(const seed of [0,2,7,19,34])for(const [n,m] of [[2,1],[1,2],[3,3]])configs.push([n,m,seed,knight,knight,6,true]);}
- for(const [n,m,winner,a,b,range,mixed] of configs.filter(c=>(!process.argv.includes('--mixed')||c[6])&&(!process.argv.includes('--bow')||c[3].weapon==='bow'))){
-  const teams:[DuelActor[],DuelActor[]]=[Array.from({length:representativeCount(n)},(_,i)=>createDuelActor(assets[a.model],{...a,weapon:mixed?([a.weapon,'spear','halberd'] as const)[i]:a.weapon})),Array.from({length:representativeCount(m)},(_,i)=>createDuelActor(assets[b.model],{...b,weapon:mixed?([b.weapon,'hatchet','axe'] as const)[i]:b.weapon}))];
-  const result=resolveCombat({units:n},{units:m},makeRng(41+winner)),record=nativeBattlePlan(result);const plan=createNativeSquad(teams,record,range);let previous:T.Vector3[]|undefined,min=Infinity,maxStep=0,encirclementGap=Math.PI*2;
+ for(const [n,m,winner,a,b,range,mixed] of configs.filter(c=>(!process.argv.includes('--mixed')||c[6])&&(!process.argv.includes('--bow')||c[3].weapon==='bow')&&(!process.argv.includes('--draw')||c[2]===-1))){
+  const teams:[DuelActor[],DuelActor[]]=[Array.from({length:representativeCount(n)},(_,i)=>createDuelActor(assets[a.model],{...a,weapon:mixed?([a.weapon,'spear','halberd'] as const)[i]:a.weapon})),Array.from({length:representativeCount(m)},(_,i)=>createDuelActor(assets[b.model],{...b,weapon:mixed?(b.model==='paladin'?([b.weapon,'spear','halberd'] as const)[i]:([b.weapon,'hatchet','axe'] as const)[i]):b.weapon}))];
+  const result=resolveCombat({units:n},{units:m},makeRng(41+winner),winner===-1?{...DEFAULT_COMBAT_CONFIG,maxRounds:2,baseLossRate:0,routThreshold:0}:undefined),record=nativeBattlePlan(result);const plan=createNativeSquad(teams,record,range);let previous:T.Vector3[]|undefined,min=Infinity,maxStep=0,encirclementGap=Math.PI*2;
   const emptyFacing=plan.actors.map(()=>0);
   if(process.argv.includes('--trace'))console.table(plan.engagements.map(e=>({a:e.ids[e.duel.events[0].attacker],d:e.ids[1-e.duel.events[0].attacker],outcome:e.duel.events[0].outcome,move:e.moveStart[e.duel.events[0].attacker].toFixed(2),strike:e.actionStart[e.duel.events[0].attacker].toFixed(2),contact:e.contact.toFixed(2),yaw:e.yaw.toFixed(2),opening:e.opening})));
+  if(n===3&&m===3&&mixed&&[-1,0,1].includes(winner)){
+   for(let id=0;id<6;id++){
+    const tracks=plan.engagements.filter(e=>{const k=e.ids.indexOf(id);return k>=0&&e.owns[k]});
+    assert(tracks.length>=4,`actor ${id} stopped after its opening exchange`);
+    assert(tracks.some(e=>e.ids[e.duel.events[0].attacker]===id),'fighter never took initiative');
+    for(let i=1;i<tracks.length;i++){
+     const e=tracks[i],k=e.ids.indexOf(id),prev=tracks[i-1],gap=e.actionStart[k]-prev.release[prev.ids.indexOf(id)];
+     const distance=e.routes[k].slice(1).reduce((sum,p,j)=>sum+p.distanceTo(e.routes[k][j]),0);
+     assert(gap<1.65+distance/1.5,`actor ${id} waited ${gap.toFixed(2)}s for an unrelated fight`);
+    }
+   }
+   assert(plan.engagements.some((a,i)=>a.contact>3&&plan.engagements.some((b,j)=>j!==i&&a.ids.every(id=>!b.ids.includes(id))&&Math.max(a.actionStart[a.duel.events[0].attacker],b.actionStart[b.duel.events[0].attacker])<Math.min(a.contact,b.contact))),'independent fights never overlap after the opening');
+  }
   for(let t=0;t<plan.duration;t+=1/15){
    plan.update(t);const p=plan.actors.map(actor=>actor.visual.position.clone());
    if(previous)p.forEach((q,i)=>{const step=q.distanceTo(previous![i]);maxStep=Math.max(maxStep,step);assert(step<.5,`teleport ${n}v${m} ${a.weapon} at ${t} actor ${i}: ${step}`);});
