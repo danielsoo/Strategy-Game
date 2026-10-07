@@ -18,6 +18,14 @@ export function nativeBattlePlan(result:DetailedCombatResult){
  const append=(counts:[number,number],morale:[number,number],round:number)=>{
   const alive=actors.filter(a=>representedCount(a,previous[a.side])>0),exchanges:RecordedExchange[]=[],pairs=new Set<string>();
   const fallen=alive.filter(a=>representedCount(a,counts[a.side])===0).map(a=>a.id),changed=counts.some((c,i)=>c!==previous[i]);
+  const strength=[0,1].map(side=>alive.filter(a=>a.side===side).length);
+  const majority=strength[0]===strength[1]?undefined:strength[0]>strength[1]?0:1;
+  // Numerical advantage supplies initiative, not extra damage. Each fighter
+  // starts pressing independently; taking a hit is never an activation gate.
+  if(round===1&&majority!==undefined)for(const a of alive.filter(a=>a.side===majority).sort((a,b)=>Math.abs(a.slot-(strength[majority]-1)/2)-Math.abs(b.slot-(strength[majority]-1)/2)||a.id-b.id)){
+   const b=alive.filter(b=>b.side!==a.side).sort((b,c)=>Math.abs(b.slot-a.slot)-Math.abs(c.slot-a.slot)||b.id-c.id)[0];
+   if(b)exchanges.push({attacker:a.id,target:b.id,event:{attacker:a.side,outcome:'block',variation:a.slot%3},delay:a.slot*.08});
+  }
   for(const a of round===1||changed?alive:[]){
    const enemies=alive.filter(b=>b.side!==a.side).sort((b,c)=>Math.abs(b.slot-a.slot)-Math.abs(c.slot-a.slot)||b.id-c.id);
    const b=enemies[0];if(!b)continue;
@@ -28,6 +36,7 @@ export function nativeBattlePlan(result:DetailedCombatResult){
    if(round!==1&&lossOf(D)===0){if(lossOf(A)>0)[A,D]=[D,A];else continue;}
    if(fallen.includes(D.id))continue; // The recorded fatal exchange below covers this loss.
    const loss=lossOf(D);
+   if(round===1&&majority!==undefined&&loss===0)continue;
    exchanges.push({attacker:A.id,target:D.id,event:{attacker:A.side,outcome:loss>0?'hit':'block',heavy:roll%3===0,variation:roll%3},delay:(roll%7)*.11});
    // Some fighters press a second cut; others recover while their neighbours
    // trade initiative. Variation changes native clips, not just start offsets.

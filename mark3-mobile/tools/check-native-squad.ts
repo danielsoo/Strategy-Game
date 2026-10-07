@@ -36,6 +36,7 @@ async function main(){
   const teams:[DuelActor[],DuelActor[]]=[Array.from({length:representativeCount(n)},(_,i)=>createDuelActor(assets[a.model],{...a,weapon:mixed?([a.weapon,'spear','halberd'] as const)[i]:a.weapon})),Array.from({length:representativeCount(m)},(_,i)=>createDuelActor(assets[b.model],{...b,weapon:mixed?([b.weapon,'hatchet','axe'] as const)[i]:b.weapon}))];
   const result=resolveCombat({units:n},{units:m},makeRng(41+winner)),record=nativeBattlePlan(result);const plan=createNativeSquad(teams,record,range);let previous:T.Vector3[]|undefined,min=Infinity,maxStep=0,encirclementGap=Math.PI*2;
   const emptyFacing=plan.actors.map(()=>0);
+  if(process.argv.includes('--trace'))console.table(plan.engagements.map(e=>({a:e.ids[e.duel.events[0].attacker],d:e.ids[1-e.duel.events[0].attacker],outcome:e.duel.events[0].outcome,move:e.moveStart[e.duel.events[0].attacker].toFixed(2),strike:e.actionStart[e.duel.events[0].attacker].toFixed(2),contact:e.contact.toFixed(2),yaw:e.yaw.toFixed(2),opening:e.opening})));
   for(let t=0;t<plan.duration;t+=1/15){
    plan.update(t);const p=plan.actors.map(actor=>actor.visual.position.clone());
    if(previous)p.forEach((q,i)=>{const step=q.distanceTo(previous![i]);maxStep=Math.max(maxStep,step);assert(step<.5,`teleport ${n}v${m} ${a.weapon} at ${t} actor ${i}: ${step}`);});
@@ -98,7 +99,12 @@ async function main(){
      assert(joints.some((n,i)=>attacker.root.getObjectByName(n)!.getWorldQuaternion(new T.Quaternion()).angleTo(attackPose[i])>.15),'one ally is only walking/idle during the supposed combined strike');
     }
     plan.update(time);
-    const forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),D.visual.rotation.y);assert(forward.dot(A.visual.position.clone().sub(D.visual.position).normalize())<-.2,'rear attack turned defender towards the attacker');
+    const heldYaw=busy.yaw+busy.duel.facings[1-busy.duel.events[0].attacker],turn=D.visual.rotation.y-heldYaw;
+    assert(Math.abs(Math.atan2(Math.sin(turn),Math.cos(turn)))<.015,'defender turned out of its occupied guard to accommodate a flank');
+    if(event.outcome!=='miss'){
+     const forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),D.visual.rotation.y);
+     assert(forward.dot(A.visual.position.clone().sub(D.visual.position).normalize())<-.2,'damaging rear strike was placed in front of the defender');
+    }
    }
    for(let id=0;id<plan.actors.length;id++)if(id!==stage.ids[event.attacker]&&plan.sides[id]===plan.sides[stage.ids[event.attacker]])assert(strikeLaneClear(A.visual.position,event.point.clone().applyAxisAngle(new T.Vector3(0,1,0),stage.yaw).add(stage.origin),plan.actors[id].visual.position),'ally occupies strike corridor');
    if(event.outcome==='miss'){assert(A.visual.localToWorld(A.strike.clone()).distanceTo(target)>.45,'zero-loss rear attack hit body');continue;}
@@ -110,7 +116,19 @@ async function main(){
   const final=plan.update(plan.duration);assert.deepEqual(final.counts,record.final);for(const side of [0,1])assert.equal(final.alive[side],record.actors.filter(a=>a.side===side&&representedCount(a,record.final[side])>0).length);
   plan.update(2);const pose=plan.actors.map(a=>a.visual.position.clone());plan.update(plan.duration);plan.update(2);
   plan.actors.forEach((a,i)=>assert(a.visual.position.distanceTo(pose[i])<1e-6,'scrub changed position'));
-  if((n===3&&m===1||n===1&&m===3||n===2&&m===1||n===1&&m===2)&&winner===0)assert(plan.engagements.some(e=>e.interception),'nearby bypass was not challenged');
+  if((n===3&&m===1||n===1&&m===3||n===2&&m===1||n===1&&m===2)&&a.weapon!=='bow'){
+   const majority=n>m?0:1,allies=record.actors.filter(actor=>actor.side===majority),firstContact=Math.min(...plan.contacts);
+   for(const ally of allies){
+    const first=plan.engagements.find(e=>e.ids.includes(ally.id)&&e.owns[e.ids.indexOf(ally.id)]);
+    assert(first&&first.ids[first.duel.events[0].attacker]===ally.id,'outnumbering fighter waits to be struck before taking initiative');
+    assert(first.moveStart[first.ids.indexOf(ally.id)]<firstContact,`ally ${ally.id} waits for first contact before moving`);
+    plan.update(firstContact-.1);
+    assert(plan.actors[ally.id].visual.position.distanceTo(first.from[first.ids.indexOf(ally.id)].position)>.08,`ally ${ally.id} reserved an approach but stood still until contact`);
+   }
+   const attacks=[0,1].map(side=>plan.engagements.filter(e=>plan.sides[e.ids[e.duel.events[0].attacker]]===side).length);
+   assert(attacks[majority]>=attacks[1-majority]*2&&attacks[majority]>=allies.length,'numerical advantage does not produce sustained extra attacks');
+   console.log(`  initiative: ${attacks.join(':')} attacks; all ${allies.length} allies move before first contact`);
+  }
   console.log(`${n}v${m} ${a.model}/${a.weapon} vs ${b.model}/${b.weapon}: ${plan.duration.toFixed(1)}s, spacing ${min.toFixed(2)}, step ${maxStep.toFixed(2)}, interceptions ${plan.engagements.filter(e=>e.interception).length}, openings ${plan.engagements.filter(e=>e.opening!==undefined).length}, rear hits ${plan.engagements.filter(e=>e.opening!==undefined&&e.duel.events[0].outcome!=='miss').length}`);plan.dispose();
  }
 }

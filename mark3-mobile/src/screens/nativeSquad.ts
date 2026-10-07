@@ -55,7 +55,6 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
  if(actors.length!==plan.actors.length)throw new Error('Recorded battle and representative models disagree');
  const homes:Placement[]=actors.map((a,id)=>{const side=sides[id],slot=side===0?id:id-n[0],lane=slot-(n[side]-1)/2;return {position:new T.Vector3((side===0?-1:1)*(ranged?range/2:1.6),0,lane*2.8),yaw:side===0?Math.PI/2:-Math.PI/2};});
  const last=homes.map(copy),available=actors.map(()=>0),deathAt=actors.map(()=>Infinity),deathPose=actors.map(()=>null as null|Placement),engagements:Engagement[]=[];
- const challenged=new Set<string>();
  const onTrack=(e:Engagement,k:number,t:number):Placement=>{
   if(t>=e.release[k])return copy(e.finish[k]);
   if(t<e.actionStart[k])return approachPlacement(e,k,t);
@@ -75,18 +74,11 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   let loneSide:DuelSide|undefined,previous:Engagement|undefined,opening:number|undefined;
   const minority:DuelSide=living[0]<living[1]?0:1;
   const targets=plan.actors.filter(p=>p.side===minority&&!Number.isFinite(deathAt[p.id]));
-  const group=plan.actors.filter(p=>p.side!==minority&&!Number.isFinite(deathAt[p.id])&&targets.slice().sort((x,y)=>Math.abs(x.slot-p.slot)-Math.abs(y.slot-p.slot)||x.id-y.id)[0]?.id===ids[minority]);
+  const group=plan.actors.filter(p=>p.side!==minority&&!Number.isFinite(deathAt[p.id])&&targets.slice().sort((x,y)=>Math.abs(x.slot-p.slot)-Math.abs(y.slot-p.slot)||x.id-y.id)[0]?.id===ids[minority]).sort((a,b)=>homes[a.id].position.distanceToSquared(homes[ids[minority]].position)-homes[b.id].position.distanceToSquared(homes[ids[minority]].position)||a.id-b.id);
   if(!ranged&&!interception&&event.attacker!==minority&&living[0]!==living[1]&&group.length>1&&group.some(p=>p.id===ids[1-minority])){
    loneSide=minority;const lone=ids[loneSide],flanker=ids[1-loneSide],slot=group.findIndex(p=>p.id===flanker);
-   const challengeKey=`${lone}:${flanker}`;
-   if(allowPressure&&slot>0&&!challenged.has(challengeKey)&&last[lone].position.distanceTo(last[flanker].position)<threatRadius(actors[lone])+2){
-    // The outnumbered fighter notices a nearby bypass and challenges it. The
-    // flanker must actually defend before trying the wider route. These are
-    // harmless recorded blocks, never extra damage or a reroll of the battle.
-    challenged.add(challengeKey);
-    add(i,j,{attacker:loneSide,outcome:'block',variation:slot%2},earliest,false,true);
-    return add(i,j,event,earliest,allowPressure);
-   }
+   // Guarded routes stay outside weapon reach. Do not manufacture a solo
+   // counterattack before every flank: that turns pressure into a turn queue.
    // Two allies occupy opposite sides; three use a full triangle around the
    // target. The rear attacker must physically walk around the target.
    yaw=group.length===2?(slot===0?0:Math.PI):[0,Math.PI*2/3,-Math.PI*2/3][slot];
@@ -95,8 +87,8 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
    if(allowPressure&&slot>0&&event.attacker!==loneSide){
     const around=routeAround(last[flanker].position,anchor.clone().add(new T.Vector3(loneSide===0?2.5:-2.5,0,0).applyAxisAngle(up,yaw)),[{...last[lone],radius:threatRadius(actors[lone])}]);
     const ready=Math.max(earliest,available[flanker]+pathLength(around)/1.45+duel.events[0].contact-.47);
-    previous=engagements.filter(e=>e.ids[1-e.duel.events[0].attacker]===lone&&e.ids[e.duel.events[0].attacker]!==flanker&&e.duel.events[0].outcome==='block').at(-1);
-    const front=group.find(p=>p.id!==flanker);
+    const front=group[0];
+    previous=engagements.filter(e=>e.ids[1-e.duel.events[0].attacker]===lone&&e.ids[e.duel.events[0].attacker]===front.id&&e.duel.events[0].outcome==='block').at(-1);
     if(front&&(!previous||previous.contact+PIN_OPENING<ready)){
      // Schedule the supporting cut to meet the approaching ally. No shared
      // defender-available gate: the second strike lands DURING this block.
