@@ -63,6 +63,14 @@ async function main(){
    assert(plan.engagements.some(e=>e.opening!==undefined),'outnumbered exchange never exploits a committed opponent');
   }
   if(n===3&&m===1&&winner===0)assert(encirclementGap<Math.PI,'three allies never surrounded the opponent');
+  if(n===3&&m===1&&winner===0){
+   const punish=plan.engagements.find(e=>e.vulnerability==='attack'&&e.duel.events[0].outcome==='death');
+   assert(punish,'3v1 still waits for the lone attacker to recover before exploiting its exposed back');
+   const victim=punish.ids[1-punish.duel.events[0].attacker];
+   const committed=plan.engagements.find(e=>e!==punish&&e.ids[e.duel.events[0].attacker]===victim&&Math.abs(punish.contact-e.contact-.1)<.001);
+   assert(committed,'back attack did not overlap the lone fighter committing to a different enemy');
+   assert(punish.actionStart[punish.duel.events[0].attacker]<committed.contact-.3,'ally waits until the solo attack has landed to begin its attack');
+  }
   for(const stage of plan.engagements){
    const defending=1-stage.duel.events[0].attacker;
    assert(stage.from[defending].position.distanceTo(stage.to[defending].position)<.001,'defender was moved to meet a future attack marker');
@@ -97,8 +105,8 @@ async function main(){
    const aimError=A.visual.rotation.y-stage.yaw-stage.duel.facings[event.attacker];assert(Math.abs(Math.atan2(Math.sin(aimError),Math.cos(aimError)))<.015,'committed strike rotated away from its calibrated contact');
    const target=D.visual.localToWorld((stage.duel.receiver?D.backTarget:event.outcome==='block'?D.guard:D.bodyTarget).clone());
    if(stage.opening!==undefined){
-    const busy=plan.engagements.find(e=>e!==stage&&e.duel.events[0].outcome==='block'&&e.ids[1-e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[e.duel.events[0].attacker]!==stage.ids[event.attacker]&&e.contact<stage.contact&&stage.contact-e.contact<.26);
-    assert(busy,'flank must land while another ally is still striking the same defender');
+    const busy=plan.engagements.find(e=>e!==stage&&e.contact<stage.contact&&stage.contact-e.contact<.26&&(stage.vulnerability==='attack'?e.ids[e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[1-e.duel.events[0].attacker]!==stage.ids[event.attacker]:e.duel.events[0].outcome==='block'&&e.ids[1-e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[e.duel.events[0].attacker]!==stage.ids[event.attacker]));
+    assert(busy,'flank must exploit an actual ongoing attack or occupied guard');
     const overlap=Math.min(busy.contact+.14,stage.contact+.14)-Math.max(busy.start+busy.duel.events[0].start+.18,stage.start+event.start+.18);
     assert(overlap>.45,`allied attack clips overlap for only ${overlap}s`);
     // Inspect the rendered arms, not merely overlapping movement reservations.
@@ -109,8 +117,8 @@ async function main(){
      assert(joints.some((n,i)=>attacker.root.getObjectByName(n)!.getWorldQuaternion(new T.Quaternion()).angleTo(attackPose[i])>.15),'one ally is only walking/idle during the supposed combined strike');
     }
     plan.update(time);
-    const heldYaw=busy.yaw+busy.duel.facings[1-busy.duel.events[0].attacker],turn=D.visual.rotation.y-heldYaw;
-    assert(Math.abs(Math.atan2(Math.sin(turn),Math.cos(turn)))<.015,'defender turned out of its occupied guard to accommodate a flank');
+    const heldYaw=busy.yaw+busy.duel.facings[busy.ids.indexOf(stage.ids[1-event.attacker])],turn=D.visual.rotation.y-heldYaw;
+    assert(Math.abs(Math.atan2(Math.sin(turn),Math.cos(turn)))<.015,'exposed fighter turned away from its committed action to accommodate a flank');
     if(event.outcome!=='miss'){
      const forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),D.visual.rotation.y);
      assert(forward.dot(A.visual.position.clone().sub(D.visual.position).normalize())<-.2,'damaging rear strike was placed in front of the defender');
