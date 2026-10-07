@@ -13,11 +13,15 @@ const yawLerp=(a:number,b:number,t:number)=>a+Math.atan2(Math.sin(b-a),Math.cos(
 // Land the flank while the ally's strike is still pressing the guard, not
 // after the defender has counterattacked and both weapons have recovered.
 const PIN_OPENING=.08;
+const APPROACH_SPEED=1.9;
 const copy=(p:Placement):Placement=>({position:p.position.clone(),yaw:p.yaw});
 export const threatRadius=(actor:DuelActor)=>actor.fighter.weapon==='spear'||actor.fighter.weapon==='halberd'?3.15:actor.fighter.weapon==='axe'?2.9:2.65;
 export function strikeLaneClear(from:T.Vector3,tip:T.Vector3,friend:T.Vector3){const v=tip.clone().sub(from).setY(0),p=friend.clone().sub(from).setY(0),u=T.MathUtils.clamp(p.dot(v)/(v.lengthSq()||1),0,1);return p.addScaledVector(v,-u).length()>=.52;}
 const pathLength=(points:T.Vector3[])=>points.slice(1).reduce((n,p,i)=>n+p.distanceTo(points[i]),0);
-function pathPoint(points:T.Vector3[],u:number){let distance=pathLength(points)*u;for(let i=1;i<points.length;i++){const length=points[i].distanceTo(points[i-1]);if(distance<=length||i===points.length-1)return points[i-1].clone().lerp(points[i],length?ease(distance/length):1);distance-=length;}return points.at(-1)!.clone();}
+// One acceleration/deceleration envelope for the whole route, not a stop at
+// every pathfinding vertex. Most of the approach runs at a steady pace.
+function routeProgress(u:number){const t=T.MathUtils.clamp(u,0,1),r=.12;return t<r?t*t/(2*r*(1-r)):t>1-r?1-(1-t)*(1-t)/(2*r*(1-r)):(t-r/2)/(1-r);}
+function pathPoint(points:T.Vector3[],u:number){let distance=pathLength(points)*routeProgress(u);for(let i=1;i<points.length;i++){const length=points[i].distanceTo(points[i-1]);if(distance<=length||i===points.length-1)return points[i-1].clone().lerp(points[i],length?distance/length:1);distance-=length;}return points.at(-1)!.clone();}
 function pathFacing(points:T.Vector3[],u:number,from:number,to:number){
  const total=pathLength(points);if(total<1.2)return yawLerp(from,to,ease(u));
  const heading=(i:number)=>Math.atan2(points[i].x-points[i-1].x,points[i].z-points[i-1].z);
@@ -81,33 +85,35 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
    // counterattack before every flank: that turns pressure into a turn queue.
    // Two allies occupy opposite sides; three use a full triangle around the
    // target. The rear attacker must physically walk around the target.
-   yaw=group.length===2?(slot===0?0:Math.PI):[0,Math.PI*2/3,-Math.PI*2/3][slot];
+   // Stay on the side this fighter already occupies. Fixed slot signs sent
+   // both wings around the far side and kept the front fighter waiting alone.
+   yaw=slot===0?0:Math.sign(yaw||slot-.5)*(group.length===2?Math.PI:Math.PI*2/3);
+   const pin=PIN_OPENING+(slot>1?.14:0);
    const anchor=last[lone].position.clone();
    tactic='정면 견제 · 측면과 배후 포위';
    if(allowPressure&&slot>0&&event.attacker!==loneSide){
     const around=routeAround(last[flanker].position,anchor.clone().add(new T.Vector3(loneSide===0?2.5:-2.5,0,0).applyAxisAngle(up,yaw)),[{...last[lone],radius:threatRadius(actors[lone])}]);
-    const ready=Math.max(earliest,available[flanker]+pathLength(around)/1.45+duel.events[0].contact-.47);
+    const ready=Math.max(earliest,available[flanker]+pathLength(around)/APPROACH_SPEED+duel.events[0].contact-.47);
     const front=group[0];
     previous=engagements.filter(e=>e.ids[1-e.duel.events[0].attacker]===lone&&e.ids[e.duel.events[0].attacker]===front.id&&e.duel.events[0].outcome==='block').at(-1);
-    if(front&&(!previous||previous.contact+PIN_OPENING<ready)){
+    if(front&&(!previous||previous.contact+pin<ready)){
      // Schedule the supporting cut to meet the approaching ally. No shared
      // defender-available gate: the second strike lands DURING this block.
      // The support cannot add casualties to the authoritative combat record.
      const blue=loneSide===0?lone:front.id,red=(loneSide===1?lone:front.id)-n[0];
-     for(let press=0;press<4;press++){
-      add(blue,red,{attacker:(1-loneSide) as DuelSide,outcome:'block',variation:(slot+press)%3},press===3?ready-PIN_OPENING:0,false);
-      previous=engagements.at(-1);
-      if(previous!.contact+PIN_OPENING>=ready)break;
-     }
+     // Meet the wing's arrival with one supporting cut. Repeating whole
+     // blocks until a fixed beat overshot readiness and padded the fight.
+     add(blue,red,{attacker:(1-loneSide) as DuelSide,outcome:'block',variation:slot%3},ready-pin,false);
+     previous=engagements.at(-1);
     }
-    if(previous&&previous.release[previous.ids.indexOf(lone)]>previous.contact+PIN_OPENING){
-     opening=previous.contact+PIN_OPENING;const target=onTrack(previous,previous.ids.indexOf(lone),opening);
+    if(previous&&previous.release[previous.ids.indexOf(lone)]>previous.contact+pin){
+     opening=previous.contact+pin;const target=onTrack(previous,previous.ids.indexOf(lone),opening);
      anchorTarget.copy(target.position);
      // A zero-loss record permits a committed miss, never an invented hit.
      if(event.outcome==='block')event={...event,outcome:'miss'};
-     // At 80 ms after a native block the defender is in the captured block
-     // recoil pose. Carry it into the hit/death blend, without an idle reset.
-     duel=createNativeDuel(pair,[event],range,{side:loneSide,yaw:target.yaw-yaw,position:new T.Vector3(loneSide===0?-half:half,0,0),idleTime:(opening+lone*.39)%pair[loneSide].duration(pair[loneSide].idle),pose:{clip:hasShield(pair[loneSide].fighter)?'impact':pair[loneSide].impact,time:PIN_OPENING}});
+     // Carry the captured block recoil at this precise follow-up time into
+     // the hit/death blend, without resetting the defender to idle.
+     duel=createNativeDuel(pair,[event],range,{side:loneSide,yaw:target.yaw-yaw,position:new T.Vector3(loneSide===0?-half:half,0,0),idleTime:(opening+lone*.39)%pair[loneSide].duration(pair[loneSide].idle),pose:{clip:hasShield(pair[loneSide].fighter)?'impact':pair[loneSide].impact,time:pin}});
      tactic='정면 공격을 막는 순간 · 측후방 동시 공격';
     }
    }
@@ -124,7 +130,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
    const place=(time:number,k:number):Placement=>({position:duel.positionsAt(time)[k].applyAxisAngle(up,angle).add(center),yaw:duel.facings[k]+angle});
    const guarded=!ranged&&actors.length>2;
    const to=[place(0,0),place(0,1)],routes=to.map((p,k)=>routeAround(from[k].position,p.position,[...last.flatMap((o,id)=>ids.includes(id)?[]:[{...o,radius:guarded&&sides[id]!==sides[ids[k]]&&!Number.isFinite(deathAt[id])?threatRadius(actors[id]):.92}]),...extra,...(guarded?[{position:to[1-k].position,yaw:0,radius:threatRadius(pair[1-k])}]:[])]));
-   const travel=routes.map((r,k)=>Math.max(.22,pathLength(r)/(guarded?1.45:1.9),Math.abs(Math.atan2(Math.sin(to[k].yaw-from[k].yaw),Math.cos(to[k].yaw-from[k].yaw)))/3.2));
+   const travel=routes.map((r,k)=>Math.max(.22,pathLength(r)/APPROACH_SPEED,Math.abs(Math.atan2(Math.sin(to[k].yaw-from[k].yaw),Math.cos(to[k].yaw-from[k].yaw)))/3.2));
    const moveStart=ids.map(id=>available[id]+delay),contact=opening??Math.max(earliest,moveStart[a]+travel[a]+windup,moveStart[d]+travel[d]+.28);
    const actionStart=[0,0];actionStart[a]=contact-windup;actionStart[d]=contact-.28;
    if(opening!==undefined){moveStart[d]=opening;actionStart[d]=opening;from[d]=copy(to[d]);}
@@ -207,7 +213,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
     // An overlapping hit truncates the guard track at contact. Keep that
     // guard facing through the handoff instead of beginning an early turn
     // towards the first attacker and then snapping back for the rear impact.
-    const interrupted=k!==e.duel.events[0].attacker&&unlock<e.contact+.2;
+    const interrupted=k!==e.duel.events[0].attacker&&unlock<e.contact+.45;
     const blend=ease((time-lock+.24)/.24)*(interrupted?1:1-ease((time-unlock+.20)/.20));
     wanted=yawLerp(wanted,committed,blend);
    }
@@ -246,7 +252,9 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
       // exactly 90 degrees makes circling feet/pelvis flip on every corner.
       const focus=e.to[1-k].position,backwards=e.to[k].position.distanceTo(focus)>e.from[k].position.distanceTo(focus)+.2;
       const direction=.72*Math.sin(heading-placements[id].yaw)*(backwards?-1:1);
-      const stride=(elapsed+id*.13)%a.duration(clip);
+      // The feet advance with distance covered, including acceleration and
+      // delayed approaches; a slowly moving root must not keep walking fast.
+      const stride=(pathLength(e.routes[k])*routeProgress(u)/1.45+id*.13)%a.duration(clip);
       a.evaluate({clip:a.idle,time:idleTimes[id]},undefined,1,undefined,{clip,time:backwards?a.duration(clip)-stride:stride,weight,direction});
      }else a.evaluate({clip,time:moving?(elapsed+id*.13)%a.duration(clip):idleTimes[id]},{clip:a.idle,time:idleTimes[id]},weight);
      state.phase=e.opening!==undefined?'경계 이동 · 측후방 접근':e.tactic;

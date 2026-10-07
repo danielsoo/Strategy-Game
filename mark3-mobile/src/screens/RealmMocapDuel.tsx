@@ -24,13 +24,20 @@ function Scene({fighters,plan,mixed,range,clock,angle,onState,onReady}:{fighters
   })) as [ReturnType<typeof createDuelActor>[],ReturnType<typeof createDuelActor>[]];
   return createNativeSquad(teams,plan,range);
  },[first,second,fighters,plan,mixed,range]);
+ const framing=useMemo(()=>{
+  const bounds=new T.Box3();duel.update(0);duel.actors.forEach(a=>bounds.expandByPoint(a.visual.position));
+  duel.engagements.forEach(e=>{e.routes.flat().forEach(p=>bounds.expandByPoint(p));e.finish.forEach(p=>bounds.expandByPoint(p.position));e.duel.positionsAt(e.duel.events[0].contact).forEach(p=>bounds.expandByPoint(p.applyAxisAngle(new T.Vector3(0,1,0),e.yaw).add(e.origin)));});
+  return bounds;
+ },[duel]);
  useEffect(()=>{clock.duration=duel.duration;clock.contacts=duel.contacts;clock.failures=duel.failures;clock.shots=duel.shots;clock.flights=duel.flights;clock.encirclements=duel.engagements.filter(e=>e.opening!==undefined).map(e=>e.contact-.03);clock.interceptions=duel.engagements.filter(e=>e.interception).map(e=>e.contact-.25);onReady();return()=>duel.dispose();},[duel]);
  const grass=useRealmMaterial('grass_ground',24),effect=useRef<T.Group>(null),last=useRef('');
  useFrame(({camera,size},delta)=>{
   if(!clock.paused)clock.time=Math.min(duel.duration,clock.time+Math.min(delta,.05)*clock.speed);
   const state=duel.update(clock.time),finished=clock.time>=duel.duration;if(finished)clock.paused=true;
   const text=`${state.round}R · ${state.phase} · ${clock.time.toFixed(1)} / ${duel.duration.toFixed(1)}초`,key=text+(finished?'done':'');if(last.current!==key){last.current=key;onState(text,state.counts);}
-  const bounds=new T.Box3();duel.actors.forEach(a=>bounds.expandByPoint(a.visual.position));const focus=bounds.getCenter(new T.Vector3()),span=bounds.getSize(new T.Vector3()).length();
+  // Hold the shot through the exchange. Following changing body bounds on
+  // every frame makes each lunge/death zoom and slide the entire battlefield.
+  const bounds=framing,focus=bounds.getCenter(new T.Vector3()),span=bounds.getSize(new T.Vector3()).length();
   const distance=Math.max(fighters[0].weapon==='bow'&&range>8?13:5.4,(span+3)/(.56*(size.width/size.height)));
   const loft=fighters[0].weapon==='bow'&&range>8;
   if(duel.actors.length>2){

@@ -66,6 +66,16 @@ async function main(){
   for(const stage of plan.engagements){
    const defending=1-stage.duel.events[0].attacker;
    assert(stage.from[defending].position.distanceTo(stage.to[defending].position)<.001,'defender was moved to meet a future attack marker');
+   for(let k=0;k<2;k++)if(stage.owns[k]&&stage.routes[k].length>2){
+    const route=stage.routes[k],length=route.slice(1).reduce((sum,p,i)=>sum+p.distanceTo(route[i]),0),span=stage.actionStart[k]-stage.moveStart[k];
+    // Inspect actual root motion throughout a curved approach: route vertices
+    // must not introduce repeated braking to a standstill.
+    for(let t=stage.moveStart[k]+span*.16;t<stage.moveStart[k]+span*.84;t+=.035){
+     plan.update(t);const p=plan.actors[stage.ids[k]].visual.position.clone();plan.update(t+.012);
+     const speed=p.distanceTo(plan.actors[stage.ids[k]].visual.position)/.012;
+     assert(speed>length/span*.35,'fighter brakes at an intermediate path vertex');
+    }
+   }
    if(stage.interception){assert.equal(stage.duel.events[0].outcome,'block','interception invented damage');assert(stage.guarded,'interception lost guard');}
    for(let k=0;k<2;k++)if(stage.guarded&&stage.owns[k]&&stage.actionStart[k]-stage.moveStart[k]>.9){
     const other=1-k,focus=stage.to[other].position,start=stage.from[k].position,end=stage.to[k].position;
@@ -87,7 +97,7 @@ async function main(){
    const aimError=A.visual.rotation.y-stage.yaw-stage.duel.facings[event.attacker];assert(Math.abs(Math.atan2(Math.sin(aimError),Math.cos(aimError)))<.015,'committed strike rotated away from its calibrated contact');
    const target=D.visual.localToWorld((stage.duel.receiver?D.backTarget:event.outcome==='block'?D.guard:D.bodyTarget).clone());
    if(stage.opening!==undefined){
-    const busy=plan.engagements.find(e=>e!==stage&&e.ids[1-e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[e.duel.events[0].attacker]!==stage.ids[event.attacker]&&e.contact<stage.contact&&stage.contact-e.contact<.14);
+    const busy=plan.engagements.find(e=>e!==stage&&e.duel.events[0].outcome==='block'&&e.ids[1-e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[e.duel.events[0].attacker]!==stage.ids[event.attacker]&&e.contact<stage.contact&&stage.contact-e.contact<.26);
     assert(busy,'flank must land while another ally is still striking the same defender');
     const overlap=Math.min(busy.contact+.14,stage.contact+.14)-Math.max(busy.start+busy.duel.events[0].start+.18,stage.start+event.start+.18);
     assert(overlap>.45,`allied attack clips overlap for only ${overlap}s`);
@@ -121,6 +131,10 @@ async function main(){
    for(const ally of allies){
     const first=plan.engagements.find(e=>e.ids.includes(ally.id)&&e.owns[e.ids.indexOf(ally.id)]);
     assert(first&&first.ids[first.duel.events[0].attacker]===ally.id,'outnumbering fighter waits to be struck before taking initiative');
+    if(allies.length===3){
+     const k=first.ids.indexOf(ally.id),relativeStart=first.from[k].position.z-first.from[1-k].position.z,relativeEnd=first.to[k].position.z-first.to[1-k].position.z;
+     if(Math.abs(relativeStart)>1)assert(relativeStart*relativeEnd>0,'wing fighter crosses to the far flank before its first attack');
+    }
     assert(first.moveStart[first.ids.indexOf(ally.id)]<firstContact,`ally ${ally.id} waits for first contact before moving`);
     plan.update(firstContact-.1);
     assert(plan.actors[ally.id].visual.position.distanceTo(first.from[first.ids.indexOf(ally.id)].position)>.08,`ally ${ally.id} reserved an approach but stood still until contact`);
