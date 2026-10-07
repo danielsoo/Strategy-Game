@@ -1,5 +1,5 @@
 import * as T from 'three';
-import {DuelActor,DuelEvent,DuelSide,createNativeDuel} from './nativeDuel';
+import {DuelActor,DuelEvent,DuelSide,createNativeDuel,hasShield} from './nativeDuel';
 import {NativeClip} from './nativeCombatModels';
 import {NativeBattlePlan,representativeCount} from './nativeBattlePlan';
 
@@ -10,6 +10,9 @@ type Engagement={start:number;enter:number;end:number;contact:number;ids:[number
 const up=new T.Vector3(0,1,0);
 const ease=(x:number)=>T.MathUtils.smoothstep(x,0,1);
 const yawLerp=(a:number,b:number,t:number)=>a+Math.atan2(Math.sin(b-a),Math.cos(b-a))*t;
+// Land the flank while the ally's strike is still pressing the guard, not
+// after the defender has counterattacked and both weapons have recovered.
+const PIN_OPENING=.08;
 const copy=(p:Placement):Placement=>({position:p.position.clone(),yaw:p.yaw});
 export const threatRadius=(actor:DuelActor)=>actor.fighter.weapon==='spear'||actor.fighter.weapon==='halberd'?3.15:actor.fighter.weapon==='axe'?2.9:2.65;
 export function strikeLaneClear(from:T.Vector3,tip:T.Vector3,friend:T.Vector3){const v=tip.clone().sub(from).setY(0),p=friend.clone().sub(from).setY(0),u=T.MathUtils.clamp(p.dot(v)/(v.lengthSq()||1),0,1);return p.addScaledVector(v,-u).length()>=.52;}
@@ -92,26 +95,28 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
    if(allowPressure&&slot>0&&event.attacker!==loneSide){
     const around=routeAround(last[flanker].position,anchor.clone().add(new T.Vector3(loneSide===0?2.5:-2.5,0,0).applyAxisAngle(up,yaw)),[{...last[lone],radius:threatRadius(actors[lone])}]);
     const ready=Math.max(earliest,available[flanker]+pathLength(around)/1.45+duel.events[0].contact-.47);
-    previous=engagements.filter(e=>e.ids[e.duel.events[0].attacker]===lone&&e.duel.events[0].outcome==='block').at(-1);
+    previous=engagements.filter(e=>e.ids[1-e.duel.events[0].attacker]===lone&&e.ids[e.duel.events[0].attacker]!==flanker&&e.duel.events[0].outcome==='block').at(-1);
     const front=group.find(p=>p.id!==flanker);
-    if(front&&(!previous||previous.contact+.65<ready)){
-     // Front pressure continues while the other ally circles. This harmless
-     // counter cannot add casualties to the authoritative combat record.
+    if(front&&(!previous||previous.contact+PIN_OPENING<ready)){
+     // Schedule the supporting cut to meet the approaching ally. No shared
+     // defender-available gate: the second strike lands DURING this block.
+     // The support cannot add casualties to the authoritative combat record.
      const blue=loneSide===0?lone:front.id,red=(loneSide===1?lone:front.id)-n[0];
      for(let press=0;press<4;press++){
-      const counter=press%2===1;
-      add(blue,red,{attacker:counter?loneSide:(1-loneSide) as DuelSide,outcome:'block',variation:press%3},0,false);
+      add(blue,red,{attacker:(1-loneSide) as DuelSide,outcome:'block',variation:(slot+press)%3},press===3?ready-PIN_OPENING:0,false);
       previous=engagements.at(-1);
-      if(counter&&previous!.contact+.65>=ready+.25)break;
+      if(previous!.contact+PIN_OPENING>=ready)break;
      }
     }
-    if(previous&&previous.release[previous.ids.indexOf(lone)]>previous.contact+.65){
-     opening=previous.contact+.65;const target=onTrack(previous,previous.ids.indexOf(lone),opening);
+    if(previous&&previous.release[previous.ids.indexOf(lone)]>previous.contact+PIN_OPENING){
+     opening=previous.contact+PIN_OPENING;const target=onTrack(previous,previous.ids.indexOf(lone),opening);
      origin.copy(target.position).sub(new T.Vector3(loneSide===0?-half:half,0,0).applyAxisAngle(up,yaw));
      // A zero-loss record permits a committed miss, never an invented hit.
      if(event.outcome==='block')event={...event,outcome:'miss'};
-     duel=createNativeDuel(pair,[event],range,{side:loneSide,yaw:target.yaw-yaw,position:new T.Vector3(loneSide===0?-half:half,0,0),idleTime:(opening+lone*.39)%pair[loneSide].duration(pair[loneSide].idle)});
-     tactic='전면 교전 중 빈틈 포착 · 배후 공격';
+     // At 80 ms after a native block the defender is in the captured block
+     // recoil pose. Carry it into the hit/death blend, without an idle reset.
+     duel=createNativeDuel(pair,[event],range,{side:loneSide,yaw:target.yaw-yaw,position:new T.Vector3(loneSide===0?-half:half,0,0),idleTime:(opening+lone*.39)%pair[loneSide].duration(pair[loneSide].idle),pose:{clip:hasShield(pair[loneSide].fighter)?'impact':pair[loneSide].impact,time:PIN_OPENING}});
+     tactic='정면 공격을 막는 순간 · 측후방 동시 공격';
     }
    }
   }
@@ -221,12 +226,12 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
       const stride=(elapsed+id*.13)%a.duration(clip);
       a.evaluate({clip:a.idle,time:idleTimes[id]},undefined,1,undefined,{clip,time:backwards?a.duration(clip)-stride:stride,weight,direction});
      }else a.evaluate({clip,time:moving?(elapsed+id*.13)%a.duration(clip):idleTimes[id]},{clip:a.idle,time:idleTimes[id]},weight);
-     state.phase=e.tactic;
+     state.phase=e.opening!==undefined?'경계 이동 · 측후방 접근':e.tactic;
     }else participation[k]=Math.max(.00001,ease((t-e.actionStart[k])/.14));
    });
    if(participation.some(w=>w>0)){
     const s=e.duel.update(t-e.start,participation,[idleTimes[e.ids[0]],idleTimes[e.ids[1]]]);
-    state.phase=e.opening!==undefined?e.tactic:s.winner===null?s.phase:'대표 병사 쓰러짐 · 다른 교전 계속';
+    state.phase=e.opening!==undefined&&t<=e.contact+.14?e.tactic:s.winner===null?s.phase:'대표 병사 쓰러짐 · 다른 교전 계속';
     e.ids.forEach((id,k)=>{if(participation[k]>0)placements[id]={position:actors[id].visual.position.clone().applyAxisAngle(up,e.yaw).add(e.origin),yaw:actors[id].visual.rotation.y+e.yaw};});
     if(s.contact)state.contacts.push({...s.contact,point:s.contact.point.clone().applyAxisAngle(up,e.yaw).add(e.origin)});
    }

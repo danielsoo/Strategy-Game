@@ -73,7 +73,18 @@ async function main(){
    plan.update(time);const A=plan.actors[stage.ids[event.attacker]],D=plan.actors[stage.ids[1-event.attacker]];
    const target=D.visual.localToWorld((stage.duel.receiver?D.backTarget:event.outcome==='block'?D.guard:D.bodyTarget).clone());
    if(stage.opening!==undefined){
-    const busy=plan.engagements.find(e=>e!==stage&&e.ids[e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&Math.abs(e.contact+.65-stage.contact)<1e-6);assert(busy,'rear attack lacks a committed opponent');assert(stage.actionStart[event.attacker]<busy.contact,'rear attacker waits until the opponent has finished swinging');
+    const busy=plan.engagements.find(e=>e!==stage&&e.ids[1-e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[e.duel.events[0].attacker]!==stage.ids[event.attacker]&&e.contact<stage.contact&&stage.contact-e.contact<.14);
+    assert(busy,'flank must land while another ally is still striking the same defender');
+    const overlap=Math.min(busy.contact+.14,stage.contact+.14)-Math.max(busy.start+busy.duel.events[0].start+.18,stage.start+event.start+.18);
+    assert(overlap>.45,`allied attack clips overlap for only ${overlap}s`);
+    // Inspect the rendered arms, not merely overlapping movement reservations.
+    for(const attacker of [A,plan.actors[busy.ids[busy.duel.events[0].attacker]]]){
+     plan.update(time-.02);const joints=['mixamorigRightArm','mixamorigRightForeArm'],attackPose=joints.map(n=>attacker.root.getObjectByName(n)!.getWorldQuaternion(new T.Quaternion()));
+     attacker.evaluate({clip:attacker.idle,time:(time-.02+plan.actors.indexOf(attacker)*.39)%attacker.duration(attacker.idle)});
+     // Arissa's FBX rotation wrappers animate the parents of these bones.
+     assert(joints.some((n,i)=>attacker.root.getObjectByName(n)!.getWorldQuaternion(new T.Quaternion()).angleTo(attackPose[i])>.15),'one ally is only walking/idle during the supposed combined strike');
+    }
+    plan.update(time);
     const forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),D.visual.rotation.y);assert(forward.dot(A.visual.position.clone().sub(D.visual.position).normalize())<-.2,'rear attack turned defender towards the attacker');
    }
    for(let id=0;id<plan.actors.length;id++)if(id!==stage.ids[event.attacker]&&plan.sides[id]===plan.sides[stage.ids[event.attacker]])assert(strikeLaneClear(A.visual.position,event.point.clone().applyAxisAngle(new T.Vector3(0,1,0),stage.yaw).add(stage.origin),plan.actors[id].visual.position),'ally occupies strike corridor');

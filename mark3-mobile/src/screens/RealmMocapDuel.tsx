@@ -24,7 +24,7 @@ function Scene({fighters,plan,mixed,range,clock,angle,onState,onReady}:{fighters
   })) as [ReturnType<typeof createDuelActor>[],ReturnType<typeof createDuelActor>[]];
   return createNativeSquad(teams,plan,range);
  },[first,second,fighters,plan,mixed,range]);
- useEffect(()=>{clock.duration=duel.duration;clock.contacts=duel.contacts;clock.failures=duel.failures;clock.shots=duel.shots;clock.flights=duel.flights;clock.encirclements=duel.engagements.filter(e=>e.opening!==undefined).map(e=>e.contact-.35);clock.interceptions=duel.engagements.filter(e=>e.interception).map(e=>e.contact-.25);onReady();return()=>duel.dispose();},[duel]);
+ useEffect(()=>{clock.duration=duel.duration;clock.contacts=duel.contacts;clock.failures=duel.failures;clock.shots=duel.shots;clock.flights=duel.flights;clock.encirclements=duel.engagements.filter(e=>e.opening!==undefined).map(e=>e.contact-.03);clock.interceptions=duel.engagements.filter(e=>e.interception).map(e=>e.contact-.25);onReady();return()=>duel.dispose();},[duel]);
  const grass=useRealmMaterial('grass_ground',24),effect=useRef<T.Group>(null),last=useRef('');
  useFrame(({camera,size},delta)=>{
   if(!clock.paused)clock.time=Math.min(duel.duration,clock.time+Math.min(delta,.05)*clock.speed);

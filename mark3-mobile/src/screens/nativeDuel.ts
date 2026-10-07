@@ -127,7 +127,7 @@ type PreparedEvent=DuelEvent&{start:number;contact:number;end:number;clip:Native
 const ease=(n:number)=>T.MathUtils.smoothstep(n,0,1);
 const transform=(p:T.Vector3,side:DuelSide)=>p.clone().applyAxisAngle(new T.Vector3(0,1,0),side===0?Math.PI/2:-Math.PI/2);
 
-export type RearReceiver={side:DuelSide;yaw:number;position:T.Vector3;idleTime:number};
+export type RearReceiver={side:DuelSide;yaw:number;position:T.Vector3;idleTime:number;pose?:Pose};
 export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[],range=6,receiver?:RearReceiver){
  const ranged=actors[0].fighter.weapon==='bow',halfRange=T.MathUtils.clamp(range,6,22)/2,base=[new T.Vector3(ranged?-halfRange:-1.25,0,0),new T.Vector3(ranged?halfRange:1.25,0,0)];
  const facings=[Math.PI/2,-Math.PI/2];if(receiver){facings[receiver.side]=receiver.yaw;base[receiver.side].copy(receiver.position);}
@@ -137,9 +137,12 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
   const a=event.attacker,d=(1-a) as DuelSide,A=actors[a],D=actors[d],clip=attack(A.fighter,event),duration=A.duration(clip);
   // A successful block targets equipment. Hits must visibly reach an opening,
   // never reuse the same raised shield pose and then kill its defender.
-  const rear=receiver?.side===d,defenderClip=rear?D.idle:event.outcome==='block'?D.defense:D.failedGuard;
-  const defenseTime=rear?receiver!.idleTime:event.outcome==='block'?D.duration(defenderClip)*.65:Math.min(.11,D.duration(defenderClip)*.2);D.evaluate({clip:defenderClip,time:defenseTime});const guard=(rear?D.backTarget:event.outcome==='block'?D.guard:D.bodyTarget).clone();
-  if(event.outcome==='miss')guard.x+=.8;
+  const rear=receiver?.side===d,defenderClip=rear?(receiver!.pose?.clip??D.idle):event.outcome==='block'?D.defense:D.failedGuard;
+  const defenseTime=rear?(receiver!.pose?.time??receiver!.idleTime):event.outcome==='block'?D.duration(defenderClip)*.65:Math.min(.11,D.duration(defenderClip)*.2);D.evaluate({clip:defenderClip,time:defenseTime});const guard=(rear?D.backTarget:event.outcome==='block'?D.guard:D.bodyTarget).clone();
+  // A harmless follow-up passes beside the defender in the attacker's lane.
+  // Offsetting in the defender's turned frame could instead move the target
+  // along the incoming blade and let a short-weapon reach clamp erase the miss.
+  if(event.outcome==='miss')guard.add(new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),-facings[d]));
   let marker=duration*.45,point=new T.Vector3(),projectileOrigin=new T.Vector3(),best=-Infinity;
   const shot=A.fighter.weapon==='bow';
   if(shot){marker=A.duration('bowDraw')+.65+5/30;A.evaluate({clip,time:marker});point.copy(A.strike);projectileOrigin.copy(A.equipment.rightGrip);}
