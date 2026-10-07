@@ -8,6 +8,10 @@ import {arrowPose,ARROW_LENGTH} from '../src/screens/duelBallistics';
 async function load(id:string){const dir=`public/realm/${id}`,j=JSON.parse(fs.readFileSync(`${dir}/model.gltf`,'utf8'));for(const b of j.buffers)b.uri='data:application/octet-stream;base64,'+fs.readFileSync(`${dir}/${b.uri}`).toString('base64');for(const m of j.materials){delete m.pbrMetallicRoughness.baseColorTexture;delete m.normalTexture;}return new GLTFLoader().parseAsync(JSON.stringify(j),'');}
 async function main(){
  const assets={paladin:await load('paladin'),arissa:await load('arissa'),erika:await load('erika')};
+ const guardActor=createDuelActor(assets.paladin,{model:'paladin',weapon:'sword'}),guardPose={clip:guardActor.defense,time:guardActor.duration(guardActor.defense)*.65};
+ guardActor.evaluate(guardPose);const guardPoint=guardActor.guard.clone();
+ for(let i=0;i<4;i++){guardActor.evaluate({clip:guardActor.idle,time:0});guardActor.evaluate(guardPose);assert(guardActor.guard.distanceTo(guardPoint)<1e-6,'repeated guard resets chest to bind pose');}
+ guardActor.dispose();
  const configs:[DuelFighter,DuelFighter,DuelSide][]=[];
  for(const weapon of ['sword','axe','hatchet','spear','halberd','flail','bow'] as const)configs.push([{model:'paladin',weapon},{model:'paladin',weapon:'sword'},0]);
  for(const model of ['arissa','erika'] as const)configs.push([{model,weapon:model==='arissa'?'hatchet':'axe'},{model:'paladin',weapon:'sword'},1],[{model:'paladin',weapon:'sword'},{model,weapon:model==='arissa'?'hatchet':'axe'},0]);

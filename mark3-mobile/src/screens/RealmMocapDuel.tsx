@@ -14,6 +14,7 @@ import {DetailedCombatResult,resolveCombat,makeRng,DEFAULT_COMBAT_CONFIG} from '
 import type {FighterKind} from './battleReplay';
 
 type Clock={time:number;paused:boolean;speed:number;duration:number;contacts:number[];flights:number[];shots:number[];failures:number[]};
+function previewTroops():[number,number]{const preset=typeof window==='undefined'?null:new URLSearchParams(window.location.search).get('squad');return preset==='2v1'?[2,1]:preset==='1v2'?[1,2]:[3,3];}
 function Scene({fighters,plan,mixed,range,clock,angle,onState,onReady}:{fighters:[DuelFighter,DuelFighter];plan:NativeBattlePlan;mixed:boolean;range:number;clock:Clock;angle:number;onState:(s:string,c:number[])=>void;onReady:()=>void}){
  const first=useLoader(GLTFLoader,COMBAT_MODELS[fighters[0].model].path),second=useLoader(GLTFLoader,COMBAT_MODELS[fighters[1].model].path);
  const duel=useMemo(()=>{
@@ -53,7 +54,7 @@ function Scene({fighters,plan,mixed,range,clock,angle,onState,onReady}:{fighters
 function Follower({actor,color}:{actor:T.Group;color:string}){const ref=useRef<T.Group>(null);useFrame(()=>{ref.current?.position.set(actor.position.x,.016,actor.position.z);});return <group ref={ref}><mesh rotation-x={-Math.PI/2}><ringGeometry args={[.38,.405,48]}/><meshBasicMaterial color={color} transparent opacity={.8} depthWrite={false}/></mesh></group>;}
 
 export default function RealmMocapDuel({onSingle,result,kinds=['knight','knight'],onClose}:{onSingle?:()=>void;result?:DetailedCombatResult;kinds?:[FighterKind,FighterKind];onClose?:()=>void}){
- const [troops,setTroops]=useState<[number,number]>([3,3]),[ranks,setRanks]=useState<[number,number]>([1,1]),[model,setModel]=useState<CombatModel>('paladin'),[weapon,setWeapon]=useState<NativeWeaponKind>('sword'),[opponent,setOpponent]=useState<CombatModel>('paladin'),[record,setRecord]=useState(41),[stalemate,setStalemate]=useState(false),[mixed,setMixed]=useState(true),[details,setDetails]=useState(false),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false),[angle,setAngle]=useState(-.23),[range,setRange]=useState(6),[ready,setReady]=useState(false),[status,setStatus]=useState('동작을 불러오는 중'),[counts,setCounts]=useState([3,3]);
+ const [troops,setTroops]=useState<[number,number]>(previewTroops),[ranks,setRanks]=useState<[number,number]>([1,1]),[model,setModel]=useState<CombatModel>('paladin'),[weapon,setWeapon]=useState<NativeWeaponKind>('sword'),[opponent,setOpponent]=useState<CombatModel>('paladin'),[record,setRecord]=useState(41),[stalemate,setStalemate]=useState(false),[mixed,setMixed]=useState(true),[details,setDetails]=useState(false),[paused,setPaused]=useState(false),[slow,setSlow]=useState(false),[angle,setAngle]=useState(-.23),[range,setRange]=useState(6),[ready,setReady]=useState(false),[status,setStatus]=useState('동작을 불러오는 중'),[counts,setCounts]=useState([3,3]);
  const {height}=useWindowDimensions(),clock=useRef<Clock>({time:0,paused:false,speed:1,duration:1,contacts:[],flights:[],shots:[],failures:[]}).current;
  const resolved=useMemo(()=>result??resolveCombat({units:troops[0],morale:100},{units:troops[1],morale:100},makeRng(record),stalemate?{...DEFAULT_COMBAT_CONFIG,maxRounds:2,baseLossRate:0,routThreshold:0}:undefined),[result,troops,record,stalemate]);
  const plan=useMemo(()=>nativeBattlePlan(resolved),[resolved]);
@@ -66,7 +67,7 @@ export default function RealmMocapDuel({onSingle,result,kinds=['knight','knight'
  const button=(label:string,fn:()=>void,active=false)=><TouchableOpacity key={label} accessibilityRole="button" accessibilityLabel={label} onPress={fn} style={[s.button,active&&s.active]}><Text style={s.label}>{label}</Text></TouchableOpacity>;
  const row=(children:React.ReactNode)=><ScrollView horizontal style={s.row} showsHorizontalScrollIndicator={false}><View style={s.controls}>{children}</View></ScrollView>;
  return <View style={[s.page,{height}]}><View style={s.header}><Text style={s.title}>왕국의 병사 · 공방</Text><Text style={s.note}>{result?'이번 지도 전투의 확정 기록':'게임 전투 엔진으로 계산한 예시 기록'} · 푸른 원 공격측 / 붉은 원 방어측</Text></View>
-  {!result&&<>{row(([[1,1],[3,1],[1,3],[3,3],[12,12],[60,60]] as [number,number][]).map(([a,b])=>button(`${a} 대 ${b}`,()=>{setTroops([a,b]);reset();},troops[0]===a&&troops[1]===b)))}
+  {!result&&<>{row(([[1,1],[2,1],[1,2],[3,1],[1,3],[3,3],[12,12],[60,60]] as [number,number][]).map(([a,b])=>button(`${a} 대 ${b}`,()=>{setTroops([a,b]);reset();},troops[0]===a&&troops[1]===b)))}
   {row(button(details?'부대·무기 설정 접기':'부대·무기 설정',()=>setDetails(v=>!v)))}
   {details&&<>{row(<>{button(`아군 ${proficiencyLabel(ranks[0])}`,()=>setRanks(r=>[(r[0]+1)%4,r[1]]))}{button(`적군 ${proficiencyLabel(ranks[1])}`,()=>setRanks(r=>[r[0],(r[1]+1)%4]))}<Text style={[s.note,{alignSelf:'center'}]}>별은 숙련도 · 병력과 별도 표시</Text></>)}
   {row((Object.entries(COMBAT_MODELS) as [CombatModel,typeof COMBAT_MODELS[CombatModel]][]).map(([key,value])=>button(`아군 ${value.label}`,()=>{setModel(key);if(key!=='paladin'&&weapon==='sword')setWeapon('hatchet');reset();},model===key)))}

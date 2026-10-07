@@ -43,15 +43,17 @@ export function createDuelActor(asset:GLTF,fighter:DuelFighter){
  // Arissa retains FBX pre/post-rotation wrappers. Rotate their common chest
  // ancestor so the arms and fingers move together, not just the leaf bone.
  while(aimChest.parent?.name.startsWith('mixamorigSpine2_'))aimChest=aimChest.parent;
- const chestRest=aimChest.quaternion.clone();
+ const chestNative=aimChest.quaternion.clone();
  const trail=new T.Line(new T.BufferGeometry().setAttribute('position',new T.BufferAttribute(new Float32Array(18*3),3)),new T.LineBasicMaterial({color:'#ddceac',transparent:true,opacity:.48,depthWrite:false}));trail.visible=false;trail.frustumCulled=false;visual.add(trail);
  function meshCenter(mesh:T.SkinnedMesh){mesh.skeleton.update();mesh.computeBoundingBox();return mesh.boundingBox!.getCenter(new T.Vector3()).applyMatrix4(mesh.matrixWorld);}
  function evaluate(pose:Pose,other:Pose={clip:idle(fighter),time:0},weight=1,aimDirection?:T.Vector3){
   visual.remove(root);if(equipment.prop)visual.remove(equipment.prop);
-  aimChest.quaternion.copy(chestRest);
+  // Restore only our bow-aim correction. Resetting everyone to bind pose
+  // invalidates AnimationMixer's unchanged-property cache on repeated guards.
+  if(fighter.weapon==='bow')aimChest.quaternion.copy(chestNative);
   for(const a of actions.values())a.setEffectiveWeight(0);
   const set=(p:Pose,w:number)=>{const a=actions.get(p.clip)!;a.enabled=true;a.paused=true;a.time=T.MathUtils.clamp(p.time,0,duration(p.clip)-.00001);a.setEffectiveWeight(w);};
-  if(other.clip===pose.clip)set(pose,1);else{set(other,1-weight);set(pose,weight);}mixer.update(0);
+  if(other.clip===pose.clip)set(pose,1);else{set(other,1-weight);set(pose,weight);}mixer.update(0);chestNative.copy(aimChest.quaternion);
   if(fighter.weapon==='bow'&&aimDirection){
    // Turn the captured upper-body chain as a whole: both native grips and
    // elbow bends survive while the bow is raised towards its launch angle.
@@ -132,10 +134,24 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
   prepared.push({...event,start,contact,end,clip,marker,defenseTime,defenderClip,attackPosition,defendPosition:defensePosition,point:contactPoint,flight,projectileOrigin,approach,ballistic,aimDirection});start=end+.18;
  }
  const duration=prepared.at(-1)!.end+.6;
+ // Root trajectories are also used by the squad's time-aware route planner.
+ // Keep one source of truth for contact lunge, recoil and death placement.
+ function positionsAt(time:number){
+  const t=T.MathUtils.clamp(time,0,duration),positions=base.map(p=>p.clone());
+  for(const e of prepared){
+   if(t<e.start-.32)continue;
+   const dead=e.outcome==='death'&&t>=e.contact;if(t>e.end&&!dead)continue;
+   const a=e.attacker,d=1-a,before=t-e.start,after=t-e.contact,windup=e.contact-e.flight-e.start;
+   positions[a].lerp(e.attackPosition,ease(before/Math.max(.15,windup*.8))*(1-ease((after-.15)/.65)));
+   if(after>=0&&e.outcome==='block')positions[d].x+=(d===0?-1:1)*Math.sin(Math.min(1,after/.65)*Math.PI)*(e.heavy?.14:.07);
+   if(dead){positions[d].copy(e.defendPosition);positions[a].copy(e.attackPosition);}
+  }
+  return positions;
+ }
  const state={time:0,phase:'양측이 거리를 재고 있습니다',health:[100,100],contact:null as null|{point:T.Vector3;age:number;blocked:boolean},winner:null as DuelSide|null};
- function update(time:number){
+ function update(time:number,participation:[number,number]=[1,1],idleTimes?:[number,number]){
   const t=T.MathUtils.clamp(time,0,duration);state.time=t;state.health=[100,100];state.contact=null;state.winner=null;state.phase='양측이 거리를 재고 있습니다';
-  const positions=base.map(p=>p.clone()),poses:Pose[]=actors.map(A=>({clip:A.idle,time:t%A.duration(A.idle)})),others=poses.map(p=>({...p})),weights=[1,1],aims:(T.Vector3|undefined)[]=[];
+  const positions=positionsAt(t),poses:Pose[]=actors.map((A,i)=>({clip:A.idle,time:idleTimes?.[i]??t%A.duration(A.idle)})),others=poses.map(p=>({...p})),weights=[1,1],aims:(T.Vector3|undefined)[]=[];
   for(const e of prepared){
    const a=e.attacker,d=(1-a) as DuelSide,A=actors[a],D=actors[d];
    if(t>=e.contact){if(e.outcome==='death'){state.health[d]=0;state.winner=a;}else if(e.outcome==='hit')state.health[d]=Math.max(20,state.health[d]-32);}
@@ -150,26 +166,24 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
     const recovery=e.outcome==='death'?.6:.48;
     weights[a]=ease(before/.18)*(1-ease((after-.14)/recovery));if(A.fighter.weapon==='bow')weights[a]=ease(before/.16)*(1-ease((sourceTime-A.duration(e.clip)+.18)/.18));
     poses[a]={clip:e.clip,time:Math.min(A.duration(e.clip),sourceTime)};
-    if(e.aimDirection){const release=e.contact-e.flight,drawStart=A.duration('bowDraw')*.55,blend=ease((before-drawStart)/.3)*(1-ease((t-release-.05)/.32));if(blend>0){A.evaluate(poses[a],others[a],weights[a]);const native=A.equipment.leftGrip.clone().sub(A.equipment.rightGrip).normalize();aims[a]=native.lerp(e.aimDirection,blend).normalize();}}
+    if(e.aimDirection&&participation[a]>0){const release=e.contact-e.flight,drawStart=A.duration('bowDraw')*.55,blend=ease((before-drawStart)/.3)*(1-ease((t-release-.05)/.32));if(blend>0){A.evaluate(poses[a],others[a],weights[a]);const native=A.equipment.leftGrip.clone().sub(A.equipment.rightGrip).normalize();aims[a]=native.lerp(e.aimDirection,blend).normalize();}}
     if(before<e.approach){const walk:NativeClip=twoHand(A.fighter.weapon)?'twoWalk':hasShield(A.fighter)?'walk':'axeWalk';poses[a]={clip:walk,time:Math.max(0,before)%A.duration(walk)};}
-    const travel=ease(before/Math.max(.15,windup*.8))*(1-ease((after-.15)/.65));positions[a].lerp(e.attackPosition,travel);
     // Success raises the guard in time. Failure plays only the first part of
     // the actual guard capture, starting late; never freeze an attack pose.
     if(after<0||e.outcome==='block'){
      poses[d]={clip:e.defenderClip,time:e.defenseTime};weights[d]=ease((t-e.start+.2)/.36)*(1-ease((after-.2)/.48));
      if(e.outcome!=='block'){const attempt=T.MathUtils.clamp((after+.24)/.24,0,1);poses[d].time=e.defenseTime*attempt;weights[d]=ease(attempt/.6);}
-     if(after>=0)positions[d].x+=(d===0?-1:1)*Math.sin(Math.min(1,after/.65)*Math.PI)*(e.heavy?.14:.07);
-     if(after>=0){const react:NativeClip=hasShield(D.fighter)?'impact':D.impact;poses[d]={clip:react,time:after};others[d]={clip:after<.3?D.defense:D.idle,time:after<.3?e.defenseTime:0};weights[d]=ease(after/.06)*(1-ease((after-.45)/.4));}
-    }else{poses[d]={clip:dead?D.death:D.impact,time:Math.max(0,after)};others[d]={clip:after<.3?e.defenderClip:D.idle,time:after<.3?e.defenseTime:0};weights[d]=ease(after/.12)*(dead?1:1-ease((after-D.duration(D.impact)+.14)/.22));}
+     if(after>=0){const react:NativeClip=hasShield(D.fighter)?'impact':D.impact;poses[d]={clip:react,time:after};others[d]={clip:after<.3?D.defense:D.idle,time:after<.3?e.defenseTime:idleTimes?.[d]??0};weights[d]=ease(after/.06)*(1-ease((after-.45)/.4));}
+    }else{poses[d]={clip:dead?D.death:D.impact,time:Math.max(0,after)};others[d]={clip:after<.3?e.defenderClip:D.idle,time:after<.3?e.defenseTime:idleTimes?.[d]??0};weights[d]=ease(after/.12)*(dead?1:1-ease((after-D.duration(D.impact)+.14)/.22));}
     const actorLabel=a===0?'아군':'적군';state.phase=after<0?`${actorLabel} ${A.fighter.weapon==='bow'?'조준 · 발사':e.heavy?'강공격 준비':'공격'}`:e.outcome==='block'?`${hasShield(D.fighter)?'방패 방어':'무기 받아내기'} → 반격 준비`:e.outcome==='death'?`${d===0?'아군':'적군'} 쓰러짐`:'피격 · 자세 회복';
    }
    if(dead){poses[d]={clip:D.death,time:Math.min(D.duration(D.death),after)};others[d]={clip:e.defenderClip,time:e.defenseTime};weights[d]=ease(after/.14);positions[d].copy(e.defendPosition);positions[a].copy(e.attackPosition);if(!ongoing)state.phase=`${a===0?'아군':'적군'} 승리 · 공방 종료`;}
    if(after>=0&&after<.22)state.contact={point:e.point.clone(),age:after,blocked:e.outcome==='block'};
   }
-  actors.forEach((A,i)=>{A.trail.visible=false;A.visual.position.copy(positions[i]);A.visual.rotation.y=i===0?Math.PI/2:-Math.PI/2;A.evaluate(poses[i],others[i],weights[i],aims[i]);});
+  actors.forEach((A,i)=>{if(participation[i]<=0)return;A.trail.visible=false;A.visual.position.copy(positions[i]);A.visual.rotation.y=i===0?Math.PI/2:-Math.PI/2;A.evaluate(poses[i],others[i],weights[i]*participation[i],aims[i]);});
   // Replace free-flight review arrows with one event-driven projectile. Stop
   // at the shield/body contact instead of flying through the defender.
-  for(const e of prepared){if(actors[e.attacker].fighter.weapon!=='bow'||t<e.start||t>e.end)continue;const A=actors[e.attacker],arrow=A.equipment.prop!.userData.arrow as T.Group,release=e.contact-e.flight;
+  for(const e of prepared){if(participation[e.attacker]<=0||actors[e.attacker].fighter.weapon!=='bow'||t<e.start||t>e.end)continue;const A=actors[e.attacker],arrow=A.equipment.prop!.userData.arrow as T.Group,release=e.contact-e.flight;
    if(t>=release&&e.ballistic){const {position,direction}=arrowPose(e.ballistic,t-release);
     arrow.position.copy(arrow.parent!.worldToLocal(position));arrow.quaternion.setFromUnitVectors(new T.Vector3(0,0,1),direction.applyQuaternion(arrow.parent!.getWorldQuaternion(new T.Quaternion()).invert()));arrow.visible=t<e.contact+.12;
     A.trail.visible=e.flight>.5&&t<e.contact;const vertices=A.trail.geometry.attributes.position as T.BufferAttribute;
@@ -178,5 +192,5 @@ export function createNativeDuel(actors:[DuelActor,DuelActor],events:DuelEvent[]
   }
   return state;
  }
- return {actors,events:prepared,duration,state,update,dispose(){actors.forEach(a=>a.dispose());}};
+ return {actors,events:prepared,duration,state,update,positionsAt,dispose(){actors.forEach(a=>a.dispose());}};
 }
