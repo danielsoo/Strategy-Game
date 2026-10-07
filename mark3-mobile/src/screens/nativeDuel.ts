@@ -12,6 +12,7 @@ export type DuelFighter={model:CombatModel;weapon:NativeWeaponKind};
 export type DuelOutcome='block'|'hit'|'death'|'miss';
 export type DuelEvent={attacker:DuelSide;outcome:DuelOutcome;heavy?:boolean;jump?:boolean;variation?:number};
 type Pose={clip:NativeClip;time:number};
+type Locomotion={clip:NativeClip;time:number;weight:number;direction:number};
 export const hasShield=(f:DuelFighter)=>f.model==='paladin'&&['sword','hatchet','flail'].includes(f.weapon);
 const twoHand=(w:NativeWeaponKind)=>['axe','halberd','spear'].includes(w);
 function idle(f:DuelFighter):NativeClip{return f.weapon==='bow'?'bowIdle':f.weapon==='spear'?'spearGuard':twoHand(f.weapon)?'twoIdle':hasShield(f)?'idle':'axeIdle';}
@@ -36,6 +37,20 @@ export function createDuelActor(asset:GLTF,fighter:DuelFighter){
  const mixer=new T.AnimationMixer(root),equipment=createNativeWeapon(root,fighter.weapon,animations),ground=nativeDeathGround(root);
  const clips=new Map(animations.map(c=>[c.name,c])),actions=new Map<NativeClip,T.AnimationAction>();
  for(const clip of animations){const name=clip.name as NativeClip,a=mixer.clipAction(nativeWeaponClip(animations,name,hasShield(fighter),fighter.weapon));a.play();a.paused=true;actions.set(name,a);}
+ // Keep the captured guard, including both hands and weapon grip, while the
+ // captured walking legs move independently. Never substitute relaxed arms.
+ const layers=new Map<string,T.AnimationAction>();
+ const lower=(t:T.KeyframeTrack)=>/mixamorig(?:Hips|(?:Left|Right)(?:UpLeg|Leg|Foot|Toe))/.test(t.name);
+ function layer(name:NativeClip,part:'upper'|'lower'){
+  const key=`${name}:${part}`;if(!layers.has(key)){
+   const source=nativeWeaponClip(animations,name,hasShield(fighter),fighter.weapon);
+   const clip=new T.AnimationClip(key,source.duration,source.tracks.filter(t=>lower(t)===(part==='lower')));
+   const action=mixer.clipAction(clip);action.play();action.paused=true;layers.set(key,action);
+  }return layers.get(key)!;
+ }
+ const chain=(name:string)=>{let bone=root.getObjectByName(name)!;while(bone.parent?.name.startsWith(name+'_'))bone=bone.parent;return bone;};
+ const hips=chain('mixamorigHips'),spine=chain('mixamorigSpine'),hipsNative=hips.quaternion.clone(),spineNative=spine.quaternion.clone();
+ let strideCorrected=false;
  function duration(name:NativeClip){return clips.get(name)!.duration;}
  const sword=root.getObjectByName('Paladin_J_Nordstrom') as T.SkinnedMesh|undefined;
  const strike=new T.Vector3(),guard=new T.Vector3(),bodyTarget=new T.Vector3(),backTarget=new T.Vector3();
@@ -46,14 +61,27 @@ export function createDuelActor(asset:GLTF,fighter:DuelFighter){
  const chestNative=aimChest.quaternion.clone();
  const trail=new T.Line(new T.BufferGeometry().setAttribute('position',new T.BufferAttribute(new Float32Array(18*3),3)),new T.LineBasicMaterial({color:'#ddceac',transparent:true,opacity:.48,depthWrite:false}));trail.visible=false;trail.frustumCulled=false;visual.add(trail);
  function meshCenter(mesh:T.SkinnedMesh){mesh.skeleton.update();mesh.computeBoundingBox();return mesh.boundingBox!.getCenter(new T.Vector3()).applyMatrix4(mesh.matrixWorld);}
- function evaluate(pose:Pose,other:Pose={clip:idle(fighter),time:0},weight=1,aimDirection?:T.Vector3){
+ function evaluate(pose:Pose,other:Pose={clip:idle(fighter),time:0},weight=1,aimDirection?:T.Vector3,locomotion?:Locomotion){
   visual.remove(root);if(equipment.prop)visual.remove(equipment.prop);
   // Restore only our bow-aim correction. Resetting everyone to bind pose
   // invalidates AnimationMixer's unchanged-property cache on repeated guards.
   if(fighter.weapon==='bow')aimChest.quaternion.copy(chestNative);
+  if(strideCorrected){hips.quaternion.copy(hipsNative);spine.quaternion.copy(spineNative);strideCorrected=false;}
   for(const a of actions.values())a.setEffectiveWeight(0);
+  for(const a of layers.values())a.setEffectiveWeight(0);
   const set=(p:Pose,w:number)=>{const a=actions.get(p.clip)!;a.enabled=true;a.paused=true;a.time=T.MathUtils.clamp(p.time,0,duration(p.clip)-.00001);a.setEffectiveWeight(w);};
-  if(other.clip===pose.clip)set(pose,1);else{set(other,1-weight);set(pose,weight);}mixer.update(0);chestNative.copy(aimChest.quaternion);
+  if(locomotion){
+   const sample=(name:NativeClip,part:'upper'|'lower',time:number,w:number)=>{const a=layer(name,part);a.enabled=true;a.time=T.MathUtils.clamp(time,0,duration(name)-.00001);a.setEffectiveWeight(w);};
+   sample(pose.clip,'upper',pose.time,1);sample(pose.clip,'lower',pose.time,1-locomotion.weight);sample(locomotion.clip,'lower',locomotion.time,locomotion.weight);
+  }else if(other.clip===pose.clip)set(pose,1);else{set(other,1-weight);set(pose,weight);}mixer.update(0);chestNative.copy(aimChest.quaternion);
+  if(locomotion){
+   hipsNative.copy(hips.quaternion);spineNative.copy(spine.quaternion);
+   // A small diagonal step beneath a stable guard; backward travel reverses
+   // the stride instead of turning the fighter's back on the opponent.
+   const angle=T.MathUtils.clamp(locomotion.direction,-.72,.72)*locomotion.weight;
+   const rotate=(bone:T.Object3D,a:number)=>{root.updateMatrixWorld(true);const parent=bone.parent!.getWorldQuaternion(new T.Quaternion());bone.quaternion.premultiply(parent.clone().invert().multiply(new T.Quaternion().setFromAxisAngle(new T.Vector3(0,1,0),a)).multiply(parent));};
+   rotate(hips,angle);rotate(spine,-angle);strideCorrected=true;
+  }
   if(fighter.weapon==='bow'&&aimDirection){
    // Turn the captured upper-body chain as a whole: both native grips and
    // elbow bends survive while the bow is raised towards its launch angle.

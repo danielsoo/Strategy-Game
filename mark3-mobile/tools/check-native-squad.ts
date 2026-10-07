@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import * as T from 'three';
 import {GLTFLoader} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {createDuelActor,DuelActor,DuelFighter} from '../src/screens/nativeDuel';
-import {createNativeSquad,representativeCount,proficiencyLabel,strikeLaneClear} from '../src/screens/nativeSquad';
+import {createNativeSquad,representativeCount,proficiencyLabel,strikeLaneClear,threatRadius} from '../src/screens/nativeSquad';
 import {nativeBattlePlan,representedCount} from '../src/screens/nativeBattlePlan';
 import {resolveCombat,makeRng} from '../src/services/combatSystem';
 (globalThis as any).ProgressEvent=class{};
@@ -15,6 +15,15 @@ async function load(id:string){
 }
 async function main(){
  const assets={paladin:await load('paladin'),arissa:await load('arissa'),erika:await load('erika')};
+ // Guard layering must preserve the captured arm/grip, and restoring a normal
+ // pose must not retain any pelvis correction (including reverse scrubbing).
+ for(const model of ['paladin','arissa','erika'] as const)for(const weapon of ['hatchet','spear','halberd'] as const){
+  const a=createDuelActor(assets[model],{model,weapon}),clip=weapon==='hatchet'?'axeWalk':'twoWalk';
+  const names=['mixamorigLeftArm','mixamorigRightArm','mixamorigLeftForeArm','mixamorigRightForeArm','mixamorigLeftHand','mixamorigRightHand'];
+  a.evaluate({clip:a.idle,time:.2});const native=names.map(n=>a.root.getObjectByName(n)!.quaternion.clone()),hand=a.root.getObjectByName('mixamorigRightHand')!.getWorldPosition(new T.Vector3());
+  for(const direction of [-1.2,1.2,0]){a.evaluate({clip:a.idle,time:.2},undefined,1,undefined,{clip,time:.3,weight:1,direction});names.forEach((n,i)=>assert(a.root.getObjectByName(n)!.quaternion.angleTo(native[i])<.001,`${model}/${weapon}: guarded movement changed captured arm ${n}`));}
+  a.evaluate({clip:a.idle,time:.2});assert(a.root.getObjectByName('mixamorigRightHand')!.getWorldPosition(new T.Vector3()).distanceTo(hand)<.001,`${model}/${weapon}: movement correction leaked into normal pose`);a.dispose();
+ }
  assert.equal(representativeCount(60),3);assert.equal(representativeCount(0),0);assert.equal(proficiencyLabel(3),'근위 ★★★');
  const knight:DuelFighter={model:'paladin',weapon:'sword'};
  const configs:[number,number,number,DuelFighter,DuelFighter,number,boolean?][]=[];
@@ -44,6 +53,16 @@ async function main(){
   }
   if(n===3&&m===1&&winner===0)assert(encirclementGap<Math.PI,'three allies never surrounded the opponent');
   for(const stage of plan.engagements){
+   if(stage.interception){assert.equal(stage.duel.events[0].outcome,'block','interception invented damage');assert(stage.guarded,'interception lost guard');}
+   for(let k=0;k<2;k++)if(stage.guarded&&stage.owns[k]&&stage.actionStart[k]-stage.moveStart[k]>.9){
+    const other=1-k,focus=stage.to[other].position,start=stage.from[k].position,end=stage.to[k].position;
+    const minDistance=Math.min(threatRadius(plan.actors[stage.ids[other]]),start.distanceTo(focus)-.025,end.distanceTo(focus)-.025);
+    for(let time=stage.moveStart[k]+.42;time<stage.actionStart[k]-.22;time+=.13){
+     plan.update(time);const actor=plan.actors[stage.ids[k]],toward=focus.clone().sub(actor.visual.position).setY(0).normalize(),forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),actor.visual.rotation.y);
+     assert(forward.dot(toward)>.9,`unguarded bypass: ${n}v${m}, actor ${stage.ids[k]}, time ${time}`);
+     assert(actor.visual.position.distanceTo(focus)>=minDistance,`bypass cut through weapon reach: ${n}v${m}, actor ${stage.ids[k]}, time ${time}`);
+    }
+   }
    for(let k=0;k<2;k++){
     if(!stage.owns[k])continue;
     const actor=plan.actors[stage.ids[k]],handoff=stage.release[k],joints=['mixamorigLeftHand','mixamorigRightHand','mixamorigNeck'];
@@ -67,7 +86,8 @@ async function main(){
   const final=plan.update(plan.duration);assert.deepEqual(final.counts,record.final);for(const side of [0,1])assert.equal(final.alive[side],record.actors.filter(a=>a.side===side&&representedCount(a,record.final[side])>0).length);
   plan.update(2);const pose=plan.actors.map(a=>a.visual.position.clone());plan.update(plan.duration);plan.update(2);
   plan.actors.forEach((a,i)=>assert(a.visual.position.distanceTo(pose[i])<1e-6,'scrub changed position'));
-  console.log(`${n}v${m} ${a.model}/${a.weapon} vs ${b.model}/${b.weapon}: ${plan.duration.toFixed(1)}s, spacing ${min.toFixed(2)}, step ${maxStep.toFixed(2)}, openings ${plan.engagements.filter(e=>e.opening!==undefined).length}, rear hits ${plan.engagements.filter(e=>e.opening!==undefined&&e.duel.events[0].outcome!=='miss').length}`);plan.dispose();
+  if((n===3&&m===1||n===1&&m===3||n===2&&m===1||n===1&&m===2)&&winner===0)assert(plan.engagements.some(e=>e.interception),'nearby bypass was not challenged');
+  console.log(`${n}v${m} ${a.model}/${a.weapon} vs ${b.model}/${b.weapon}: ${plan.duration.toFixed(1)}s, spacing ${min.toFixed(2)}, step ${maxStep.toFixed(2)}, interceptions ${plan.engagements.filter(e=>e.interception).length}, openings ${plan.engagements.filter(e=>e.opening!==undefined).length}, rear hits ${plan.engagements.filter(e=>e.opening!==undefined&&e.duel.events[0].outcome!=='miss').length}`);plan.dispose();
  }
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
