@@ -35,11 +35,21 @@ async function main(){
  for(const [n,m,winner,a,b,range,mixed] of configs.filter(c=>(!process.argv.includes('--mixed')||c[6])&&(!process.argv.includes('--bow')||c[3].weapon==='bow'))){
   const teams:[DuelActor[],DuelActor[]]=[Array.from({length:representativeCount(n)},(_,i)=>createDuelActor(assets[a.model],{...a,weapon:mixed?([a.weapon,'spear','halberd'] as const)[i]:a.weapon})),Array.from({length:representativeCount(m)},(_,i)=>createDuelActor(assets[b.model],{...b,weapon:mixed?([b.weapon,'hatchet','axe'] as const)[i]:b.weapon}))];
   const result=resolveCombat({units:n},{units:m},makeRng(41+winner)),record=nativeBattlePlan(result);const plan=createNativeSquad(teams,record,range);let previous:T.Vector3[]|undefined,min=Infinity,maxStep=0,encirclementGap=Math.PI*2;
+  const emptyFacing=plan.actors.map(()=>0);
   for(let t=0;t<plan.duration;t+=1/15){
    plan.update(t);const p=plan.actors.map(actor=>actor.visual.position.clone());
    if(previous)p.forEach((q,i)=>{const step=q.distanceTo(previous![i]);maxStep=Math.max(maxStep,step);assert(step<.5,`teleport ${n}v${m} ${a.weapon} at ${t} actor ${i}: ${step}`);});
    for(let i=0;i<p.length;i++)for(let j=i+1;j<p.length;j++){const d=p[i].distanceTo(p[j]);min=Math.min(min,d);assert(d>.75,`overlap ${n}v${m} ${a.weapon} at ${t}: ${i},${j} ${d}`);}
    previous=p;
+   if(t<plan.finish)plan.actors.forEach((actor,id)=>{
+    const committed=plan.engagements.some(e=>{const k=e.ids.indexOf(id);return k>=0&&e.owns[k]&&t>=e.actionStart[k]-.25&&t<=e.release[k];});
+    if(committed||t>=plan.deathAt[id]){emptyFacing[id]=0;return;}
+    const enemies=plan.actors.map((_,j)=>j).filter(j=>plan.sides[j]!==plan.sides[id]&&t<plan.deathAt[j]);
+    const forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),actor.visual.rotation.y);
+    const seesEnemy=enemies.some(j=>forward.dot(p[j].clone().sub(p[id]).setY(0).normalize())>.6);
+    emptyFacing[id]=seesEnemy||!enemies.length?0:emptyFacing[id]+1/15;
+    assert(emptyFacing[id]<.75,`idle/moving actor stares into empty space: ${n}v${m} actor ${id} at ${t}`);
+   });
    if((n===3&&m===1||n===1&&m===3)&&plan.state.alive[0]+plan.state.alive[1]===4){const lone=n===1?0:3,angles=p.filter((_,id)=>id!==lone).map(v=>Math.atan2(v.z-p[lone].z,v.x-p[lone].x)).sort((a,b)=>a-b);encirclementGap=Math.min(encirclementGap,Math.max(angles[1]-angles[0],angles[2]-angles[1],angles[0]+Math.PI*2-angles[2]));}
   }
   for(let i=0;i<plan.engagements.length;i++)for(let j=i+1;j<plan.engagements.length;j++){
@@ -53,13 +63,15 @@ async function main(){
   }
   if(n===3&&m===1&&winner===0)assert(encirclementGap<Math.PI,'three allies never surrounded the opponent');
   for(const stage of plan.engagements){
+   const defending=1-stage.duel.events[0].attacker;
+   assert(stage.from[defending].position.distanceTo(stage.to[defending].position)<.001,'defender was moved to meet a future attack marker');
    if(stage.interception){assert.equal(stage.duel.events[0].outcome,'block','interception invented damage');assert(stage.guarded,'interception lost guard');}
    for(let k=0;k<2;k++)if(stage.guarded&&stage.owns[k]&&stage.actionStart[k]-stage.moveStart[k]>.9){
     const other=1-k,focus=stage.to[other].position,start=stage.from[k].position,end=stage.to[k].position;
     const minDistance=Math.min(threatRadius(plan.actors[stage.ids[other]]),start.distanceTo(focus)-.025,end.distanceTo(focus)-.025);
-    for(let time=stage.moveStart[k]+.42;time<stage.actionStart[k]-.22;time+=.13){
-     plan.update(time);const actor=plan.actors[stage.ids[k]],toward=focus.clone().sub(actor.visual.position).setY(0).normalize(),forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),actor.visual.rotation.y);
-     assert(forward.dot(toward)>.9,`unguarded bypass: ${n}v${m}, actor ${stage.ids[k]}, time ${time}`);
+    for(let time=stage.moveStart[k]+.65;time<stage.actionStart[k]-.25;time+=.13){
+     plan.update(time);const actor=plan.actors[stage.ids[k]],opponent=plan.actors[stage.ids[other]],toward=opponent.visual.position.clone().sub(actor.visual.position).setY(0).normalize(),forward=new T.Vector3(0,0,1).applyAxisAngle(new T.Vector3(0,1,0),actor.visual.rotation.y);
+     assert(forward.dot(toward)>.85,`facing empty future slot: ${n}v${m}, actor ${stage.ids[k]}, time ${time}, dot ${forward.dot(toward)}`);
      assert(actor.visual.position.distanceTo(focus)>=minDistance,`bypass cut through weapon reach: ${n}v${m}, actor ${stage.ids[k]}, time ${time}`);
     }
    }
@@ -71,6 +83,7 @@ async function main(){
    }
    const event=stage.duel.events[0],time=stage.start+stage.enter+event.contact;
    plan.update(time);const A=plan.actors[stage.ids[event.attacker]],D=plan.actors[stage.ids[1-event.attacker]];
+   const aimError=A.visual.rotation.y-stage.yaw-stage.duel.facings[event.attacker];assert(Math.abs(Math.atan2(Math.sin(aimError),Math.cos(aimError)))<.015,'committed strike rotated away from its calibrated contact');
    const target=D.visual.localToWorld((stage.duel.receiver?D.backTarget:event.outcome==='block'?D.guard:D.bodyTarget).clone());
    if(stage.opening!==undefined){
     const busy=plan.engagements.find(e=>e!==stage&&e.ids[1-e.duel.events[0].attacker]===stage.ids[1-event.attacker]&&e.ids[e.duel.events[0].attacker]!==stage.ids[event.attacker]&&e.contact<stage.contact&&stage.contact-e.contact<.14);

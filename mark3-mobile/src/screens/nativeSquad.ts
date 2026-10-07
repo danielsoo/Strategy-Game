@@ -65,15 +65,18 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
  function add(i:number,j:number,event:DuelEvent,earliest:number,allowPressure=true,interception=false):number{
   const ids:[number,number]=[i,n[0]+j],pair:[DuelActor,DuelActor]=[actors[ids[0]],actors[ids[1]]];
   let duel=createNativeDuel(pair,[event],range);
-  const delta=last[ids[1]].position.clone().sub(last[ids[0]].position),origin=last[ids[0]].position.clone().lerp(last[ids[1]].position,.5);
+  const delta=last[ids[1]].position.clone().sub(last[ids[0]].position);
   let yaw=-Math.atan2(delta.z,delta.x),tactic=interception?'측면 접근 저지 · 경계하며 물러서기':'상대 견제 · 다음 공격 준비';
   const living=[0,1].map(side=>actors.filter((_,id)=>sides[id]===side&&!Number.isFinite(deathAt[id])).length);
   const half=ranged?range/2:1.25;
+  // The attacker closes on the defender's existing position. Never relocate
+  // both actors to a convenient midpoint to make a paired capture fit.
+  const defender=1-event.attacker,anchorTarget=last[ids[defender]].position.clone();
   let loneSide:DuelSide|undefined,previous:Engagement|undefined,opening:number|undefined;
   const minority:DuelSide=living[0]<living[1]?0:1;
   const targets=plan.actors.filter(p=>p.side===minority&&!Number.isFinite(deathAt[p.id]));
   const group=plan.actors.filter(p=>p.side!==minority&&!Number.isFinite(deathAt[p.id])&&targets.slice().sort((x,y)=>Math.abs(x.slot-p.slot)-Math.abs(y.slot-p.slot)||x.id-y.id)[0]?.id===ids[minority]);
-  if(!ranged&&!interception&&living[0]!==living[1]&&group.length>1&&group.some(p=>p.id===ids[1-minority])){
+  if(!ranged&&!interception&&event.attacker!==minority&&living[0]!==living[1]&&group.length>1&&group.some(p=>p.id===ids[1-minority])){
    loneSide=minority;const lone=ids[loneSide],flanker=ids[1-loneSide],slot=group.findIndex(p=>p.id===flanker);
    const challengeKey=`${lone}:${flanker}`;
    if(allowPressure&&slot>0&&!challenged.has(challengeKey)&&last[lone].position.distanceTo(last[flanker].position)<threatRadius(actors[lone])+2){
@@ -88,9 +91,6 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
    // target. The rear attacker must physically walk around the target.
    yaw=group.length===2?(slot===0?0:Math.PI):[0,Math.PI*2/3,-Math.PI*2/3][slot];
    const anchor=last[lone].position.clone();
-   if(available[lone]>0){anchor.z+=slot%2===0?.28:-.28;}
-   anchor.x=T.MathUtils.clamp(anchor.x,homes[lone].position.x-1.2,homes[lone].position.x+1.2);
-   origin.copy(anchor).sub(new T.Vector3(loneSide===0?-half:half,0,0).applyAxisAngle(up,yaw));
    tactic='정면 견제 · 측면과 배후 포위';
    if(allowPressure&&slot>0&&event.attacker!==loneSide){
     const around=routeAround(last[flanker].position,anchor.clone().add(new T.Vector3(loneSide===0?2.5:-2.5,0,0).applyAxisAngle(up,yaw)),[{...last[lone],radius:threatRadius(actors[lone])}]);
@@ -110,7 +110,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
     }
     if(previous&&previous.release[previous.ids.indexOf(lone)]>previous.contact+PIN_OPENING){
      opening=previous.contact+PIN_OPENING;const target=onTrack(previous,previous.ids.indexOf(lone),opening);
-     origin.copy(target.position).sub(new T.Vector3(loneSide===0?-half:half,0,0).applyAxisAngle(up,yaw));
+     anchorTarget.copy(target.position);
      // A zero-loss record permits a committed miss, never an invented hit.
      if(event.outcome==='block')event={...event,outcome:'miss'};
      // At 80 ms after a native block the defender is in the captured block
@@ -120,19 +120,16 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
     }
    }
   }
-  // A replacement opponent may be behind another fight or a fallen soldier.
-  // Move the whole calibrated pair to a clear patch; never push one body away
-  // at impact, which would break weapon/shield contact.
-  const samples=[0,duel.events[0].contact,duel.duration].flatMap(t=>duel.positionsAt(t).map(p=>p.applyAxisAngle(up,yaw)));
-  const obstacles=last.filter((_,id)=>!ids.includes(id)),candidates:T.Vector3[]=[];
-  for(let x=-4;x<=4;x++)for(let z=-4;z<=4;z++)candidates.push(new T.Vector3(x*.8,0,z*.8));
-  candidates.sort((a,b)=>a.lengthSq()-b.lengthSq());
+  // Find a clear attack angle around the current defender. A blocked approach
+  // changes the attacker's route; it does not drag the defender into the blow.
+  const candidates=[0,.22,-.22,.45,-.45,.75,-.75,1.1,-1.1,1.55,-1.55,2.1,-2.1,Math.PI];
   const a=event.attacker,d=1-a,native=duel.events[0],windup=native.contact-.47;
   // Reserve bodies, not an entire pair until the end of both clips. The next
   // attacker can already wind up while the defender recovers from a block.
   const from=ids.map(id=>copy(last[id]));
-  const build=(center:T.Vector3,delay:number,extra:Placement[]=[]):Engagement=>{
-   const place=(time:number,k:number):Placement=>({position:duel.positionsAt(time)[k].applyAxisAngle(up,yaw).add(center),yaw:duel.facings[k]+yaw});
+  const build=(angle:number,delay:number,extra:Placement[]=[]):Engagement=>{
+   const center=anchorTarget.clone().sub(duel.positionsAt(0)[d].applyAxisAngle(up,angle));
+   const place=(time:number,k:number):Placement=>({position:duel.positionsAt(time)[k].applyAxisAngle(up,angle).add(center),yaw:duel.facings[k]+angle});
    const guarded=!ranged&&actors.length>2;
    const to=[place(0,0),place(0,1)],routes=to.map((p,k)=>routeAround(from[k].position,p.position,[...last.flatMap((o,id)=>ids.includes(id)?[]:[{...o,radius:guarded&&sides[id]!==sides[ids[k]]&&!Number.isFinite(deathAt[id])?threatRadius(actors[id]):.92}]),...extra,...(guarded?[{position:to[1-k].position,yaw:0,radius:threatRadius(pair[1-k])}]:[])]));
    const travel=routes.map((r,k)=>Math.max(.22,pathLength(r)/(guarded?1.45:1.9),Math.abs(Math.atan2(Math.sin(to[k].yaw-from[k].yaw),Math.cos(to[k].yaw-from[k].yaw)))/3.2));
@@ -143,7 +140,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
    const recovery=pair[a].fighter.weapon==='bow'?Math.max(.8,pair[a].duration(native.clip)-(native.contact-native.start)):.8;
    release[a]=contact+recovery;release[d]=contact+(event.outcome==='death'?pair[d].duration(pair[d].death)+.35:event.outcome==='hit'?pair[d].duration(pair[d].impact)+.1:.85);
    const owns:[boolean,boolean]=[true,true];if(event.outcome==='miss')owns[d]=false;
-   return {start,enter:0,end:Math.max(...release.filter((_,k)=>owns[k])),contact,ids,duel,origin:center,yaw,from,to,finish:release.map((t,k)=>place(t-start,k)),routes,moveStart,actionStart,release,owns,tactic,opening,guarded,interception};
+   return {start,enter:0,end:Math.max(...release.filter((_,k)=>owns[k])),contact,ids,duel,origin:center,yaw:angle,from,to,finish:release.map((t,k)=>place(t-start,k)),routes,moveStart,actionStart,release,owns,tactic,opening,guarded,interception};
   };
   const collision=(e:Engagement):Placement|null=>{
    for(let t=Math.min(...e.moveStart);t<=e.end+.08;t+=.08){
@@ -155,11 +152,9 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   };
   let selected:Engagement|undefined;
   const clearAfter=Math.max(...available)-Math.min(...ids.map(id=>available[id]))+.2;
-  search:for(const delay of opening!==undefined?[0]:[0,.3,.65,1.1,clearAfter])for(const shift of opening!==undefined?[new T.Vector3()]:candidates){
-   const center=origin.clone().add(shift);
-   if(!samples.every(p=>obstacles.every(o=>p.clone().add(center).distanceTo(o.position)>=1.02)))continue;
-   let e=build(center,delay),hit=collision(e);
-   if(hit){e=build(center,delay,[hit]);hit=collision(e);}
+  search:for(const delay of opening!==undefined?[0]:[0,.3,.65,1.1,clearAfter])for(const turn of opening!==undefined?[0]:candidates){
+   let e=build(yaw+turn,delay),hit=collision(e);
+   if(hit){e=build(yaw+turn,delay,[hit]);hit=collision(e);}
    if(!hit&&e.actionStart[a]>=e.moveStart[a]+pathLength(e.routes[a])/2.15){selected=e;break search;}
   }
   if(!selected&&opening!==undefined)return add(i,j,event.outcome==='miss'?{...event,outcome:'block'}:event,earliest,false);
@@ -196,6 +191,41 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   stages.push({at:end,counts:round.counts,round:round.round});phase=end+.05;
  }
  const finish=Math.max(0,...engagements.map(e=>e.end),phase),duration=finish+2.4;
+ // Resolve attention from CURRENT bodies, independently of destination slots.
+ // Fixed-step yaw samples make bounded turning identical during play/rewind.
+ // Only the committed strike/block is locked to its calibrated capture frame.
+ const facingStep=1/60,facingFrames:number[][]=[homes.map(p=>p.yaw)],attentionFrames:number[][]=[];
+ const currentTrack=(id:number,t:number)=>engagements.find(e=>{const k=e.ids.indexOf(id);return k>=0&&e.owns[k]&&t>=e.moveStart[k]&&t<=e.release[k];});
+ let attention=actors.map((_,id)=>actors.findIndex((__,other)=>sides[id]!==sides[other]));
+ for(let frame=0;frame<=Math.ceil(finish/facingStep)+1;frame++){
+  const time=frame*facingStep,positions=actors.map((_,id)=>placementAt(id,time).position),previous=facingFrames.at(-1)!;
+  const next=actors.map((_,id)=>{
+   const e=currentTrack(id,time),k=e?.ids.indexOf(id)??-1;
+   if(time>=deathAt[id])return e?e.duel.facings[k]+e.yaw:previous[id];
+   const enemies=actors.map((_,other)=>other).filter(other=>sides[other]!==sides[id]&&time<deathAt[other]);
+   let target=e?e.ids[1-k]:attention[id];
+   const nearest=enemies.slice().sort((a,b)=>positions[a].distanceToSquared(positions[id])-positions[b].distanceToSquared(positions[id]))[0];
+   if(!enemies.includes(target)||!e&&nearest!==undefined&&positions[nearest].distanceTo(positions[id])+.65<positions[target].distanceTo(positions[id]))target=nearest;
+   if(target===undefined)return previous[id];attention[id]=target;
+   const delta=positions[target].clone().sub(positions[id]);let wanted=Math.atan2(delta.x,delta.z);
+   if(e){
+    const lock=e.actionStart[k],unlock=e.release[k],committed=e.duel.facings[k]+e.yaw;
+    // Turn into the capture only as the weapon commits. Before that, a moving
+    // opponent is followed where it actually is, never at its future marker.
+    // An overlapping hit truncates the guard track at contact. Keep that
+    // guard facing through the handoff instead of beginning an early turn
+    // towards the first attacker and then snapping back for the rear impact.
+    const interrupted=k!==e.duel.events[0].attacker&&unlock<e.contact+.2;
+    const blend=ease((time-lock+.24)/.24)*(interrupted?1:1-ease((time-unlock+.20)/.20));
+    wanted=yawLerp(wanted,committed,blend);
+   }
+   const deltaYaw=Math.atan2(Math.sin(wanted-previous[id]),Math.cos(wanted-previous[id]));
+   return previous[id]+T.MathUtils.clamp(deltaYaw,-5.5*facingStep,5.5*facingStep);
+  });
+  if(frame===0)facingFrames[0]=next;else facingFrames.push(next);
+  attentionFrames.push([...attention]);
+ }
+ function facingsAt(time:number){const index=T.MathUtils.clamp(time/facingStep,0,facingFrames.length-1),a=Math.floor(index),b=Math.min(a+1,facingFrames.length-1);return facingFrames[a].map((yaw,id)=>yawLerp(yaw,facingFrames[b][id],index-a));}
  const resultLabel=plan.outcome==='stalemate'?'교착 · 양측 이탈':plan.outcome==='attacker-win'?'공격측 승리':'방어측 승리';
  const contacts=engagements.filter(e=>e.duel.events[0].outcome!=='miss').map(e=>e.contact).sort((a,b)=>a-b);
  const failures=engagements.filter(e=>['hit','death'].includes(e.duel.events[0].outcome)).map(e=>e.contact).sort((a,b)=>a-b);
@@ -205,7 +235,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
  function update(time:number){
   const t=T.MathUtils.clamp(time,0,duration),placements=homes.map(copy);state.contacts=[];state.health=[0,0];state.alive=[0,0];state.phase=t>=finish?resultLabel:'대형 유지 · 상대 탐색';
   const stage=stages.filter(s=>s.at<=t).at(-1)!;state.counts=[...stage.counts];state.round=stages.find(s=>s.at>t)?.round??stage.round;
-  const engaged=new Set<number>(),idleTimes=actors.map((a,id)=>(t+id*.39)%a.duration(a.idle));
+  const engaged=new Set<number>(),idleTimes=actors.map((a,id)=>(t+id*.39)%a.duration(a.idle)),facings=facingsAt(t);
   actors.forEach((a,id)=>{a.trail.visible=false;a.evaluate({clip:a.idle,time:idleTimes[id]});});
   for(const e of engagements){
    const participation:[number,number]=[0,0];
@@ -215,6 +245,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
     if(t<e.actionStart[k]){
      const elapsed=t-e.moveStart[k],length=e.actionStart[k]-e.moveStart[k],u=elapsed/length,a=actors[id],moving=pathLength(e.routes[k])>.08;
      placements[id]=approachPlacement(e,k,t);
+     placements[id].yaw=facings[id];
      const clip=moving?walk(a):a.idle;
      const weight=ease(elapsed/.18)*(1-ease((elapsed-length+.18)/.18));
      if(e.guarded&&moving){
@@ -241,6 +272,7 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   for(let id=0;id<actors.length;id++){
    if(!engaged.has(id)){const done=engagements.filter(e=>e.ids.includes(id)&&e.owns[e.ids.indexOf(id)]&&e.release[e.ids.indexOf(id)]<t).at(-1);if(done)placements[id]=copy(done.finish[done.ids.indexOf(id)]);}
    const a=actors[id],side=sides[id],dead=t>=deathAt[id];
+   if(!dead&&t<=finish)placements[id].yaw=facings[id];
    if(dead&&!engaged.has(id)){placements[id]=copy(deathPose[id]!);a.evaluate({clip:a.death,time:Math.min(a.duration(a.death),t-deathAt[id])});}
    if(!dead&&t>finish&&(plan.outcome==='stalemate'||(plan.outcome==='attacker-win'?side===1:side===0))){
     const elapsed=t-finish,u=ease(elapsed/2.4);placements[id].position.x+=(side===0?-1:1)*1.7*u;placements[id].yaw=yawLerp(placements[id].yaw,side===0?-Math.PI/2:Math.PI/2,ease(elapsed/.6));
@@ -251,5 +283,5 @@ export function createNativeSquad(teams:[DuelActor[],DuelActor[]],plan:NativeBat
   }
   state.health=state.health.map(Math.round);return state;
  }
- return {actors,sides,engagements,duration,finish,stages,contacts,failures,shots,flights,deathAt,state,update,dispose(){actors.forEach(a=>a.dispose());}};
+ return {actors,sides,engagements,duration,finish,stages,contacts,failures,shots,flights,deathAt,state,update,attentionAt(time:number){return attentionFrames[Math.min(attentionFrames.length-1,Math.max(0,Math.floor(time/facingStep)))];},dispose(){actors.forEach(a=>a.dispose());}};
 }
