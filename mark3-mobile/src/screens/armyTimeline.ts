@@ -7,7 +7,7 @@ import {createBattleReplay,fighterKind,BattleReplay} from './battleReplay';
 import {FIELD_WEAPONS} from './battleWeapons';
 import {createArmyMarch,ArmyMarch} from './armyMarch';
 export type BattleCue=AttackOutcome&{sequence:number};
-export interface ArmyTrack {from:V3;to:V3;start:number;duration:number;battle:boolean;defender?:boolean;win?:boolean;formationZ?:number;replay?:BattleReplay;march?:ArmyMarch}
+export interface ArmyTrack {from:V3;to:V3;start:number;duration:number;battle:boolean;defender?:boolean;win?:boolean;formationZ?:number;replay?:BattleReplay;combatResult?:AttackOutcome['result'];march?:ArmyMarch}
 export type ArmyEvent={from:Ground;to:Ground;was?:Ground;track:ArmyTrack};
 export function queueArmyEvents(current:ArmyEvent[],incoming:ArmyEvent[],now:number){
  const queue=current.filter(e=>e.track.start+e.track.duration>now);
@@ -50,7 +50,7 @@ export function useArmyTimeline(ground:Ground[],battles:BattleCue[]=[]){
    if(!from?.seen||!to?.seen||!cue.result.rounds.length)continue;
    const kinds=[fighterKind(from.cell.neutral),fighterKind(to.cell.neutral)] as const;
    const replay=createBattleReplay(cue.result,[...kinds],10,[FIELD_WEAPONS[kinds[0]],FIELD_WEAPONS[kinds[1]]]);
-   next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:replay.duration+.6,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0,replay}});
+   next.push({from:copy(from),to:copy(to),track:{from:from.position,to:to.position,start,duration:replay.duration+.6,battle:true,win:cue.capturedCell,formationZ:from.castle?.92:0,replay,combatResult:cue.result}});
   }
   const fighting=new Set(next.flatMap(e=>[e.from.cell.id,e.to.cell.id]));
   for(const move of visibleMoves(previous.current,ground))if(!fighting.has(move.from.cell.id)&&!fighting.has(move.to.cell.id)){

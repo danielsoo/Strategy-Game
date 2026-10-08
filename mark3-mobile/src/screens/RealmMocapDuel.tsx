@@ -12,6 +12,7 @@ import {createNativeSquad,proficiencyLabel} from './nativeSquad';
 import {nativeBattlePlan,NativeBattlePlan} from './nativeBattlePlan';
 import {DetailedCombatResult,resolveCombat,makeRng,DEFAULT_COMBAT_CONFIG} from '../services/combatSystem';
 import type {FighterKind} from './battleReplay';
+import {armyFighter,formationFighter} from './armyAppearance';
 
 type Clock={time:number;paused:boolean;speed:number;duration:number;contacts:number[];flights:number[];shots:number[];failures:number[];encirclements:number[];interceptions:number[];exposures:number[]};
 function previewTroops():[number,number]{const preset=typeof window==='undefined'?null:new URLSearchParams(window.location.search).get('squad');return preset==='2v1'?[2,1]:preset==='1v2'?[1,2]:preset==='3v1'?[3,1]:preset==='1v3'?[1,3]:[3,3];}
@@ -19,8 +20,7 @@ function Scene({fighters,plan,mixed,range,clock,angle,onState,onReady}:{fighters
  const first=useLoader(GLTFLoader,COMBAT_MODELS[fighters[0].model].path),second=useLoader(GLTFLoader,COMBAT_MODELS[fighters[1].model].path);
  const duel=useMemo(()=>{
   const teams=[0,1].map(side=>plan.actors.filter(a=>a.side===side).map(a=>{
-   const base=fighters[side],weapons:NativeWeaponKind[]=base.weapon==='bow'?['bow']:base.model==='paladin'?[base.weapon,'spear','halberd']:[base.weapon,'hatchet','axe'];
-   return createDuelActor(side===0?first:second,{...base,weapon:mixed?weapons[a.slot%weapons.length]:base.weapon});
+   return createDuelActor(side===0?first:second,formationFighter(fighters[side],a.slot,mixed));
   })) as [ReturnType<typeof createDuelActor>[],ReturnType<typeof createDuelActor>[]];
   return createNativeSquad(teams,plan,range);
  },[first,second,fighters,plan,mixed,range]);
@@ -66,7 +66,7 @@ export default function RealmMocapDuel({onSingle,result,kinds=['knight','knight'
  const resolved=useMemo(()=>result??resolveCombat({units:troops[0],morale:100},{units:troops[1],morale:100},makeRng(record),stalemate?{...DEFAULT_COMBAT_CONFIG,maxRounds:2,baseLossRate:0,routThreshold:0}:undefined),[result,troops,record,stalemate]);
  const plan=useMemo(()=>nativeBattlePlan(resolved),[resolved]);
  const fighters=useMemo<[DuelFighter,DuelFighter]>(()=>{
-  if(result)return kinds.map(k=>({model:k==='knight'?'paladin':k==='bandit'?'arissa':'erika',weapon:k==='knight'?'sword':k==='bandit'?'hatchet':'axe'})) as [DuelFighter,DuelFighter];
+  if(result)return kinds.map(k=>armyFighter(k)) as [DuelFighter,DuelFighter];
   return [{model,weapon},{model:opponent,weapon:opponent==='paladin'?'sword':opponent==='arissa'?'hatchet':'axe'}];
  },[result,kinds[0],kinds[1],model,weapon,opponent]);
  useEffect(()=>{clock.time=0;clock.paused=false;setPaused(false);setCounts(plan.initial);},[plan]);
