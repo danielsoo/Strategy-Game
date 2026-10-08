@@ -10,6 +10,7 @@ import {animateArmyMaterial,tagKnightEquipment,ACTION_CODE,ArmyAction} from './a
 import {ArmyTrack,animationNow,sampleTrack} from './armyTimeline';
 import {FighterKind,fighterKind} from './battleReplay';
 import {buildFormationModel} from './formationModel';
+import {sampleArmyMarch} from './armyMarch';
 
 /** 조형된 갑옷·인체·무기와 원본 UV를 공유한다. 몸통을 기본 도형으로 대체하지 않는다. */
 export default function RealmKnight({ground,detail=false,kind,action='idle',tracks,profile='knight'}:{ground:Ground[];detail?:boolean;kind?:ArmyKind;action?:ArmyAction;tracks?:Map<string,ArmyTrack>;profile?:FighterKind}){
@@ -30,9 +31,9 @@ export default function RealmKnight({ground,detail=false,kind,action='idle',trac
     return {geometry,material:material!,depth};
   },[asset,profile]);
   useEffect(()=>()=>{model.geometry.dispose();(Array.isArray(model.material)?model.material:[model.material]).forEach(m=>{if(profile!=='knight'){(m as THREE.MeshStandardMaterial).map?.dispose();(m as THREE.MeshStandardMaterial).bumpMap?.dispose();}m.dispose();});model.depth.dispose();},[model,profile]);
-  const places=useMemo(()=>{const field=terrainField(ground),out:Array<Piece&{cellId?:string}>=[];
-    if(detail)return [{position:[0,field.height(0,0),0],scale:[1,1,1],rotation:[0,0,0],color:'#ffffff'}] as Array<Piece&{cellId?:string}>;
-    for(const g of ground){if(fighterKind(g.cell.neutral)!==profile)continue;for(const p of armyFormation(g)){if(kind&&p.kind!==kind)continue;const x=g.position[0]+p.x,z=g.position[2]+p.z;out.push({cellId:g.cell.id,position:[x,field.height(x,z)+.002,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:'#ffffff'});}}
+  const places=useMemo(()=>{const field=terrainField(ground),out:Array<Piece&{cellId?:string;marchIndex?:number}>=[];
+    if(detail)return [{position:[0,field.height(0,0),0],scale:[1,1,1],rotation:[0,0,0],color:'#ffffff'}] as Array<Piece&{cellId?:string;marchIndex?:number}>;
+    for(const g of ground){if(fighterKind(g.cell.neutral)!==profile)continue;for(const p of armyFormation(g)){if(kind&&p.kind!==kind)continue;const x=g.position[0]+p.x,z=g.position[2]+p.z;out.push({cellId:g.cell.id,marchIndex:p.index,position:[x,field.height(x,z)+.002,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:'#ffffff'});}}
     return out;
   },[ground,detail,kind,profile]);
   const motion=useMemo(()=>new THREE.InstancedBufferAttribute(new Float32Array(places.length*2),2),[places.length]);
@@ -42,11 +43,13 @@ export default function RealmKnight({ground,detail=false,kind,action='idle',trac
     const mesh=ref.current;if(!mesh)return;const now=animationNow();time.value=now;
     places.forEach((p,i)=>{
       const track=p.cellId?tracks?.get(p.cellId):undefined,sample=track?sampleTrack(track,now):null;
-      const mode=sample?.action??action;
+      let mode=sample?.action??action;
       let x=p.position[0],z=p.position[2],yaw=p.rotation?.[1]??0;
+      const march=track?.march&&p.marchIndex!==undefined?sampleArmyMarch(track.march,p.marchIndex,now-track.start):null;
       if(track&&sample){x+=(track.to[0]-track.from[0])*sample.progress;z+=(track.to[2]-track.from[2])*sample.progress;yaw=Math.atan2(track.to[0]-track.from[0],track.to[2]-track.from[2]);if(track.battle){const lx=p.position[0]-track.from[0],lz=p.position[2]-track.from[2]-(track.formationZ??0);x=track.from[0]+(track.to[0]-track.from[0])*sample.progress+lx*Math.cos(yaw)+lz*Math.sin(yaw);z=track.from[2]+(track.to[2]-track.from[2])*sample.progress-lx*Math.sin(yaw)+lz*Math.cos(yaw);}if(sample.progress<.62&&mode==='walk'&&track.battle&&now-track.start>track.duration*.82)yaw+=Math.PI;}
-      object.position.set(x,!track?p.position[1]:field.height(x,z)+.003,z);object.scale.set(...p.scale);object.rotation.set(0,yaw,0);object.updateMatrix();mesh.setMatrixAt(i,object.matrix);
-      motion.setXY(i,ACTION_CODE[mode],i*.17);
+      if(march){x=march.x;z=march.z;yaw=march.yaw;mode=march.moving?'walk':'idle';}
+      object.position.set(x,!track?p.position[1]:field.height(x,z)+.002,z);object.scale.set(...p.scale);if(march)object.scale.setScalar(march.scale);object.rotation.set(0,yaw,0);object.updateMatrix();mesh.setMatrixAt(i,object.matrix);
+      motion.setXY(i,ACTION_CODE[mode],march&&march.moving?march.distance/(march.scale*1.45)*Math.PI*2/7.5-now+(p.marchIndex??0)*.17:i*.17);
     });
     mesh.instanceMatrix.needsUpdate=true;motion.needsUpdate=true;
   });

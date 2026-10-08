@@ -17,17 +17,34 @@ export function settlementPlan(g:Ground){
 }
 
 export type ArmyKind='guard'|'pike'|'archer'|'rider';
+export function armyHeading(g:Ground){
+  const previous=g.cell.lastFrom?.split(',').map(Number);
+  if(previous?.length===2&&previous.every(Number.isFinite)){
+    const [row,col]=previous,dx=Math.sqrt(3)*(g.cell.col+(g.cell.row%2)*.5-col-(row%2)*.5),dz=(g.cell.row-row)*1.5;
+    if(Math.hypot(dx,dz)>0)return Math.atan2(dx,dz);
+  }
+  return 0;
+}
+export function armyAnchor(g:Ground):[number,number]{
+  // Keep stationed troops outside the castle mesh; field formations occupy
+  // the tile centre. The march renderer connects these berths continuously.
+  return [g.position[0],g.position[2]+(g.castle||g.cell.fortStage>0?1.02:0)];
+}
 export function armyFormation(g:Ground){
   if(!g.seen||g.cell.units<=0)return [];
-  const seed=g.cell.row*113+g.cell.col*31,fortified=g.castle||g.cell.fortStage>0;
+  // Appearance belongs to the army, not its tile: arriving must not reshuffle
+  // ranks, resize soldiers or rotate the whole formation at the final frame.
+  const seed=(g.owner??9)*31+(g.cell.neutral==='bandit'?113:g.cell.neutral==='mercenary'?71:0);
   const count=Math.min(24,Math.max(6,g.cell.units*3));
-  const yaw=(realmRandom(seed+7)-.5)*.8;
-  return Array.from({length:count},(_,i)=>{
+  const yaw=armyHeading(g),anchor=armyAnchor(g);
+  const slots=Array.from({length:count},(_,i)=>{
     const row=Math.floor(i/6),col=i%6;
     const kind:ArmyKind=i===0&&g.cell.units>=4?'rider':row<2?(i%3===0?'pike':'guard'):i%2?'archer':'pike';
     const x=(col-2.5)*.15+(realmRandom(seed+i*3)-.5)*.012;
-    const z=(fortified?1.24:.32)-row*.18+(kind==='rider'?.08:0);
+    const z=-row*.18+(kind==='rider'?.08:0);
     return {kind,x:x*Math.cos(yaw)+z*Math.sin(yaw),z:-x*Math.sin(yaw)+z*Math.cos(yaw),
       yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.10+realmRandom(seed+i*11)*.01};
   });
+  const cx=slots.reduce((sum,p)=>sum+p.x,0)/count,cz=slots.reduce((sum,p)=>sum+p.z,0)/count;
+  return slots.map((p,index)=>({...p,index,x:p.x-cx+anchor[0]-g.position[0],z:p.z-cz+anchor[1]-g.position[2]}));
 }

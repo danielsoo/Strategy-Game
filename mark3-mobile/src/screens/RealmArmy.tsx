@@ -9,6 +9,7 @@ import type {Ground,Piece,V3} from './medievalScene';
 import {terrainField} from './campaignTerrain';
 import {armyFormation,ArmyKind} from './realmLayout';
 import RealmKnight from './RealmKnight';
+import {sampleArmyMarch} from './armyMarch';
 
 type Surface='mail'|'steel'|'cloth'|'leather'|'wood'|'skin'|'horse'|'dark';
 const colors:Record<Surface,string>={mail:'#636962',steel:'#a0aaa5',cloth:'#b7b3a3',leather:'#483c30',wood:'#786042',skin:'#b2967c',horse:'#66513d',dark:'#242a28'};
@@ -87,7 +88,7 @@ function soldier(kind:ArmyKind){
     return {surface:key,geometry,material};
   });
 }
-function ArmyBatch({part,places,tracks,ground}:{part:ReturnType<typeof soldier>[number];places:Array<Piece&{cellId:string}>;tracks:Map<string,ArmyTrack>;ground:Ground[]}){
+function ArmyBatch({part,places,tracks,ground}:{part:ReturnType<typeof soldier>[number];places:Array<Piece&{cellId:string;marchIndex:number}>;tracks:Map<string,ArmyTrack>;ground:Ground[]}){
   const ref=useRef<THREE.InstancedMesh>(null);
   const time=useMemo(()=>({value:0}),[]),motion=useMemo(()=>new THREE.InstancedBufferAttribute(new Float32Array(places.length*2),2),[places.length]);
   const depth=useMemo(()=>{animateArmyMaterial(part.material,time,0);const d=new THREE.MeshDepthMaterial({depthPacking:THREE.RGBADepthPacking});animateArmyMaterial(d,time,0);return d;},[part,time]);
@@ -95,7 +96,9 @@ function ArmyBatch({part,places,tracks,ground}:{part:ReturnType<typeof soldier>[
   const field=useMemo(()=>terrainField(ground),[ground]),obj=useMemo(()=>new THREE.Object3D(),[]);
   useLayoutEffect(()=>{part.geometry.setAttribute('realmMotion',motion);if(!part.geometry.getAttribute('realmEquipment'))part.geometry.setAttribute('realmEquipment',new THREE.BufferAttribute(new Float32Array(part.geometry.getAttribute('position').count),1));},[part,motion]);
   useFrame(()=>{const mesh=ref.current;if(!mesh)return;const now=animationNow();time.value=now;places.forEach((p,i)=>{const track=tracks.get(p.cellId),sample=track?sampleTrack(track,now):null;let x=p.position[0],z=p.position[2],yaw=p.rotation?.[1]??0;if(track&&sample){x+=(track.to[0]-track.from[0])*sample.progress;z+=(track.to[2]-track.from[2])*sample.progress;yaw=Math.atan2(track.to[0]-track.from[0],track.to[2]-track.from[2]);if(track.battle){const lx=p.position[0]-track.from[0],lz=p.position[2]-track.from[2]-(track.formationZ??0);x=track.from[0]+(track.to[0]-track.from[0])*sample.progress+lx*Math.cos(yaw)+lz*Math.sin(yaw);z=track.from[2]+(track.to[2]-track.from[2])*sample.progress-lx*Math.sin(yaw)+lz*Math.cos(yaw);}}
-  obj.position.set(x,track?field.height(x,z)+.008:p.position[1],z);obj.scale.set(...p.scale);obj.rotation.set(0,yaw,0);obj.updateMatrix();mesh.setMatrixAt(i,obj.matrix);motion.setXY(i,ACTION_CODE[sample?.action??'idle'],i*.17);});mesh.instanceMatrix.needsUpdate=true;motion.needsUpdate=true;});
+  const march=track?.march?sampleArmyMarch(track.march,p.marchIndex,now-track.start):null;
+  if(march){x=march.x;z=march.z;yaw=march.yaw;}
+  obj.position.set(x,track?field.height(x,z)+.008:p.position[1],z);obj.scale.set(...p.scale);if(march)obj.scale.setScalar(march.scale);obj.rotation.set(0,yaw,0);obj.updateMatrix();mesh.setMatrixAt(i,obj.matrix);motion.setXY(i,ACTION_CODE[march?(march.moving?'walk':'idle'):sample?.action??'idle'],march&&march.moving?march.distance/(march.scale*1.45)*Math.PI*2/7.5-now+p.marchIndex*.17:i*.17);});mesh.instanceMatrix.needsUpdate=true;motion.needsUpdate=true;});
   useLayoutEffect(()=>{const mesh=ref.current;if(!mesh)return;const obj=new THREE.Object3D(),color=new THREE.Color();
     places.forEach((p,i)=>{obj.position.set(...p.position);obj.scale.set(...p.scale);obj.rotation.set(...p.rotation!);obj.updateMatrix();mesh.setMatrixAt(i,obj.matrix);mesh.setColorAt(i,color.set(part.surface==='cloth'?p.color:'#ffffff'));});
     mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;mesh.computeBoundingSphere();
@@ -103,21 +106,21 @@ function ArmyBatch({part,places,tracks,ground}:{part:ReturnType<typeof soldier>[
   if(!places.length)return null;
   return <instancedMesh key={places.length} ref={ref} args={[part.geometry,part.material,places.length]} customDepthMaterial={depth} frustumCulled={false} castShadow receiveShadow raycast={()=>{}} dispose={null}/>;
 }
-export default function RealmArmy({ground:live,battles}:{ground:Ground[];battles?:BattleCue[]}){
+export default function RealmArmy({ground:live,battles,renderStandard}:{ground:Ground[];battles?:BattleCue[];renderStandard?:(tile:Ground,track?:ArmyTrack)=>React.ReactNode}){
   const contactField=useMemo(()=>terrainField(live),[live]);
   const {ground:displayGround,tracks,events}=useArmyTimeline(live,battles);
   const ground=useMemo(()=>displayGround.map(g=>tracks.get(g.cell.id)?.battle?{...g,cell:{...g.cell,units:0}}:g),[displayGround,tracks]);
   const models=useMemo(()=>Object.fromEntries((['guard','pike','archer','rider'] as ArmyKind[]).map(k=>[k,soldier(k)])) as Record<ArmyKind,ReturnType<typeof soldier>>,[]);
   useEffect(()=>()=>Object.values(models).flat().forEach(p=>{p.geometry.dispose();p.material.dispose();}),[models]);
-  const formations=useMemo(()=>{const field=terrainField(ground),out:Record<ArmyKind,Array<Piece&{cellId:string}>>={guard:[],pike:[],archer:[],rider:[]};
+  const formations=useMemo(()=>{const field=terrainField(ground),out:Record<ArmyKind,Array<Piece&{cellId:string;marchIndex:number}>>={guard:[],pike:[],archer:[],rider:[]};
     for(const g of ground){if(g.cell.neutral)continue;const cloth=new THREE.Color(g.heraldry).lerp(new THREE.Color('#9b957d'),.55).getStyle();
       for(const p of armyFormation(g)){const x=g.position[0]+p.x,z=g.position[2]+p.z;
-        out[p.kind].push({cellId:g.cell.id,position:[x,field.height(x,z)+.008,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:cloth});}}
+        out[p.kind].push({cellId:g.cell.id,marchIndex:p.index,position:[x,field.height(x,z)+.008,z],scale:[p.scale,p.scale,p.scale],rotation:[0,p.yaw,0],color:cloth});}}
     return out;
   },[ground]);
   return <group><RealmKnight ground={ground} kind="guard" tracks={tracks}/><RealmKnight ground={ground} profile="mercenary" tracks={tracks}/><RealmKnight ground={ground} profile="bandit" tracks={tracks}/>{(Object.keys(models) as ArmyKind[]).filter(k=>k!=='guard').flatMap(k=>models[k].map((p,i)=><ArmyBatch key={k+i} part={p} places={formations[k]} tracks={tracks} ground={live}/>))}{events.filter(e=>e.track.battle).flatMap(e=>{
     const x=e.track.from[0]*.35+e.track.to[0]*.65,z=e.track.from[2]*.35+e.track.to[2]*.65;
     const yaw=Math.atan2(e.track.to[0]-e.track.from[0],e.track.to[2]-e.track.from[2])-Math.PI/2;
     return e.track.replay?[<RealmBattle key={e.from.cell.id+'-'+e.track.start} plan={e.track.replay} startAt={e.track.start+.6} position={[x,contactField.height(x,z)+.01,z]} surfaceHeight={contactField.surfaceHeight} scale={.17} yaw={yaw} colors={[e.from.heraldry,e.to.heraldry]}/>]:[];
-  })}</group>;
+  })}{renderStandard&&displayGround.filter(g=>g.seen&&g.cell.units>0).map((g,i)=><React.Fragment key={`standard-${g.cell.id}-${i}`}>{renderStandard(g,tracks.get(g.cell.id))}</React.Fragment>)}</group>;
 }

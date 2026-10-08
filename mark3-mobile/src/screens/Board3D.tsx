@@ -554,13 +554,12 @@ export default function Board3D({ hud=false, battles, state, player, watching, s
         <RealmModels ground={scene.ground}/>
         <RealmGrass ground={scene.ground}/>
         <RealmLandscape ground={scene.ground}/>
-        <RealmArmy ground={scene.ground} battles={battles}/>
+        <RealmArmy ground={scene.ground} battles={battles} renderStandard={(t,track)=><ArmyStandard tile={t} track={track} own={t.owner===player} selected={selected===(track?.march?.toId??t.cell.id)} label={t.owner===player?'내 군대':t.owner===null?'중립':`${relationOf(state,player,t.owner)==='alliance'?'동맹':relationOf(state,player,t.owner)==='truce'?'휴전':'적군'} · ${state.nations[t.owner].name}`} onPick={()=>onCellPress(scene.ground.find(g=>g.cell.id===(track?.march?.toId??t.cell.id))?.cell??t.cell)}/>}/>
         {SHAPES.map(shape => <Instances key={shape} shape={shape} pieces={scene.pieces[shape]} />)}
         {scene.ground.filter(t => movable.has(t.cell.id) || selected === t.cell.id).map(t =>
           <TerrainRing key={t.cell.id} tile={t} ground={scene.ground} selected={selected === t.cell.id} />)}
         <WarMist cells={unknownMist} memory={false} />
         <WarMist cells={memoryMist} memory />
-        {scene.ground.filter(t => t.seen && t.cell.units > 0).map(t => <ArmyStandard key={t.cell.id} tile={t} own={t.owner===player} selected={selected===t.cell.id} label={t.owner===player?'내 군대':t.owner===null?'중립':`${relationOf(state,player,t.owner)==='alliance'?'동맹':relationOf(state,player,t.owner)==='truce'?'휴전':'적군'} · ${state.nations[t.owner].name}`} onPick={()=>onCellPress(t.cell)}/>)}
         {pathTiles.map((t, i) => i === 0 ? null :
           <PathArrow key={'a' + t.tile.cell.id} from={pathTiles[i - 1].tile.position} to={t.tile.position} />)}
         {turnStops.map(({ tile, turn }) => <TurnBadge key={'b' + tile.cell.id} tile={tile} turn={turn} />)}

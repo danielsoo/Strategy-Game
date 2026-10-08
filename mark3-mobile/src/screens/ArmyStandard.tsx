@@ -2,9 +2,12 @@ import React,{useMemo,useRef,useEffect} from 'react';
 import {useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
 import type {Ground} from './medievalScene';
+import {ArmyTrack,animationNow} from './armyTimeline';
+import {sampleArmyMarch} from './armyMarch';
+import {armyAnchor} from './realmLayout';
 
 /** 축소해도 소속을 읽을 수 있는 문장기. 숫자는 실제 병력 수를 그대로 표시한다. */
-export default function ArmyStandard({tile,label,own,selected,onPick}:{tile:Ground;label:string;own:boolean;selected:boolean;onPick:()=>void}){
+export default function ArmyStandard({tile,label,own,selected,onPick,track}:{tile:Ground;label:string;own:boolean;selected:boolean;onPick:()=>void;track?:ArmyTrack}){
   const ref=useRef<THREE.Sprite>(null);
   const texture=useMemo(()=>{
     const canvas=document.createElement('canvas');canvas.width=256;canvas.height=288;const ctx=canvas.getContext('2d')!;
@@ -23,8 +26,9 @@ export default function ArmyStandard({tile,label,own,selected,onPick}:{tile:Grou
     const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;return map;
   },[tile.cell.units,tile.heraldry,tile.owner,label,own,selected]);
   useEffect(()=>()=>texture.dispose(),[texture]);
-  useFrame(({camera,size})=>{if(!ref.current)return;const distance=camera.position.distanceTo(ref.current.position);const pixels=size.width<700?81:100;const h=2*distance*Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov/2))*pixels/size.height;ref.current.scale.set(h*256/288,h,1);});
-  return <sprite ref={ref} position={[tile.position[0],tile.height+.62,tile.position[2]+(tile.castle?.93:.05)]} renderOrder={9} onClick={e=>{e.stopPropagation();onPick();}}>
+  useFrame(({camera,size})=>{if(!ref.current)return;if(track?.march){const p=sampleArmyMarch(track.march,0,animationNow()-track.start),u=p.distance/Math.max(.001,track.march.distance);ref.current.position.set(p.center[0],track.from[1]+(track.to[1]-track.from[1])*u+.62,p.center[1]);}const distance=camera.position.distanceTo(ref.current.position);const pixels=size.width<700?81:100;const h=2*distance*Math.tan(THREE.MathUtils.degToRad((camera as THREE.PerspectiveCamera).fov/2))*pixels/size.height;ref.current.scale.set(h*256/288,h,1);});
+  const anchor=armyAnchor(tile);
+  return <sprite ref={ref} position={[anchor[0],tile.height+.62,anchor[1]]} renderOrder={9} onClick={e=>{e.stopPropagation();onPick();}}>
     <spriteMaterial map={texture} transparent depthTest={false} depthWrite={false} toneMapped={false}/>
   </sprite>;
 }
