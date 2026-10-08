@@ -17,6 +17,10 @@ export function settlementPlan(g:Ground){
 }
 
 export type ArmyKind='guard'|'pike'|'archer'|'rider';
+// Campaign pieces are readable representatives, not a literal head count.
+// Full army strength stays on the standard; battle actors use their own scale.
+export const MAP_SOLDIER_SCALE=.30;
+export const MAP_STANDARD_HEIGHT=1.12;
 export function armyHeading(g:Ground){
   const previous=g.cell.lastFrom?.split(',').map(Number);
   if(previous?.length===2&&previous.every(Number.isFinite)){
@@ -35,15 +39,16 @@ export function armyFormation(g:Ground){
   // Appearance belongs to the army, not its tile: arriving must not reshuffle
   // ranks, resize soldiers or rotate the whole formation at the final frame.
   const seed=(g.owner??9)*31+(g.cell.neutral==='bandit'?113:g.cell.neutral==='mercenary'?71:0);
-  const count=Math.min(24,Math.max(6,g.cell.units*3));
+  const count=Math.min(3,g.cell.units);
   const yaw=armyHeading(g),anchor=armyAnchor(g);
   const slots=Array.from({length:count},(_,i)=>{
-    const row=Math.floor(i/6),col=i%6;
-    const kind:ArmyKind=i===0&&g.cell.units>=4?'rider':row<2?(i%3===0?'pike':'guard'):i%2?'archer':'pike';
-    const x=(col-2.5)*.15+(realmRandom(seed+i*3)-.5)*.012;
-    const z=-row*.18+(kind==='rider'?.08:0);
+    const kind:ArmyKind=i===0?'guard':i===1?'pike':g.cell.units>=4?'rider':'archer';
+    // A compact triangle leaves room for shields, spears and a mounted leader
+    // while keeping every formation centred inside the hex as it turns.
+    const x=count===2?(i-.5)*.48:count===3?[0,-.36,.36][i]:0;
+    const z=count===3?(i===0?.28:-.14):0;
     return {kind,x:x*Math.cos(yaw)+z*Math.sin(yaw),z:-x*Math.sin(yaw)+z*Math.cos(yaw),
-      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:.10+realmRandom(seed+i*11)*.01};
+      yaw:yaw+(realmRandom(seed+i*5)-.5)*.16,scale:MAP_SOLDIER_SCALE+realmRandom(seed+i*11)*.015};
   });
   const cx=slots.reduce((sum,p)=>sum+p.x,0)/count,cz=slots.reduce((sum,p)=>sum+p.z,0)/count;
   return slots.map((p,index)=>({...p,index,x:p.x-cx+anchor[0]-g.position[0],z:p.z-cz+anchor[1]-g.position[2]}));
